@@ -1,8 +1,10 @@
+export type GoalCalculationScalar = number | string | boolean | null;
+
 export type GoalCalculationProvenance = {
   method: string;
   version: string;
-  /** Structured inputs shown back to the user on the calculation-details screen. */
-  inputs: Record<string, number | string | boolean | null>;
+  /** Structured primitive inputs shown back to the user on the calculation-details screen. */
+  inputs: Record<string, GoalCalculationScalar>;
   /** Stable internal IDs that map to published scientific references. */
   referenceIds: string[];
 };
@@ -32,8 +34,20 @@ export function assertGoalCalculationProvenance(provenance: GoalCalculationProve
   if (typeof provenance.inputs !== "object" || provenance.inputs == null || Array.isArray(provenance.inputs)) {
     throw new Error("Goal calculation inputs must be an object");
   }
-  if (Object.keys(provenance.inputs).length === 0) {
-    throw new Error("Goal calculation inputs cannot be empty");
+  const entries = Object.entries(provenance.inputs as Record<string, unknown>);
+  if (entries.length === 0) throw new Error("Goal calculation inputs cannot be empty");
+  for (const [key, value] of entries) {
+    if (!key.trim()) throw new Error("Goal calculation input keys cannot be blank");
+    const type = typeof value;
+    if (value !== null && type !== "number" && type !== "string" && type !== "boolean") {
+      throw new Error(`Goal calculation input ${key} must be a primitive scalar`);
+    }
+    if (type === "number" && !Number.isFinite(value as number)) {
+      throw new Error(`Goal calculation input ${key} must be finite`);
+    }
+    if (type === "string" && !(value as string).trim()) {
+      throw new Error(`Goal calculation input ${key} cannot be blank`);
+    }
   }
   if (!Array.isArray(provenance.referenceIds) || provenance.referenceIds.length === 0) {
     throw new Error("At least one scientific reference is required");
@@ -41,9 +55,10 @@ export function assertGoalCalculationProvenance(provenance: GoalCalculationProve
 
   const seenReferences = new Set<string>();
   for (const referenceId of provenance.referenceIds) {
-    if (!referenceId.trim()) throw new Error("Scientific reference id cannot be empty");
-    if (seenReferences.has(referenceId)) throw new Error(`Duplicate scientific reference: ${referenceId}`);
-    seenReferences.add(referenceId);
+    const canonical = referenceId.trim();
+    if (!canonical) throw new Error("Scientific reference id cannot be empty");
+    if (seenReferences.has(canonical)) throw new Error(`Duplicate scientific reference: ${canonical}`);
+    seenReferences.add(canonical);
   }
 }
 
