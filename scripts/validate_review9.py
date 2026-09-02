@@ -37,7 +37,7 @@ def main():
     conn.execute("INSERT INTO scientific_references(id,title,citation,created_at) VALUES('r9','R9','Citation',?)", (NOW,))
     conn.execute("""
       INSERT INTO goals(id,user_id,effective_from,energy_kcal,protein_g,carbs_g,fat_g,source,calculation_method,calculation_version,calculation_inputs_json,reference_ids_json,created_at)
-      VALUES('g9','u1','2026-09-02',2000,120,220,70,'arven-calculated','m','v1','{"x":1}','["r9"]',?)
+      VALUES('g9','u1','2026-09-02',2000,120,220,70,'arven-calculated','m','v1','{"weightKg":80}','["r9"]',?)
     """, (NOW,))
     reject(conn, "REPLACE used scientific ref", "INSERT OR REPLACE INTO scientific_references(id,title,citation,created_at) VALUES('r9','Changed','Changed',?)", (NOW,))
 
