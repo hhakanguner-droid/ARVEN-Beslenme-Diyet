@@ -34,6 +34,7 @@ const TURKISH_NUMBER_SUFFIXES = new Set([
   "da", "de", "ta", "te", "ya", "ye", "lar", "ler", "lari", "leri", "larin", "lerin", "lara", "lere",
   "lik", "luk", "inci", "uncu",
 ]);
+const NUTRITION_UNIT_PATTERN = "(?:kcal|kj|kalori[a-z]*|gram[a-z]*|miligram[a-z]*|mikrogram[a-z]*|milligram[a-z]*|microgram[a-z]*|gr|g|mg|mcg|ml|kg)";
 
 function normalizeNumberText(value: string): string {
   return value
@@ -66,17 +67,18 @@ function containsSpelledNumberWord(value: string): boolean {
 
 function containsContextualOneClaim(value: string): boolean {
   const normalized = normalizeNumberText(value);
-  return /\b(?:yuzde\s+bir|percent\s+one|bir\s+(?:kcal|kj|kalori[a-z]*|gram[a-z]*|gr|g|mg|mcg|ml|kg|puan|adim|saat|gun|hafta|ogun|porsiyon|kilo|kilogram)|one\s+(?:kcal|kj|calorie[a-z]*|gram[a-z]*|mg|mcg|ml|kg|point|step|hour|day|week))\b/i.test(normalized);
+  const unitOrMetric = `${NUTRITION_UNIT_PATTERN}|puan|adim|saat|gun|hafta|ogun|porsiyon|kilo|kilogram|kez|defa|kere`;
+  return new RegExp(`\\b(?:yuzde\\s+bir|percent\\s+one|bir\\s+(?:${unitOrMetric})|one\\s+(?:kcal|kj|calorie[a-z]*|gram[a-z]*|milligram[a-z]*|microgram[a-z]*|mg|mcg|ml|kg|point|step|hour|day|week|time|times))\\b`, "i").test(normalized);
 }
 
 function containsDigitNutritionClaim(value: string): boolean {
   const normalized = normalizeNumberText(value);
-  return /\b\d+(?:[.,]\d+)?\s*(?:kcal|kj|kalori[a-z]*|gram[a-z]*|gr|g|mg|mcg|ml|kg)\b/i.test(normalized);
+  return new RegExp(`\\b\\d+(?:[.,]\\d+)?\\s*${NUTRITION_UNIT_PATTERN}\\b`, "i").test(normalized);
 }
 
 function containsSpelledNutritionClaim(value: string): boolean {
   const normalized = normalizeNumberText(value);
-  const hasNutritionUnit = /\b(?:kcal|kj|kalori[a-z]*|gram[a-z]*|gr|g|mg|mcg|ml|kg)\b/i.test(normalized);
+  const hasNutritionUnit = new RegExp(`\\b${NUTRITION_UNIT_PATTERN}\\b`, "i").test(normalized);
   return hasNutritionUnit && (containsSpelledNumberWord(normalized) || containsContextualOneClaim(normalized));
 }
 
@@ -103,6 +105,11 @@ const NaturalPortionLabel = z.string().min(1).max(120).refine(
   "Natural portion labels must not smuggle gram/ml nutrition quantities",
 );
 
+const FoodQuery = z.string().min(1).max(120).refine(
+  (value) => !containsDigitNutritionClaim(value) && !containsSpelledNutritionClaim(value),
+  "Food queries must not contain model-authored gram or nutrition quantities",
+);
+
 const PortionHint = z.object({
   measure: PortionMeasure,
   quantity: z.number().positive().max(20),
@@ -111,7 +118,7 @@ const PortionHint = z.object({
 }).strict();
 
 const SuggestedIngredient = z.object({
-  foodQuery: z.string().min(1).max(120),
+  foodQuery: FoodQuery,
   portionHint: PortionHint,
 }).strict();
 
@@ -140,8 +147,8 @@ export type WeeklyInsight = z.infer<typeof WeeklyInsightV1>;
 /**
  * Deliberately absent from the AI schema: grams, calories, protein,
  * carbohydrate, fat and other nutrient totals. Strict schemas reject those
- * fields and all user-facing meal text fields reject digit- or word-authored
- * nutrition claims, including Turkish inflections such as "kalorilik".
+ * fields and all model-authored meal text/query fields reject digit- or
+ * word-authored nutrition claims, including Turkish inflections and full units.
  */
 export function parseMealSuggestion(input: unknown): MealSuggestion {
   return MealSuggestionV1.parse(input);
