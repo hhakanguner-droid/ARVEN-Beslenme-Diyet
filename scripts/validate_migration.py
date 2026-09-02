@@ -74,6 +74,8 @@ def main() -> None:
         calculation_method,calculation_version,calculation_inputs_json,reference_ids_json,created_at
       ) VALUES ('goal-current','user-1','2026-09-02',2000,120,220,70,'arven-calculated','mifflin','v1','{"weightKg":80}','["ref-1"]',?)
     """, (NOW,))
+    expect_rejected(conn, "delete referenced scientific reference", "DELETE FROM scientific_references WHERE id='ref-1'")
+    expect_rejected(conn, "rename referenced scientific reference", "UPDATE scientific_references SET id='ref-renamed' WHERE id='ref-1'")
     expect_rejected(conn, "overlapping active goal interval", """
       INSERT INTO goals (id,user_id,effective_from,energy_kcal,protein_g,carbs_g,fat_g,source,created_at)
       VALUES ('goal-overlap','user-1','2026-09-10',1800,100,180,60,'manual',?)
@@ -84,10 +86,19 @@ def main() -> None:
       WHERE id='goal-old'
     """)
 
+    expect_rejected(conn, "blank external provider food id", """
+      INSERT INTO foods (
+        id,name,normalized_name,energy_kcal_100g,protein_g_100g,carbs_g_100g,fat_g_100g,
+        source_provider,source_external_id,verified_at,created_at,updated_at
+      ) VALUES ('food-blank-source','Bad source','bad source',100,10,10,2,'usda','   ',?,?,?)
+    """, (NOW, NOW, NOW))
+
     foods = (
         ("food-a", None, "Food A"),
         ("food-b", "user-2", "Private Food B"),
         ("food-c", None, "Food C"),
+        ("food-d", "user-1", "Private Food D"),
+        ("food-e", "user-1", "Private Food E"),
     )
     for food_id, owner, name in foods:
         conn.execute("""
@@ -123,6 +134,31 @@ def main() -> None:
       ) VALUES ('item-bad-owner','meal-1','food-b',50,50,5,5,1,'v1',?)
     """, (NOW,))
 
+    conn.execute("""
+      INSERT INTO meal_entry_items (
+        id,meal_entry_id,food_id,grams,energy_kcal,protein_g,carbs_g,fat_g,calculation_version,created_at
+      ) VALUES ('item-private-owner','meal-1','food-d',50,50,5,5,1,'v1',?)
+    """, (NOW,))
+    expect_rejected(conn, "changing meal owner across private food", "UPDATE meal_entries SET user_id='user-2' WHERE id='meal-1'")
+    expect_rejected(conn, "changing private food owner across meal link", "UPDATE foods SET owner_user_id='user-2' WHERE id='food-d'")
+
+    expect_rejected(conn, "preference referencing another user's private food", """
+      INSERT INTO food_preferences (
+        id,user_id,food_term,food_id,resolution_status,preference,strength,provenance,created_at,updated_at
+      ) VALUES ('pref-bad','user-1','Private Food B','food-b','resolved','avoid',1,'user',?,?)
+    """, (NOW, NOW))
+    conn.execute("""
+      INSERT INTO food_preferences (
+        id,user_id,food_term,food_id,resolution_status,preference,strength,provenance,created_at,updated_at
+      ) VALUES ('pref-good','user-1','Private Food E','food-e','resolved','avoid',1,'user',?,?)
+    """, (NOW, NOW))
+    expect_rejected(conn, "changing private food owner across preference link", "UPDATE foods SET owner_user_id='user-2' WHERE id='food-e'")
+    expect_rejected(conn, "changing preference owner across private food", "UPDATE food_preferences SET user_id='user-2' WHERE id='pref-good'")
+
+    expect_rejected(conn, "AI action with invalid JSON payload", """
+      INSERT INTO ai_actions (id,user_id,action_type,schema_version,request_hash,payload_json,status,idempotency_key,created_at)
+      VALUES ('ai-invalid-json','user-1','meal-log','v1','hash-json','not-json','proposed','idem-json',?)
+    """, (NOW,))
     expect_rejected(conn, "AI action applied without confirmation evidence", """
       INSERT INTO ai_actions (id,user_id,action_type,schema_version,request_hash,payload_json,status,idempotency_key,created_at)
       VALUES ('ai-no-confirm','user-1','meal-log','v1','hash-1','{}','applied','idem-1',?)
