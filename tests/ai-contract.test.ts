@@ -80,7 +80,7 @@ test("food queries cannot be blank or smuggle model-authored quantities", () => 
     "iki miligram sodyum", "iki kilokalori yoğurt", "2 litre su", "iki mililitre süt",
     "1e3 kcal yoğurt", "1e3 calories chicken", "900 kilocalories yogurt", "800 kilojoules soup",
   ]) {
-    assert.throws(() => parseMealSuggestion({ ...validSuggestion, ingredients: [{ ...validSuggestion.ingredients[0], foodQuery }] }), undefined, foodQuery);
+    assert.throws(() => parseMealSuggestion({ ...validSuggestion, ingredients: [{ ...validSuggestion.ingredients[0], foodQuery }] }));
   }
 });
 
