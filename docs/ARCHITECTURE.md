@@ -56,19 +56,58 @@ Code owns:
 - portion scaling from verified per-100g nutrition facts
 - meal/day energy and macro sums
 - remaining targets and plan replacement deltas
-- water totals
-- date/timezone boundaries
+- water totals and corrections
+- date/timezone/nutrition-day boundaries
 - daily/weekly averages and adherence
 - measurement trends and milestones
 - unit normalization and rounding
+- per-meal target allocation validation
+- target-calculation method/version/input provenance
 
 AI may explain outputs but cannot overwrite them.
+
+## Nutrition completeness
+
+A missing nutrient is not zero. Core calories/macros require verified numeric data; optional fibre and micronutrients preserve completeness explicitly. Extended nutrients use one of:
+
+- `complete` — the contributing source set is known complete for that nutrient
+- `partial` — a numeric subtotal exists but one or more contributors are incomplete
+- `unknown` — a trustworthy total cannot be calculated
+
+This rule prevents dashboards from telling a user that they consumed `0 mg` of a micronutrient when the database simply does not provide the value. Historical meal snapshots persist the amount/unit/completeness state used at the time of logging.
+
+## Food data and provenance
+
+ARVEN normalizes multiple verified food providers behind one domain model. Initial provider identifiers include Open Food Facts, USDA, TURKOMP, BLS, Swiss Food Composition Database and manually verified records. Each record preserves provider, external source ID, verification time and optional evidence/license metadata.
+
+Users may enable or prioritize providers, but the product layer does not become provider-specific. Barcode lookup, text search and recently logged foods all return the same normalized `Food` model.
+
+Private user-created foods are always accessed through an authenticated `UserId` scope. Repository contracts require the scope explicitly so an adapter cannot accidentally return another user's private record.
+
+## Allergy safety
+
+Food-name substring checks are not accepted as safety evidence. Allergies use stable allergen identifiers and foods carry verified allergen IDs plus an allergen-data status. When a user has active allergies, unresolved allergen evidence fails closed: the food is not recommended until it can be resolved or the user chooses a verified alternative.
+
+## Scientific goal provenance
+
+If ARVEN calculates a nutrition target, the persisted goal records:
+
+- calculation method
+- method/version
+- structured inputs used
+- stable scientific reference IDs
+
+The UI can therefore answer “Bu hedef nereden geldi?” without asking an AI model to reconstruct the reasoning. Manual/professional targets may use a different `source` while still preserving provenance.
+
+Meal energy allocation is stored separately as basis points and validated in code to total exactly 10,000 (= 100.00%). This supports personal breakfast/lunch/dinner/snack distributions without changing the daily numeric truth.
 
 ## AI boundary
 
 Critical model responses use versioned schemas. `MealSuggestionV1` deliberately contains food candidates and natural portion hints, but no AI-authored grams, calories or macro totals. For example, AI may suggest `1 avuç içi kadar tavuk`; the server resolves that hint against verified food portion options, converts it to grams internally and recalculates nutrition locally.
 
 If no verified natural portion mapping exists, ARVEN must ask for clarification or offer a custom/manual amount. AI-generated gram conversions are never promoted to trusted source data.
+
+`WeeklyInsightV1` is narrative-only. Weekly adherence, averages, trends and other metrics are computed before the AI call and passed as context. The model may explain them through a summary, positives, improvement areas and suggestions, but the response schema does not contain replacement scores/calorie totals.
 
 AI mutations follow:
 
@@ -83,11 +122,23 @@ AI mutations follow:
 9. perform mutation idempotently
 10. deterministically recalculate affected totals
 
+## User preferences without forking numeric truth
+
+Display/interaction preferences are separate from nutrition truth:
+
+- kcal or kJ display
+- configurable nutrition-day start minute
+- home-card ordering with an ARVEN canonical default
+- preferred nutrient ordering
+- enabled/prioritized food data providers
+
+Changing one of these preferences does not mutate historical nutrition values.
+
 ## Persistence
 
-All user-owned records are scoped by `user_id`. Client-supplied ownership is ignored. The first migration establishes users, profiles, versioned goals, verified foods, verified natural portion options, allergies/preferences, meal logs, water logs and confirmed/proposed AI actions.
+All user-owned records are scoped by `user_id`. Client-supplied ownership is ignored. The first migration establishes users, profiles, UI preferences, scientific references, versioned goals, meal target allocations, verified foods/portions/nutrients/allergens, provider preferences, assessment snapshots, meal/water logs and confirmed/proposed AI actions.
 
-Meal items preserve `portion_option_id`, natural quantity/label and resolved grams alongside their nutrition snapshot. D1-compatible SQL is used in hosted V1, while repository interfaces prevent product logic from depending on D1-specific APIs.
+Meal items preserve `portion_option_id`, natural quantity/label and resolved grams alongside their nutrition snapshot. Extended nutrients are also snapshotted so historical logs are stable when upstream provider data changes. D1-compatible SQL is used in hosted V1, while repository interfaces prevent product logic from depending on D1-specific APIs.
 
 ## Private storage
 
@@ -95,7 +146,7 @@ Meal photos, menu scans, body photos, lab files, audio and exports remain privat
 
 ## PWA/offline policy
 
-The shell is installable. Offline fallback caches only public shell resources. Authenticated nutrition and health payloads are network-only until a separately reviewed encrypted offline-data design exists.
+The shell is installable with 192px/512px icons. Offline fallback caches only public shell resources. Authenticated nutrition and health payloads are network-only until a separately reviewed encrypted offline-data design exists.
 
 ## Visual system
 
