@@ -1,8 +1,22 @@
 import type { Food, Portion, PortionSelection } from "./types";
 
+const PORTION_GRAM_PRECISION = 0.1;
+
 function finitePositive(value: number, field: string): number {
   if (!Number.isFinite(value) || value <= 0) throw new Error(`${field} must be a finite positive number`);
   return value;
+}
+
+function roundResolvedGrams(value: number): number {
+  return Math.round((value + Number.EPSILON) * 10) / 10;
+}
+
+function assertResolvedGramPrecision(value: number, kind: string): number {
+  const grams = roundResolvedGrams(finitePositive(value, "grams"));
+  if (grams < PORTION_GRAM_PRECISION) {
+    throw new Error(`Resolved ${kind} portion is below ARVEN's 0.1 g precision; choose a larger amount`);
+  }
+  return grams;
 }
 
 function formatQuantity(quantity: number): string {
@@ -12,7 +26,7 @@ function formatQuantity(quantity: number): string {
 
 export function resolvePortionSelection(food: Food, selection: PortionSelection): Portion {
   if (selection.kind === "custom-grams") {
-    const grams = finitePositive(selection.grams, "grams");
+    const grams = assertResolvedGramPrecision(selection.grams, "custom");
     return {
       food,
       grams,
@@ -25,10 +39,7 @@ export function resolvePortionSelection(food: Food, selection: PortionSelection)
   if (!option) throw new Error(`Unknown portion option ${selection.portionOptionId} for food ${food.id}`);
 
   const gramsPerUnit = finitePositive(option.gramsPerUnit, "gramsPerUnit");
-  const grams = Math.round((gramsPerUnit * quantity + Number.EPSILON) * 10) / 10;
-  if (grams <= 0) {
-    throw new Error("Resolved household portion is below ARVEN's 0.1 g precision; choose a larger amount or custom grams");
-  }
+  const grams = assertResolvedGramPrecision(gramsPerUnit * quantity, "household");
 
   return {
     food,
