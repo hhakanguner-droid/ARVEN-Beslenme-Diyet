@@ -72,3 +72,20 @@ WHEN
 BEGIN
   SELECT RAISE(ABORT, 'AI action payload does not match declared schema');
 END;
+
+-- Confirmation is an explicit state transition, not a timestamp convention.
+CREATE TRIGGER ai_actions_no_preconfirmed_insert
+BEFORE INSERT ON ai_actions
+WHEN NEW.status IN ('confirmed','applied')
+BEGIN
+  SELECT RAISE(ABORT, 'AI actions must be inserted as proposals before confirmation');
+END;
+
+CREATE TRIGGER ai_actions_status_transition
+BEFORE UPDATE OF status ON ai_actions
+WHEN
+  (NEW.status = 'confirmed' AND OLD.status <> 'proposed')
+  OR (NEW.status = 'applied' AND OLD.status <> 'confirmed')
+BEGIN
+  SELECT RAISE(ABORT, 'invalid AI action confirmation/application transition');
+END;
