@@ -32,10 +32,27 @@ Primary navigation:
 
 Canonical secondary flows include `/analiz/ogun`, `/analiz/menu`, `/hedeflerim`, `/stratejim`, `/saglik/profil`, `/saglik/tahliller`, `/saglik/ilac-takviye`, `/rapor/gun-sonu`, `/profil`, `/arven/hafiza`, `/basarilarim` and `/ayarlar/bildirimler`.
 
+## Portion model: natural outside, grams inside
+
+The default user experience does not ask people to think in grams. Foods expose verified `FoodPortionOption` records such as:
+
+- 2 adet yumurta
+- 1 dilim ekmek
+- 5 yemek kaşığı bulgur
+- 1 küçük kase yoğurt
+- 1 avuç badem
+- 1 avuç içi kadar tavuk
+- 1 paket kefir
+
+Each option stores a verified `gramsPerUnit` value. A selection like `1 küçük kase yoğurt` is resolved to its internal gram amount first; only then does the deterministic nutrition engine calculate calories and macros. The UI may show the approximate gram equivalent as secondary detail (`≈ 180 g`). Custom grams remain available as an advanced fallback.
+
+Historical meal entries persist both the natural display selection and the resolved grams so later edits to a food's portion catalog cannot silently change old nutrition logs.
+
 ## Deterministic layer
 
 Code owns:
 
+- resolving verified household/visual portions to grams
 - portion scaling from verified per-100g nutrition facts
 - meal/day energy and macro sums
 - remaining targets and plan replacement deltas
@@ -49,7 +66,9 @@ AI may explain outputs but cannot overwrite them.
 
 ## AI boundary
 
-Critical model responses use versioned schemas. `MealSuggestionV1` deliberately contains food candidates and proposed gram amounts, but no AI-authored calorie or macro totals. Suggested foods are resolved against the verified catalog and totals are recalculated locally.
+Critical model responses use versioned schemas. `MealSuggestionV1` deliberately contains food candidates and natural portion hints, but no AI-authored grams, calories or macro totals. For example, AI may suggest `1 avuç içi kadar tavuk`; the server resolves that hint against verified food portion options, converts it to grams internally and recalculates nutrition locally.
+
+If no verified natural portion mapping exists, ARVEN must ask for clarification or offer a custom/manual amount. AI-generated gram conversions are never promoted to trusted source data.
 
 AI mutations follow:
 
@@ -58,16 +77,17 @@ AI mutations follow:
 3. call provider server-side
 4. schema validate
 5. apply health/allergy guardrails
-6. persist as a proposed action
-7. wait for user confirmation
-8. perform mutation idempotently
-9. deterministically recalculate affected totals
+6. resolve proposed natural portions against verified portion options
+7. persist as a proposed action
+8. wait for user confirmation
+9. perform mutation idempotently
+10. deterministically recalculate affected totals
 
 ## Persistence
 
-All user-owned records are scoped by `user_id`. Client-supplied ownership is ignored. The first migration establishes users, profiles, versioned goals, verified foods, allergies/preferences, meal logs, water logs and confirmed/proposed AI actions.
+All user-owned records are scoped by `user_id`. Client-supplied ownership is ignored. The first migration establishes users, profiles, versioned goals, verified foods, verified natural portion options, allergies/preferences, meal logs, water logs and confirmed/proposed AI actions.
 
-D1-compatible SQL is used in hosted V1, while repository interfaces prevent product logic from depending on D1-specific APIs.
+Meal items preserve `portion_option_id`, natural quantity/label and resolved grams alongside their nutrition snapshot. D1-compatible SQL is used in hosted V1, while repository interfaces prevent product logic from depending on D1-specific APIs.
 
 ## Private storage
 
