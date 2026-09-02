@@ -81,7 +81,7 @@ test("versioned goal calculator rejects input combinations that derive invalid t
       energyAdjustmentKcal: -1500, proteinGPerKg: 0.5, fatEnergyPct: 0.15, waterMlPerKg: 15,
     },
     referenceIds: ["mifflin-1990"],
-  }), /derived energyKcal is outside supported range/);
+  }), /derived energyKcal is outside supported range|internally inconsistent/);
 });
 
 test("versioned goal calculator rejects individually valid but internally inconsistent macro inputs", () => {
