@@ -21,9 +21,11 @@ test("AI meal contract rejects suggested grams and AI-authored numeric fields", 
   assert.throws(() => parseMealSuggestion({ ...validSuggestion, energyKcal: 430 }));
 });
 
-test("all user-facing meal text rejects numeric nutrition claims including scientific notation", () => {
+test("all user-facing meal text rejects numeric nutrition claims including scientific notation and Unicode digits", () => {
   const cases = [
     { ...validSuggestion, rationale: "Bu öğün 430 kcal içerir." },
+    { ...validSuggestion, rationale: "Bu öğün ４３０ kcal içerir." },
+    { ...validSuggestion, rationale: "Bu öğün ٤٣٠ kcal içerir." },
     { ...validSuggestion, rationale: "Bu öğün dört yüz kalori içerir." },
     { ...validSuggestion, rationale: "Bu öğün bir gram protein içerir." },
     { ...validSuggestion, rationale: "Bu öğün iki miligram sodyum içerir." },
@@ -47,7 +49,7 @@ test("all user-facing meal text rejects numeric nutrition claims including scien
 
 test("food queries cannot smuggle model-authored quantities", () => {
   for (const foodQuery of [
-    "120 g tavuk", "400 kcal yoğurt", "iki miligram sodyum", "iki kilokalori yoğurt", "2 litre su", "iki mililitre süt",
+    "120 g tavuk", "４３０ kcal tavuk", "٤٣٠ kcal tavuk", "400 kcal yoğurt", "iki miligram sodyum", "iki kilokalori yoğurt", "2 litre su", "iki mililitre süt",
     "1e3 kcal yoğurt", "1e3 calories chicken", "900 kilocalories yogurt", "800 kilojoules soup",
   ]) {
     assert.throws(() => parseMealSuggestion({ ...validSuggestion, ingredients: [{ ...validSuggestion.ingredients[0], foodQuery }] }), /Food queries/, foodQuery);
