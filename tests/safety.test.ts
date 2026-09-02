@@ -45,6 +45,10 @@ test("AI medication or treatment management is blocked without storing a medicat
     "Metformini artık alma.",
     "Metformin dozunu atla.",
     "Euthyrox kullanımını sürdür.",
+    "Aspirin kullanmalısın.",
+    "Metformini almalısın.",
+    "Bunu kullanmamalısın.",
+    "Bunu kullanman gerekiyor.",
   ];
 
   for (const message of unsafe) {
@@ -59,6 +63,9 @@ test("direct diagnosis assertions are rejected", () => {
     "Sende diyabet var.",
     "Bu belirtiler çölyak olduğunu gösteriyor.",
     "Bu değerlere göre teşhisin kesin.",
+    "Diyabet hastasısın.",
+    "Sen çölyaksın.",
+    "Bu diyabettir.",
   ];
 
   for (const message of unsafe) {
