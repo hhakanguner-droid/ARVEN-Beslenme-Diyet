@@ -27,25 +27,19 @@ function normalizeTurkishText(value: string): string {
 }
 
 const MEDICAL_MANAGEMENT_CONTEXT = ["ilac", "ilaclar", "ilac kullanimi", "medikasyon", "recete", "doz", "tedavi"];
-const NUTRITION_TARGET_PATTERNS = [
-  /\b(?:besin|gida|yemek|ogun|porsiyon|porsiyonu|meyve|sebze|ekmek|ekmegi|tuz|tuzu|seker|sekeri)\b/,
-  /\b(?:zeytinyagi|yag|yagi|protein|karbonhidrat|lif|kalori|kahvalti|corba|salata)\b/,
-  /\b(?:et|tavuk|balik|yumurta|sut|yogurt|peynir|bakliyat|kuruyemis)\b/,
-  /\bsu(?:yu|yun|ya|da|dan)?\b/,
-];
-
-const TREATMENT_ACTION_PATTERNS = [
-  /\b(?:al|alma|kullan|kullanma|birak|kes|durdur|basla|atla|degistir|degistirme)\b/,
-  /\b(?:al|kullan|birak|kes|durdur|basla|atla|degistir)(?:ma|me)?(?:mali|meli)(?:sin|siniz)?\b/,
-  /\b(?:al|kullan|birak|kes|durdur|basla|atla|degistir)(?:abil|ebil)(?:ir)?(?:sin|siniz)?\b/,
-  /\b(?:al|kullan|birak|kes|durdur|basla|atla|degistir)(?:man|men|maniz|meniz)\s+(?:gerekir|gerekiyor|lazim)\b/,
-  /\b(?:artir|azalt|yukselt|dusur|surdur|devam)\b/,
+const NUTRITION_TARGET = "(?:besin|gida|yemek|ogun|porsiyon|meyve|sebze|ekmek|ekmegi|tuz|tuzu|seker|sekeri|zeytinyagi|yag|yagi|protein|karbonhidrat|lif|kalori|kahvalti|corba|salata|et|tavuk|balik|yumurta|sut|yogurt|peynir|bakliyat|kuruyemis|su|suyu)";
+const TREATMENT_ACTION = "(?:al|alma|kullan|kullanma|birak|kes|durdur|basla|atla|degistir|degistirme|artir|azalt|yukselt|dusur|surdur|devam|almali(?:sin|siniz)?|kullanmali(?:sin|siniz)?|birakmali(?:sin|siniz)?|kesmeli(?:sin|siniz)?|durdurmali(?:sin|siniz)?|baslamali(?:sin|siniz)?|atlamali(?:sin|siniz)?|degistirmeli(?:sin|siniz)?)";
+const TREATMENT_ACTION_PATTERN = new RegExp(`\\b${TREATMENT_ACTION}\\b`);
+const DIRECT_NUTRITION_DIRECTIVE_PATTERNS = [
+  new RegExp(`\\b${NUTRITION_TARGET}(?:yi|i|u|yu|e|a|den|dan)?\\s+${TREATMENT_ACTION}\\b`),
+  new RegExp(`\\b${TREATMENT_ACTION}\\s+${NUTRITION_TARGET}\\b`),
 ];
 
 const DIAGNOSIS_TERM = "(?:diyabet|prediyabet|colyak|hipertansiyon|hipotansiyon|obezite|anemi|hipotiroidi|hipertiroidi|tiroid|insulin direnci|metabolik sendrom|alerji|intolerans|hastalik|sendrom)";
-const MEDICAL_STEM = "(?:kanser|depresyon|anksiyete|astim|migren|epilepsi|bipolar|psikoz|siroz|hepatit|artrit|dermatit|fibroz|skleroz|nefrit|gastrit|kolit|pnomoni|tromboz|lösemi|losemi|lenfoma|melanom|karsinom|sarkom)";
+const MEDICAL_LEXEME = "(?:kanser|depresyon|anksiyete|astim|migren|epilepsi|bipolar|psikoz|siroz|hepatit|artrit|dermatit|fibroz|skleroz|nefrit|gastrit|kolit|pnomoni|tromboz|losemi|lenfoma|melanom|karsinom|sarkom|parkinson|endometriozis)";
+const MEDICAL_DERIVATIONAL_STEM = "(?:[a-z]{3,}(?:ozis|itis|oma|emi|pati|opati|alji|skleroz|fibroz|tromboz)|parkinson|endometriozis)";
 const DIRECT_DIAGNOSIS_PATTERNS = [
-  /\b(?:tani|teshis)\w*\b/,
+  /\b(?:tani|tanisi|taninin|taniya|tanidan|teshis|teshisi|teshisin|teshise|teshisten)\b/,
   new RegExp(`\\b(?:sende|sizde)\\b.{0,60}\\b${DIAGNOSIS_TERM}\\b.{0,30}\\b(?:var|oldugun|oldugunu)\\b`),
   new RegExp(`\\b${DIAGNOSIS_TERM}(?:in|un|nin|nun)?\\s+var\\b`),
   new RegExp(`\\b${DIAGNOSIS_TERM}\\s+hastasi(?:sin|siniz|dir)?\\b`),
@@ -53,10 +47,8 @@ const DIRECT_DIAGNOSIS_PATTERNS = [
   new RegExp(`\\b${DIAGNOSIS_TERM}(?:sin|siniz|sun|sunuz)\\b`),
   new RegExp(`\\bbu\\s+${DIAGNOSIS_TERM}(?:tir|dir|tur|dur)?\\b`),
   new RegExp(`\\b(?:belirti|belirtiler|bulgu|bulgular|sonuc|sonuclar|deger|degerler)\\w*\\b.{0,100}\\b${DIAGNOSIS_TERM}\\b.{0,50}\\b(?:oldugunu|gosteriyor|kanitliyor|dogruluyor)\\b`),
-  // Broader medical morphology catches direct diagnoses such as "kanserlisin"
-  // and "depresyondasin" without classifying ordinary coaching predicates like
-  // "kararlisin" as diagnoses.
-  new RegExp(`\\b${MEDICAL_STEM}(?:li|lu|da|de)?(?:sin|siniz|sun|sunuz)\\b`),
+  new RegExp(`\\b${MEDICAL_LEXEME}(?:li|lu|da|de|i)?(?:sin|siniz|sun|sunuz)\\b`),
+  new RegExp(`\\b${MEDICAL_DERIVATIONAL_STEM}(?:li|lu|da|de|i)?(?:sin|siniz|sun|sunuz)\\b`),
 ];
 
 function splitDirectiveClauses(normalized: string): string[] {
@@ -66,19 +58,19 @@ function splitDirectiveClauses(normalized: string): string[] {
     .filter(Boolean);
 }
 
-function clauseHasNutritionTarget(clause: string): boolean {
-  return NUTRITION_TARGET_PATTERNS.some((pattern) => pattern.test(clause));
+function clauseContainsTreatmentAction(clause: string): boolean {
+  return TREATMENT_ACTION_PATTERN.test(clause);
 }
 
-function clauseHasTreatmentAction(clause: string): boolean {
-  return TREATMENT_ACTION_PATTERNS.some((pattern) => pattern.test(clause));
+function actionTargetsNutrition(clause: string): boolean {
+  return DIRECT_NUTRITION_DIRECTIVE_PATTERNS.some((pattern) => pattern.test(clause));
 }
 
 export function assertNoMedicalOverreach(text: string): void {
   const normalized = normalizeTurkishText(text);
   const managementContext = MEDICAL_MANAGEMENT_CONTEXT.some((term) => normalized.includes(term));
   const treatmentDirective = splitDirectiveClauses(normalized)
-    .some((clause) => clauseHasTreatmentAction(clause) && !clauseHasNutritionTarget(clause));
+    .some((clause) => clauseContainsTreatmentAction(clause) && !actionTargetsNutrition(clause));
   const diagnosisAssertion = DIRECT_DIAGNOSIS_PATTERNS.some((pattern) => pattern.test(normalized));
   if (managementContext || treatmentDirective || diagnosisAssertion) {
     throw new Error("AI output violates ARVEN non-diagnostic health policy");
