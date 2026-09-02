@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { remainingTargets, scaleNutrition, sumNutrition } from "../lib/nutrition/calculations";
+import { sumNutrientValues } from "../lib/nutrition/nutrients";
 import { approximateGramLabel, resolvePortionSelection } from "../lib/nutrition/portions";
 import { assertVerifiedNutritionSource } from "../lib/nutrition/sources";
 import type { Food } from "../lib/nutrition/types";
@@ -30,6 +31,7 @@ test("portion nutrition scales deterministically", () => {
     carbsG: 15,
     fatG: 12,
     fiberG: 6,
+    extended: undefined,
   });
 });
 
@@ -63,26 +65,51 @@ test("custom grams remain available as an advanced fallback", () => {
   assert.equal(portion.display?.label, "135 g");
 });
 
-test("nutrition totals are summed by code", () => {
+test("nutrition totals preserve unknown fibre instead of inventing zero", () => {
   assert.deepEqual(sumNutrition([
-    { energyKcal: 100, proteinG: 10, carbsG: 5, fatG: 3 },
+    { energyKcal: 100, proteinG: 10, carbsG: 5, fatG: 3, fiberG: 2 },
     { energyKcal: 80, proteinG: 4, carbsG: 8, fatG: 2 },
-  ]), { energyKcal: 180, proteinG: 14, carbsG: 13, fatG: 5, fiberG: 0 });
+  ]), {
+    energyKcal: 180,
+    proteinG: 14,
+    carbsG: 13,
+    fatG: 5,
+    fiberG: undefined,
+    extended: undefined,
+  });
 });
 
-test("remaining targets never go below zero", () => {
+test("extended nutrient sums remain partial when any contributing source is incomplete", () => {
+  assert.deepEqual(sumNutrientValues([
+    { amount: 100, unit: "mg", completeness: "complete" },
+    { amount: 50, unit: "mg", completeness: "partial" },
+  ], "mg"), { amount: 150, unit: "mg", completeness: "partial" });
+
+  assert.deepEqual(sumNutrientValues([
+    { amount: null, unit: "mg", completeness: "unknown" },
+    { amount: null, unit: "mg", completeness: "unknown" },
+  ], "mg"), { amount: null, unit: "mg", completeness: "unknown" });
+});
+
+test("remaining targets never go below zero and subtract logged water", () => {
   const result = remainingTargets(
-    { energyKcal: 2000, proteinG: 150, carbsG: 200, fatG: 70 },
+    { energyKcal: 2000, proteinG: 150, carbsG: 200, fatG: 70, waterMl: 2000 },
     { energyKcal: 2100, proteinG: 100, carbsG: 250, fatG: 50 },
+    1000,
   );
   assert.equal(result.energyKcal, 0);
   assert.equal(result.carbsG, 0);
   assert.equal(result.proteinG, 50);
   assert.equal(result.fatG, 20);
+  assert.equal(result.waterMl, 1000);
 });
 
-test("verified source is required", () => {
+test("verified source is required by both validation and calculation boundary", () => {
   assert.doesNotThrow(() => assertVerifiedNutritionSource(verifiedFood));
-  const invalid: Food = { ...verifiedFood, source: { provider: "usda", verifiedAt: "2026-09-02T00:00:00.000Z" } };
+  const invalid: Food = {
+    ...verifiedFood,
+    source: { provider: "usda", verifiedAt: "2026-09-02T00:00:00.000Z" },
+  };
   assert.throws(() => assertVerifiedNutritionSource(invalid), /external source id/);
+  assert.throws(() => scaleNutrition({ food: invalid, grams: 100 }), /external source id/);
 });
