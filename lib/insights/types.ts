@@ -44,4 +44,16 @@ export function assertWeeklyInsightMetrics(metrics: WeeklyInsightMetrics): void 
   if (metrics.averageSleepHours != null && metrics.averageSleepHours > 24) {
     throw new Error("averageSleepHours cannot exceed 24");
   }
+
+  if (metrics.loggedDays === 0 && (
+    metrics.averageEnergyKcal != null
+    || metrics.averageProteinG != null
+    || metrics.averageWaterMl != null
+  )) {
+    throw new Error("nutrition averages must be null when loggedDays is zero");
+  }
+
+  if (metrics.plannedDays === 0 && metrics.adherencePercent != null) {
+    throw new Error("adherencePercent must be null when plannedDays is zero");
+  }
 }
