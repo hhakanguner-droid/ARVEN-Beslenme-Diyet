@@ -43,7 +43,7 @@ const DIRECT_DIAGNOSIS_PATTERNS = [
   new RegExp(`\\b${DIAGNOSIS_TERM}(?:sin|siniz|sun|sunuz)\\b`),
   new RegExp(`\\bbu\\s+${DIAGNOSIS_TERM}(?:tir|dir|tur|dur)?\\b`),
   new RegExp(`\\b(?:belirti|belirtiler|bulgu|bulgular|sonuc|sonuclar|deger|degerler)\\w*\\b.{0,100}\\b${DIAGNOSIS_TERM}\\b.{0,50}\\b(?:oldugunu|gosteriyor|kanitliyor|dogruluyor)\\b`),
-  new RegExp(`\\b${MEDICAL_LEXEME}(?:li|lu|da|de|i)?(?:sin|siniz|sun|sunuz)\\b`),
+  new RegExp(`\\b${MEDICAL_LEXEME}(?:li|lu|da|de|i)?(?:sin|siniz|sun|sunuz|in)\\b`),
 ];
 
 function splitDirectiveClauses(normalized: string): string[] {
