@@ -3,13 +3,20 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-const items = [
+type NavItem = {
+  href: string;
+  label: string;
+  icon: string;
+  center?: boolean;
+};
+
+const items: readonly NavItem[] = [
   { href: "/bugun", label: "Bugün", icon: "⌂" },
   { href: "/planim", label: "Planım", icon: "▦" },
   { href: "/arven", label: "ARVEN", icon: "✦", center: true },
   { href: "/gelisim", label: "Gelişim", icon: "▥" },
   { href: "/daha-fazla", label: "Daha Fazla", icon: "☰" },
-] as const;
+];
 
 export function BottomNav() {
   const pathname = usePathname();
