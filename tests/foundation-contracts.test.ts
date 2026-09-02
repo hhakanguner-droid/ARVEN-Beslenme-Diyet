@@ -3,6 +3,15 @@ import test from "node:test";
 import { EXTERNAL_DATA_FLOWS, getFlowsForTrigger, validateExternalDataFlows } from "../lib/privacy/data-flows";
 import { ARVEN_EXPORT_FORMAT, validateExportManifest } from "../lib/portability/types";
 
+const validManifest = {
+  format: ARVEN_EXPORT_FORMAT,
+  exportedAt: "2026-09-02T10:00:00.000Z",
+  locale: "tr-TR",
+  timezone: "Europe/Istanbul",
+  sections: ["profile", "goals", "meal-log"] as const,
+  recordCounts: { profile: 1, goals: 2, "meal-log": 14 },
+};
+
 test("external data-flow registry is structurally valid", () => {
   assert.doesNotThrow(() => validateExternalDataFlows(EXTERNAL_DATA_FLOWS));
   const barcodeFlows = getFlowsForTrigger("barcode-lookup");
@@ -17,14 +26,24 @@ test("duplicate external data-flow ids are rejected", () => {
 });
 
 test("versioned export manifest accepts a valid portable bundle description", () => {
-  assert.doesNotThrow(() => validateExportManifest({
-    format: ARVEN_EXPORT_FORMAT,
-    exportedAt: "2026-09-02T10:00:00.000Z",
-    locale: "tr-TR",
-    timezone: "Europe/Istanbul",
-    sections: ["profile", "goals", "meal-log"],
-    recordCounts: { profile: 1, goals: 2, "meal-log": 14 },
-  }));
+  assert.doesNotThrow(() => validateExportManifest(validManifest));
+});
+
+test("export manifest requires a real canonical UTC generation timestamp", () => {
+  for (const exportedAt of [
+    "0",
+    "2026-02-31",
+    "2026-02-31T10:00:00.000Z",
+    "2026-09-02 10:00:00Z",
+    "2026-09-02T24:01:00Z",
+    "2026-09-02T10:00:00+03:00",
+  ]) {
+    assert.throws(
+      () => validateExportManifest({ ...validManifest, exportedAt }),
+      /canonical UTC timestamp/,
+      exportedAt,
+    );
+  }
 });
 
 test("invalid export record counts are rejected", () => {
