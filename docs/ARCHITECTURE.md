@@ -4,7 +4,7 @@
 
 ARVEN Beslenme & Diyet is a multi-user, mobile-first nutrition coaching PWA. AI supplies interpretation, personalization and proposals. Numeric truth comes from deterministic services using verified data. Personalization is derived from user-owned data. The approved mockup book is the canonical visual specification.
 
-The product is not a diagnostic or treatment system. It may explain nutrition context, show uncertainty and suggest professional review; it must not diagnose, prescribe or instruct medication changes.
+The product is not a diagnostic or treatment system. It may explain nutrition context, show uncertainty and suggest professional review; it must not diagnose, prescribe or instruct medication changes. ARVEN does not store or track medications. Nutrition-related supplements are a separate user-managed nutrition module.
 
 ## Runtime shape
 
@@ -30,7 +30,7 @@ Primary navigation:
 - `/gelisim`
 - `/daha-fazla`
 
-Canonical secondary flows include `/analiz/ogun`, `/analiz/menu`, `/hedeflerim`, `/stratejim`, `/saglik/profil`, `/saglik/tahliller`, `/saglik/ilac-takviye`, `/rapor/gun-sonu`, `/profil`, `/arven/hafiza`, `/basarilarim` and `/ayarlar/bildirimler`.
+Canonical secondary flows include `/analiz/ogun`, `/analiz/menu`, `/hedeflerim`, `/stratejim`, `/saglik/profil`, `/saglik/tahliller`, `/saglik/takviyeler`, `/rapor/gun-sonu`, `/profil`, `/arven/hafiza`, `/basarilarim` and `/ayarlar/bildirimler`.
 
 ## Portion model: natural outside, grams inside
 
@@ -82,7 +82,7 @@ ARVEN normalizes multiple verified food providers behind one domain model. Initi
 
 Users may enable or prioritize providers, but the product layer does not become provider-specific. Barcode lookup, text search and recently logged foods all return the same normalized `Food` model.
 
-Private user-created foods are always accessed through an authenticated `UserId` scope. Repository contracts require the scope explicitly so an adapter cannot accidentally return another user's private record.
+Private user-created foods are always accessed through an authenticated `UserId` scope. Repository contracts require the scope explicitly so an adapter cannot accidentally return another user's private record. Meal-log writes additionally reject cross-user references to private foods at the persistence boundary.
 
 ## Allergy safety
 
@@ -95,11 +95,11 @@ If ARVEN calculates a nutrition target, the persisted goal records:
 - calculation method
 - method/version
 - structured inputs used
-- stable scientific reference IDs
+- stable scientific reference IDs that resolve to stored reference rows
 
 The UI can therefore answer “Bu hedef nereden geldi?” without asking an AI model to reconstruct the reasoning. Manual/professional targets may use a different `source` while still preserving provenance.
 
-Meal energy allocation is stored separately as basis points and validated in code to total exactly 10,000 (= 100.00%). This supports personal breakfast/lunch/dinner/snack distributions without changing the daily numeric truth.
+Meal energy allocation is stored separately as basis points and validated in code to total exactly 10,000 (= 100.00%). This supports personal breakfast/lunch/dinner/snack distributions without changing the daily numeric truth. Active goal intervals for the same user cannot overlap.
 
 ## AI boundary
 
@@ -136,7 +136,7 @@ Changing one of these preferences does not mutate historical nutrition values.
 
 ## Persistence
 
-All user-owned records are scoped by `user_id`. Client-supplied ownership is ignored. The first migration establishes users, profiles, UI preferences, scientific references, versioned goals, meal target allocations, verified foods/portions/nutrients/allergens, provider preferences, assessment snapshots, meal/water logs and confirmed/proposed AI actions.
+All user-owned records are scoped by `user_id`. Client-supplied ownership is ignored. The first migration establishes users, profiles, UI preferences, scientific references, versioned goals, meal target allocations, verified foods/portions/nutrients/allergens, provider preferences, assessment snapshots, meal/water logs and confirmed/proposed AI actions. It intentionally contains no medication registry.
 
 Meal items preserve `portion_option_id`, natural quantity/label and resolved grams alongside their nutrition snapshot. Extended nutrients are also snapshotted so historical logs are stable when upstream provider data changes. D1-compatible SQL is used in hosted V1, while repository interfaces prevent product logic from depending on D1-specific APIs.
 
