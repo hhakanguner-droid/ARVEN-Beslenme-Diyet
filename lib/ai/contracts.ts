@@ -20,6 +20,11 @@ const TURKISH_NUMBER_SUFFIXES = new Set([
 ]);
 const NUTRITION_UNIT_PATTERN = "(?:kcal|kilokalori[a-z]*|kilocalorie[a-z]*|calorie[a-z]*|calories|kj|kilojul[a-z]*|kilojoule[a-z]*|kalori[a-z]*|gram[a-z]*|miligram[a-z]*|mikrogram[a-z]*|mililitre[a-z]*|millilitre[a-z]*|litre[a-z]*|milligram[a-z]*|microgram[a-z]*|milliliter[a-z]*|liter[a-z]*|gr|g|mg|mcg|ml|kg|l)";
 const NUTRITION_METRIC_PATTERN = "(?:kalori|kcal|enerji|protein|karbonhidrat|karb|yag|lif|fiber|sodyum|tuz|seker|calorie|calories|energy|carb|carbs|fat|sodium|sugar)";
+const MEASURE_LABELS: Record<z.infer<typeof PortionMeasure>, string> = {
+  piece: "adet", slice: "dilim", teaspoon: "çay kaşığı", tablespoon: "yemek kaşığı", "tea-glass": "çay bardağı",
+  "water-glass": "su bardağı", cup: "fincan", bowl: "kase", handful: "avuç", palm: "avuç içi", serving: "porsiyon",
+  package: "paket", bottle: "şişe", can: "kutu", ladle: "kepçe",
+};
 
 function normalizeNumberText(value: string): string {
   return value.toLocaleLowerCase("tr-TR").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
@@ -39,8 +44,8 @@ function containsSpelledNumberWord(value: string): boolean {
 }
 function containsContextualOneClaim(value: string): boolean {
   const normalized = normalizeNumberText(value);
-  const unitOrMetric = `${NUTRITION_UNIT_PATTERN}|puan|adim|saat|gun|hafta|ogun|porsiyon|kilo|kilogram`;
-  const directOne = new RegExp(`\\b(?:yuzde\\s+bir|percent\\s+one|bir\\s+(?:${unitOrMetric})|one\\s+(?:${NUTRITION_UNIT_PATTERN}|point|step|hour|day|week))\\b`, "i");
+  const unitOrMetric = `${NUTRITION_UNIT_PATTERN}|${NUTRITION_METRIC_PATTERN}|puan|adim|saat|gun|hafta|ogun|porsiyon|kilo|kilogram`;
+  const directOne = new RegExp(`\\b(?:yuzde\\s+bir|percent\\s+one|bir\\s+(?:${unitOrMetric})|one\\s+(?:${unitOrMetric})|(?:${unitOrMetric})\\s*:?\\s*(?:bir|one))\\b`, "i");
   const frequencyOne = /\bbir(?:er)?\s+(?:kez|defa|kere)(?:den|dan|ten|tan|de|da|ye|ya)?\b/i;
   return directOne.test(normalized) || frequencyOne.test(normalized);
 }
@@ -75,7 +80,18 @@ const FoodQuery = z.string().min(1).max(120).refine(
   (value) => !containsDigitNutritionClaim(value) && !containsSpelledNutritionClaim(value),
   "Food queries must not contain model-authored gram or nutrition quantities",
 );
-const PortionHint = z.object({ measure: PortionMeasure, quantity: z.number().positive().max(20), size: PortionSize.optional(), naturalLabel: NaturalPortionLabel }).strict();
+function formatQuantity(value: number): string {
+  return Number.isInteger(value) ? String(value) : String(Math.round(value * 100) / 100).replace(".", ",");
+}
+function canonicalHintLabel(measure: z.infer<typeof PortionMeasure>, quantity: number): string {
+  return `${formatQuantity(quantity)} ${MEASURE_LABELS[measure]}`;
+}
+const PortionHint = z.object({ measure: PortionMeasure, quantity: z.number().positive().max(20), size: PortionSize.optional(), naturalLabel: NaturalPortionLabel }).strict().superRefine((value, ctx) => {
+  const expected = canonicalHintLabel(value.measure, value.quantity).toLocaleLowerCase("tr-TR");
+  if (value.naturalLabel.trim().toLocaleLowerCase("tr-TR") !== expected) {
+    ctx.addIssue({ code: "custom", path: ["naturalLabel"], message: `naturalLabel must match structured portion hint (${expected})` });
+  }
+});
 const SuggestedIngredient = z.object({ foodQuery: FoodQuery, portionHint: PortionHint }).strict();
 export const MealSuggestionV1 = z.object({
   schemaVersion: z.literal("MealSuggestionV1"), title: mealNarrative(120), rationale: mealNarrative(600),
