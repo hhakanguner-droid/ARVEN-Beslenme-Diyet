@@ -33,6 +33,9 @@ function normalizeTurkishText(value: string): string {
     .replace(/ç/g, "c")
     .replace(/ö/g, "o")
     .replace(/ü/g, "u")
+    // Turkish proper-name case suffixes are often written with an apostrophe.
+    // Join them before tokenization so "Aspirin'i bırak" becomes "aspirini birak".
+    .replace(/['’ʼ]/g, "")
     .replace(/[^a-z0-9\s]/g, " ")
     .replace(/\s+/g, " ");
 }
@@ -47,12 +50,6 @@ const MEDICAL_MANAGEMENT_CONTEXT = [
   "tedavi",
 ];
 
-/**
- * The health boundary intentionally rejects obligation/permission wording around
- * treatment-style action verbs without trying to identify a drug name. ARVEN V1
- * stores no medication registry, so a registry-independent fail-closed rule is
- * safer than guessing whether the preceding noun is a medicine.
- */
 const TREATMENT_MODAL_PATTERNS = [
   /\b(?:al|kullan|birak|kes|durdur|basla|atla|degistir)(?:ma|me)?(?:mali|meli)(?:sin|siniz)?\b/,
   /\b(?:al|kullan|birak|kes|durdur|basla|atla|degistir)(?:abil|ebil)(?:ir)?(?:sin|siniz)?\b/,
@@ -68,26 +65,27 @@ const DIRECT_TREATMENT_PATTERNS = [
 ];
 
 /**
- * Health AI must not label the user with a diagnosis. These patterns are
- * intentionally broader than a disease-name allowlist: direct second-person
- * predicate labels and definitive "bu X'tir" assertions are rejected so a new
- * disease term cannot silently bypass the boundary.
+ * Defense-in-depth vocabulary for direct diagnosis assertions. ARVEN is a
+ * nutrition product, so named medical conditions and diagnostic language are
+ * not valid AI-authored conclusions. Keeping the predicate tied to medical
+ * context avoids false positives such as "Sen kararlısın" or "Bu dengelidir".
  */
+const DIAGNOSIS_TERM = "(?:diyabet|prediyabet|colyak|hipertansiyon|hipotansiyon|obezite|anemi|hipotiroidi|hipertiroidi|tiroid|insulin direnci|metabolik sendrom|alerji|intolerans|hastalik|sendrom)";
 const DIRECT_DIAGNOSIS_PATTERNS = [
   /\b(?:tani|teshis)\w*\b/,
-  /\b(?:sende|sizde)\b.{0,80}\b(?:var|hastasin|hastaligi|oldugun|oldugunu)\b/,
-  /\b(?:belirti|belirtiler|bulgu|bulgular|sonuc|sonuclar|deger|degerler)\w*\b.{0,100}\b(?:oldugunu|gosteriyor|kanitliyor|dogruluyor)\b/,
-  /\b[a-z0-9]{3,}(?:\s+[a-z0-9]{3,}){0,2}\s+hastasi(?:sin|siniz|dir)?\b/,
-  /\b(?:sen|siz)\s+(?:[a-z0-9]{2,}\s+){0,2}[a-z0-9]{3,}(?:sin|siniz|sun|sunuz)\b/,
-  /\bbu\s+[a-z0-9]{3,}(?:tir|dir|tur|dur)\b/,
+  new RegExp(`\\b(?:sende|sizde)\\b.{0,60}\\b${DIAGNOSIS_TERM}\\b.{0,30}\\b(?:var|oldugun|oldugunu)\\b`),
+  new RegExp(`\\b${DIAGNOSIS_TERM}(?:in|un|nin|nun)?\\s+var\\b`),
+  new RegExp(`\\b${DIAGNOSIS_TERM}\\s+hastasi(?:sin|siniz|dir)?\\b`),
+  new RegExp(`\\b(?:sen|siz)\\s+${DIAGNOSIS_TERM}(?:sin|siniz|sun|sunuz)?\\b`),
+  new RegExp(`\\bbu\\s+${DIAGNOSIS_TERM}(?:tir|dir|tur|dur)?\\b`),
+  new RegExp(`\\b(?:belirti|belirtiler|bulgu|bulgular|sonuc|sonuclar|deger|degerler)\\w*\\b.{0,100}\\b${DIAGNOSIS_TERM}\\b.{0,50}\\b(?:oldugunu|gosteriyor|kanitliyor|dogruluyor)\\b`),
 ];
 
 /**
  * ARVEN does not store or track medications. AI-authored health text therefore
  * cannot rely on a user medication registry for safety. Instead this boundary
  * rejects medication/treatment-management language and diagnosis assertions
- * directly. Safe escalation copy (for example, advising professional review)
- * should be deterministic/server-authored when needed.
+ * directly. Safe escalation copy should be deterministic/server-authored.
  */
 export function assertNoMedicalOverreach(text: string): void {
   const normalized = normalizeTurkishText(text);
@@ -109,7 +107,7 @@ export function findAllergyConflicts(
   candidates: ResolvedFoodAllergens[],
   activeAllergenIds: string[],
 ): string[] {
-  const blocked = new Set(activeAllergenIds.filter(Boolean));
+  const blocked = new Set(activeAllergenIds.map((id) => id.trim()).filter(Boolean));
   if (blocked.size === 0) return [];
 
   const conflicts: string[] = [];
@@ -119,7 +117,7 @@ export function findAllergyConflicts(
       continue;
     }
 
-    if (candidate.allergenIds.some((allergenId) => blocked.has(allergenId))) {
+    if (candidate.allergenIds.some((allergenId) => blocked.has(allergenId.trim()))) {
       conflicts.push(candidate.foodName);
     }
   }
@@ -138,7 +136,7 @@ export function assertNoAllergyConflict(
 
 /**
  * Explicit avoid rules and dietary rules are recommendation hard-blocks.
- * Unresolved exclusions fail closed instead of silently disappearing from context.
+ * Unresolved or malformed exclusions fail closed instead of disappearing.
  */
 export function findDietaryExclusionConflicts(
   candidates: ResolvedFoodDietarySafety[],
@@ -151,23 +149,24 @@ export function findDietaryExclusionConflicts(
   const ruleIds = new Set<string>();
 
   for (const exclusion of exclusions) {
-    if (exclusion.resolutionStatus !== "resolved" || !exclusion.id) {
+    const resolvedId = exclusion.id?.trim() ?? "";
+    if (exclusion.resolutionStatus !== "resolved" || resolvedId.length === 0) {
       conflicts.add(`${exclusion.label} (dietary exclusion unresolved)`);
       continue;
     }
-    if (exclusion.kind === "food") foodIds.add(exclusion.id);
-    else ruleIds.add(exclusion.id);
+    if (exclusion.kind === "food") foodIds.add(resolvedId);
+    else ruleIds.add(resolvedId);
   }
 
   for (const candidate of candidates) {
-    if (foodIds.has(candidate.foodId)) conflicts.add(candidate.foodName);
+    if (foodIds.has(candidate.foodId.trim())) conflicts.add(candidate.foodName);
 
     if (ruleIds.size > 0) {
       if (candidate.dietarySafetyDataStatus === "unknown") {
         conflicts.add(`${candidate.foodName} (dietary safety data unresolved)`);
         continue;
       }
-      if (candidate.dietaryConflictRuleIds.some((ruleId) => ruleIds.has(ruleId))) {
+      if (candidate.dietaryConflictRuleIds.some((ruleId) => ruleIds.has(ruleId.trim()))) {
         conflicts.add(candidate.foodName);
       }
     }
