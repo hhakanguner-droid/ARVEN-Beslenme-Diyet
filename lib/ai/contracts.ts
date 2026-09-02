@@ -99,7 +99,9 @@ function normalizeNumberText(value: string): string {
     .replace(/ğ/g, "g")
     .replace(/ç/g, "c")
     .replace(/ö/g, "o")
-    .replace(/ü/g, "u");
+    .replace(/ü/g, "u")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ");
 }
 
 function isWrittenNumberToken(token: string): boolean {
@@ -113,18 +115,21 @@ function isWrittenNumberToken(token: string): boolean {
 }
 
 function containsSpelledNumberWord(value: string): boolean {
-  const tokens = normalizeNumberText(value)
-    .split(/[^a-z0-9]+/)
-    .filter(Boolean);
-  return tokens.some(isWrittenNumberToken);
+  return normalizeNumberText(value).split(/\s+/).filter(Boolean).some(isWrittenNumberToken);
+}
+
+function containsContextualOneClaim(value: string): boolean {
+  const normalized = normalizeNumberText(value);
+  return /\b(?:yuzde\s+bir|percent\s+one|bir\s+(?:kcal|kj|kalori|gram|gr|g|mg|mcg|ml|kg|puan|adim|saat|gun|hafta|ogun|porsiyon|kilo|kilogram)|one\s+(?:kcal|kj|calorie|gram|mg|mcg|ml|kg|point|step|hour|day|week))\b/i.test(normalized);
 }
 
 function containsWeeklyNumericClaim(value: string): boolean {
-  return ANY_DIGIT.test(value) || containsSpelledNumberWord(value);
+  return ANY_DIGIT.test(value) || containsSpelledNumberWord(value) || containsContextualOneClaim(value);
 }
 
 function containsSpelledNutritionClaim(value: string): boolean {
-  return NUTRITION_UNIT_WORD.test(value) && containsSpelledNumberWord(value);
+  return NUTRITION_UNIT_WORD.test(value)
+    && (containsSpelledNumberWord(value) || containsContextualOneClaim(value));
 }
 
 function mealNarrative(max: number) {
@@ -160,7 +165,7 @@ const SuggestedIngredient = z.object({
 
 export const MealSuggestionV1 = z.object({
   schemaVersion: z.literal("MealSuggestionV1"),
-  title: z.string().min(1).max(120),
+  title: mealNarrative(120),
   rationale: mealNarrative(600),
   ingredients: z.array(SuggestedIngredient).min(1).max(20),
   preparation: z.array(mealNarrative(300)).max(12),
@@ -183,10 +188,10 @@ export type WeeklyInsight = z.infer<typeof WeeklyInsightV1>;
 /**
  * Deliberately absent from the AI schema: grams, calories, protein,
  * carbohydrate, fat and other nutrient totals. Strict schemas reject those
- * fields and narrative validators reject digit- or word-authored nutrition
- * claims inside text. AI speaks in natural portion language. The server
- * resolves that hint against verified FoodPortionOptions, converts it to grams
- * internally, then calculates nutrition deterministically.
+ * fields and all user-facing meal text fields reject digit- or word-authored
+ * nutrition claims. AI speaks in natural portion language. The server resolves
+ * that hint against verified FoodPortionOptions, converts it to grams internally,
+ * then calculates nutrition deterministically.
  */
 export function parseMealSuggestion(input: unknown): MealSuggestion {
   return MealSuggestionV1.parse(input);
@@ -194,9 +199,8 @@ export function parseMealSuggestion(input: unknown): MealSuggestion {
 
 /**
  * Weekly numeric metrics (adherence, averages, trends) are computed before the
- * model call and rendered separately. The model output is number-free narrative
- * including Turkish inflections such as "seksenine" as well as plain written
- * quantities such as "yüzde doksan" or "iki bin".
+ * model call and rendered separately. The model output is number-free narrative,
+ * including Turkish inflections and contextual one-valued metric claims.
  */
 export function parseWeeklyInsight(input: unknown): WeeklyInsight {
   return WeeklyInsightV1.parse(input);

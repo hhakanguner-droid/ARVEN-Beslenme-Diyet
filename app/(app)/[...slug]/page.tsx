@@ -7,7 +7,7 @@ const canonicalRoutes: Record<string, { title: string; description: string }> = 
   "saglik/profil": { title: "Sağlık Profilim", description: "Beslenme planlamasında kullanılan, kullanıcı tarafından onaylanmış sağlık bağlamı." },
   "stratejim": { title: "Beslenme Stratejim", description: "Hedefe göre uygulanan planlama yaklaşımı ve değişiklik geçmişi." },
   "saglik/tahliller": { title: "Tahlillerim", description: "Yüklenen sonuçlar çıkarılan ve kullanıcı tarafından doğrulanan değerler olarak ayrı tutulur." },
-  "saglik/ilac-takviye": { title: "İlaç & Takviyeler", description: "Kayıt ve hatırlatma alanı; ARVEN ilaç başlatma, bırakma veya doz değiştirme talimatı vermez." },
+  "saglik/takviyeler": { title: "Takviyeler", description: "Beslenmeyle ilişkili takviyelerin kullanıcı tarafından yönetileceği alan; ilaç takibi değildir ve ARVEN tedavi veya doz talimatı vermez." },
   "arven/hafiza": { title: "ARVEN Hafızası", description: "ARVEN’in kişiselleştirme için tuttuğu kullanıcıya ait şeffaf ve yönetilebilir bilgiler." },
   "basarilarim": { title: "Başarılarım", description: "Doğrulanmış davranış ve ilerleme kayıtlarından oluşan kilometre taşları." },
   "ayarlar/bildirimler": { title: "Bildirimler", description: "Hatırlatma ve bildirim tercihleri." },

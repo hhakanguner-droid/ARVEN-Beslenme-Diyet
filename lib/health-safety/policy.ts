@@ -5,11 +5,6 @@ export type ResolvedFoodAllergens = {
   allergenIds: string[];
 };
 
-export type MedicalSafetyContext = {
-  /** Active medication names/brands resolved from the authenticated user's records. */
-  medicationNames?: readonly string[];
-};
-
 export type DietarySafetyExclusion = {
   kind: "food" | "rule";
   /** Resolved food id or dietary-rule id. Null means the exclusion still needs resolution. */
@@ -42,36 +37,43 @@ function normalizeTurkishText(value: string): string {
     .replace(/\s+/g, " ");
 }
 
-const MEDICATION_CONTEXT = ["ilac", "ilaclar", "ilac kullanimi", "medikasyon", "recete", "doz"];
-
-const DIRECT_MEDICAL_PATTERNS = [
-  /\btani\s+koy/,
-  /\btedavi\w*\s+(basla|uygula|degistir|durdur)/,
-  /\brecete\b/,
+const MEDICAL_MANAGEMENT_CONTEXT = [
+  "ilac",
+  "ilaclar",
+  "ilac kullanimi",
+  "medikasyon",
+  "recete",
+  "doz",
+  "tedavi",
 ];
 
-function mentionsKnownMedication(normalizedText: string, medicationNames: readonly string[]): boolean {
-  return medicationNames.some((name) => {
-    const normalizedName = normalizeTurkishText(name);
-    return normalizedName.length >= 3 && normalizedText.includes(normalizedName);
-  });
-}
+const DIRECT_TREATMENT_PATTERNS = [
+  /\b[a-z0-9]{3,}\w*\s+(?:artik\s+)?(?:al|alma|kullan|kullanma|birak|kes|durdur|basla|atla|degistir|degistirme)\b/,
+  /\b[a-z0-9]{3,}\w*\s+(?:doz\w*|kullanim\w*)\s+(?:artir|azalt|degistir|yukselt|dusur|atla|surdur|devam)\b/,
+  /\btedavi\w*\s+(?:basla|uygula|degistir|durdur|surdur)\b/,
+  /\brecete\w*\b/,
+];
+
+const DIRECT_DIAGNOSIS_PATTERNS = [
+  /\b(?:tani|teshis)\w*\b/,
+  /\b(?:sende|sizde)\b.{0,80}\b(?:var|hastasin|hastaligi|oldugun|oldugunu)\b/,
+  /\b(?:belirti|belirtiler|bulgu|bulgular|sonuc|sonuclar|deger|degerler)\w*\b.{0,100}\b(?:oldugunu|gosteriyor|kanitliyor|dogruluyor)\b/,
+];
 
 /**
- * AI-generated coaching text is not allowed to manage medication at all.
- * The guard intentionally fails closed whenever the model mentions a generic
- * medication-management concept or one of the authenticated user's active
- * medication names. Any safe medication notice must be deterministic,
- * server-authored copy outside the model output. This avoids an endless and
- * incomplete list of imperative verbs such as "bırak", "alma" or "atla".
+ * ARVEN does not store or track medications. AI-authored health text therefore
+ * cannot rely on a user medication registry for safety. Instead this boundary
+ * rejects medication/treatment-management language and diagnosis assertions
+ * directly. Safe escalation copy (for example, advising professional review)
+ * should be deterministic/server-authored when needed.
  */
-export function assertNoMedicalOverreach(text: string, context: MedicalSafetyContext = {}): void {
+export function assertNoMedicalOverreach(text: string): void {
   const normalized = normalizeTurkishText(text);
-  const genericMedicationContext = MEDICATION_CONTEXT.some((term) => normalized.includes(term));
-  const namedMedicationContext = mentionsKnownMedication(normalized, context.medicationNames ?? []);
-  const directOverreach = DIRECT_MEDICAL_PATTERNS.some((pattern) => pattern.test(normalized));
+  const managementContext = MEDICAL_MANAGEMENT_CONTEXT.some((term) => normalized.includes(term));
+  const treatmentDirective = DIRECT_TREATMENT_PATTERNS.some((pattern) => pattern.test(normalized));
+  const diagnosisAssertion = DIRECT_DIAGNOSIS_PATTERNS.some((pattern) => pattern.test(normalized));
 
-  if (genericMedicationContext || namedMedicationContext || directOverreach) {
+  if (managementContext || treatmentDirective || diagnosisAssertion) {
     throw new Error("AI output violates ARVEN non-diagnostic health policy");
   }
 }

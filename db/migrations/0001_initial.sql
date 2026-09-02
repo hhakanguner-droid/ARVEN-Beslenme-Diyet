@@ -42,8 +42,8 @@ CREATE TABLE scientific_references (
 CREATE TABLE goals (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  effective_from TEXT NOT NULL,
-  effective_to TEXT,
+  effective_from TEXT NOT NULL CHECK (date(effective_from) IS NOT NULL AND effective_from = date(effective_from)),
+  effective_to TEXT CHECK (effective_to IS NULL OR (date(effective_to) IS NOT NULL AND effective_to = date(effective_to) AND effective_to >= effective_from)),
   energy_kcal REAL NOT NULL CHECK (energy_kcal > 0),
   protein_g REAL NOT NULL CHECK (protein_g >= 0),
   carbs_g REAL NOT NULL CHECK (carbs_g >= 0),
@@ -81,7 +81,12 @@ BEGIN
     OR (SELECT COUNT(*) FROM json_each(NEW.reference_ids_json)
         WHERE type = 'text' AND length(trim(CAST(value AS TEXT))) > 0)
        <> json_array_length(NEW.reference_ids_json)
-  THEN RAISE(ABORT, 'ARVEN-calculated goals require meaningful provenance') END;
+    OR EXISTS (
+      SELECT 1 FROM json_each(NEW.reference_ids_json) refs
+      LEFT JOIN scientific_references sr ON sr.id = trim(CAST(refs.value AS TEXT))
+      WHERE sr.id IS NULL
+    )
+  THEN RAISE(ABORT, 'ARVEN-calculated goals require resolvable scientific provenance') END;
 END;
 
 CREATE TRIGGER goals_validate_arven_calculated_update
@@ -102,7 +107,37 @@ BEGIN
     OR (SELECT COUNT(*) FROM json_each(NEW.reference_ids_json)
         WHERE type = 'text' AND length(trim(CAST(value AS TEXT))) > 0)
        <> json_array_length(NEW.reference_ids_json)
-  THEN RAISE(ABORT, 'ARVEN-calculated goals require meaningful provenance') END;
+    OR EXISTS (
+      SELECT 1 FROM json_each(NEW.reference_ids_json) refs
+      LEFT JOIN scientific_references sr ON sr.id = trim(CAST(refs.value AS TEXT))
+      WHERE sr.id IS NULL
+    )
+  THEN RAISE(ABORT, 'ARVEN-calculated goals require resolvable scientific provenance') END;
+END;
+
+CREATE TRIGGER goals_prevent_overlap_insert
+BEFORE INSERT ON goals
+WHEN EXISTS (
+  SELECT 1 FROM goals g
+  WHERE g.user_id = NEW.user_id
+    AND g.effective_from <= COALESCE(NEW.effective_to, '9999-12-31')
+    AND NEW.effective_from <= COALESCE(g.effective_to, '9999-12-31')
+)
+BEGIN
+  SELECT RAISE(ABORT, 'goal interval overlap');
+END;
+
+CREATE TRIGGER goals_prevent_overlap_update
+BEFORE UPDATE OF user_id, effective_from, effective_to ON goals
+WHEN EXISTS (
+  SELECT 1 FROM goals g
+  WHERE g.user_id = NEW.user_id
+    AND g.id <> NEW.id
+    AND g.effective_from <= COALESCE(NEW.effective_to, '9999-12-31')
+    AND NEW.effective_from <= COALESCE(g.effective_to, '9999-12-31')
+)
+BEGIN
+  SELECT RAISE(ABORT, 'goal interval overlap');
 END;
 
 CREATE TABLE goal_meal_allocations (
@@ -147,39 +182,15 @@ CREATE TABLE nutrient_catalog (
 );
 
 INSERT INTO nutrient_catalog (nutrient_key, unit) VALUES
-  ('saturated-fat','g'),
-  ('trans-fat','g'),
-  ('monounsaturated-fat','g'),
-  ('polyunsaturated-fat','g'),
-  ('omega-3','g'),
-  ('omega-6','g'),
-  ('sugars','g'),
-  ('added-sugars','g'),
-  ('sodium','mg'),
-  ('salt','g'),
-  ('cholesterol','mg'),
-  ('caffeine','mg'),
-  ('calcium','mg'),
-  ('iron','mg'),
-  ('potassium','mg'),
-  ('magnesium','mg'),
-  ('zinc','mg'),
-  ('phosphorus','mg'),
-  ('selenium','mcg'),
-  ('iodine','mcg'),
-  ('vitamin-a','mcg'),
-  ('vitamin-b1','mg'),
-  ('vitamin-b2','mg'),
-  ('vitamin-b3','mg'),
-  ('vitamin-b5','mg'),
-  ('vitamin-b6','mg'),
-  ('vitamin-b7','mcg'),
-  ('vitamin-b9','mcg'),
-  ('vitamin-b12','mcg'),
-  ('vitamin-c','mg'),
-  ('vitamin-d','mcg'),
-  ('vitamin-e','mg'),
-  ('vitamin-k','mcg');
+  ('saturated-fat','g'), ('trans-fat','g'), ('monounsaturated-fat','g'),
+  ('polyunsaturated-fat','g'), ('omega-3','g'), ('omega-6','g'),
+  ('sugars','g'), ('added-sugars','g'), ('sodium','mg'), ('salt','g'),
+  ('cholesterol','mg'), ('caffeine','mg'), ('calcium','mg'), ('iron','mg'),
+  ('potassium','mg'), ('magnesium','mg'), ('zinc','mg'), ('phosphorus','mg'),
+  ('selenium','mcg'), ('iodine','mcg'), ('vitamin-a','mcg'), ('vitamin-b1','mg'),
+  ('vitamin-b2','mg'), ('vitamin-b3','mg'), ('vitamin-b5','mg'), ('vitamin-b6','mg'),
+  ('vitamin-b7','mcg'), ('vitamin-b9','mcg'), ('vitamin-b12','mcg'), ('vitamin-c','mg'),
+  ('vitamin-d','mcg'), ('vitamin-e','mg'), ('vitamin-k','mcg');
 
 CREATE TABLE food_nutrients (
   food_id TEXT NOT NULL REFERENCES foods(id) ON DELETE CASCADE,
@@ -282,18 +293,6 @@ CREATE TABLE food_preferences (
 CREATE INDEX food_preferences_user_idx ON food_preferences(user_id);
 CREATE INDEX food_preferences_safety_idx ON food_preferences(user_id, preference, resolution_status);
 
-CREATE TABLE user_medications (
-  id TEXT PRIMARY KEY,
-  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  display_name TEXT NOT NULL,
-  normalized_name TEXT NOT NULL,
-  active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)),
-  provenance TEXT NOT NULL,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
-CREATE INDEX user_medications_active_idx ON user_medications(user_id, active);
-
 CREATE TABLE assessment_snapshots (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -335,6 +334,32 @@ CREATE TABLE meal_entry_items (
 );
 CREATE INDEX meal_entry_items_entry_idx ON meal_entry_items(meal_entry_id);
 
+CREATE TRIGGER meal_entry_items_private_food_insert
+BEFORE INSERT ON meal_entry_items
+WHEN EXISTS (
+  SELECT 1 FROM meal_entries m
+  JOIN foods f ON f.id = NEW.food_id
+  WHERE m.id = NEW.meal_entry_id
+    AND f.owner_user_id IS NOT NULL
+    AND f.owner_user_id <> m.user_id
+)
+BEGIN
+  SELECT RAISE(ABORT, 'private food ownership mismatch');
+END;
+
+CREATE TRIGGER meal_entry_items_private_food_update
+BEFORE UPDATE OF meal_entry_id, food_id ON meal_entry_items
+WHEN EXISTS (
+  SELECT 1 FROM meal_entries m
+  JOIN foods f ON f.id = NEW.food_id
+  WHERE m.id = NEW.meal_entry_id
+    AND f.owner_user_id IS NOT NULL
+    AND f.owner_user_id <> m.user_id
+)
+BEGIN
+  SELECT RAISE(ABORT, 'private food ownership mismatch');
+END;
+
 CREATE TABLE meal_entry_item_nutrients (
   meal_entry_item_id TEXT NOT NULL REFERENCES meal_entry_items(id) ON DELETE CASCADE,
   nutrient_key TEXT NOT NULL,
@@ -366,10 +391,20 @@ CREATE TABLE ai_actions (
   status TEXT NOT NULL CHECK (status IN ('proposed','confirmed','rejected','applied','failed')),
   idempotency_key TEXT NOT NULL,
   created_at TEXT NOT NULL,
-  confirmed_at TEXT,
-  applied_at TEXT,
+  confirmed_at TEXT CHECK (
+    confirmed_at IS NULL OR (length(trim(confirmed_at)) > 0 AND julianday(confirmed_at) IS NOT NULL)
+  ),
+  applied_at TEXT CHECK (
+    applied_at IS NULL OR (length(trim(applied_at)) > 0 AND julianday(applied_at) IS NOT NULL)
+  ),
   CHECK (status NOT IN ('confirmed','applied') OR confirmed_at IS NOT NULL),
-  CHECK (status <> 'applied' OR applied_at IS NOT NULL),
+  CHECK (
+    status <> 'applied'
+    OR (
+      applied_at IS NOT NULL
+      AND julianday(applied_at) >= julianday(confirmed_at)
+    )
+  ),
   UNIQUE(user_id, idempotency_key)
 );
 CREATE INDEX ai_actions_user_status_idx ON ai_actions(user_id, status);

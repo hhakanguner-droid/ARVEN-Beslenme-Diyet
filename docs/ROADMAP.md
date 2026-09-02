@@ -56,11 +56,12 @@
 - barcode/photo-assisted product discovery where source evidence exists
 - deterministic recalculation after correction
 
-## Phase 6 — Health modules
+## Phase 6 — Health context and supplements
 - lab upload/extraction with extracted vs confirmed separation
-- medication and supplement records
-- morphology-aware safety checks plus structured output guardrails
-- safe contextual explanations, no diagnosis/treatment instructions
+- nutrition-related supplement records as a separate user-managed module
+- verified supplement/product nutrient provenance where available
+- no medication registry or medication tracking
+- safe contextual explanations, no diagnosis/treatment/medication instructions
 
 ## Phase 7 — Weekly planning system
 - weekly review and plan generation

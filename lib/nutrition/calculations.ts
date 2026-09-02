@@ -4,10 +4,12 @@ import {
   sumExtendedNutrition,
 } from "./nutrients";
 import { assertVerifiedNutritionSource } from "./sources";
-import type { ExtendedNutritionFacts, NutrientCompleteness, NutrientValue } from "./nutrients";
+import type { ExtendedNutritionFacts, NutrientCompleteness } from "./nutrients";
 import type { NutritionFacts, NutritionTargets, Portion } from "./types";
 
 const ZERO: NutritionFacts = { energyKcal: 0, proteinG: 0, carbsG: 0, fatG: 0, fiberG: 0 };
+
+export type ConsumptionCoverage = "logged-foods" | "empty-day";
 
 function finiteNonNegative(value: number, field: string): number {
   if (!Number.isFinite(value) || value < 0) throw new Error(`${field} must be a finite non-negative number`);
@@ -124,10 +126,7 @@ export function sumNutrition(items: NutritionFacts[]): NutritionFacts {
   };
 }
 
-/**
- * Portion contributions are accumulated at full precision and rounded only once
- * at the final meal total. This prevents per-ingredient rounding drift.
- */
+/** Portion contributions are accumulated at full precision and rounded only once at the final meal total. */
 export function calculatePortions(portions: Portion[]): NutritionFacts {
   return sumNutrition(portions.map(scaleNutritionExact));
 }
@@ -144,6 +143,7 @@ function combineCompleteness(
 function remainingExtendedTargets(
   targets: ExtendedNutritionFacts | undefined,
   consumed: ExtendedNutritionFacts | undefined,
+  coverage: ConsumptionCoverage,
 ): ExtendedNutritionFacts | undefined {
   if (!targets) return undefined;
   assertExtendedNutritionFacts(targets);
@@ -163,7 +163,15 @@ function remainingExtendedTargets(
     finiteNonNegative(target.amount, `${rawKey} target`);
 
     if (!actual || actual.amount == null || actual.unit !== unit) {
-      result[key] = { amount: null, unit, completeness: "unknown" };
+      if (coverage === "empty-day") {
+        result[key] = {
+          amount: round(target.amount, 3),
+          unit,
+          completeness: target.completeness,
+        };
+      } else {
+        result[key] = { amount: null, unit, completeness: "unknown" };
+      }
       continue;
     }
     finiteNonNegative(actual.amount, `${rawKey} consumed`);
@@ -183,6 +191,7 @@ export function remainingTargets(
   targets: NutritionTargets,
   consumed: NutritionFacts,
   consumedWaterMl = 0,
+  coverage: ConsumptionCoverage = "logged-foods",
 ): NutritionTargets {
   assertNutritionFactsValid(targets, "targets");
   assertNutritionFactsValid(consumed, "consumed");
@@ -190,16 +199,19 @@ export function remainingTargets(
   if (targets.waterMl != null) finiteNonNegative(targets.waterMl, "targets.waterMl");
 
   const remaining = (target: number, actual: number) => round(Math.max(0, target - actual));
+  const remainingFiber = targets.fiberG == null
+    ? undefined
+    : consumed.fiberG == null
+      ? coverage === "empty-day" ? round(targets.fiberG) : undefined
+      : remaining(targets.fiberG, consumed.fiberG);
 
   return {
     energyKcal: round(Math.max(0, targets.energyKcal - consumed.energyKcal), 0),
     proteinG: remaining(targets.proteinG, consumed.proteinG),
     carbsG: remaining(targets.carbsG, consumed.carbsG),
     fatG: remaining(targets.fatG, consumed.fatG),
-    fiberG: targets.fiberG == null || consumed.fiberG == null
-      ? undefined
-      : remaining(targets.fiberG, consumed.fiberG),
-    extended: remainingExtendedTargets(targets.extended, consumed.extended),
+    fiberG: remainingFiber,
+    extended: remainingExtendedTargets(targets.extended, consumed.extended, coverage),
     waterMl: targets.waterMl == null ? undefined : remaining(targets.waterMl, consumedWaterMl),
   };
 }

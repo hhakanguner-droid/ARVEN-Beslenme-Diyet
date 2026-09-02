@@ -6,7 +6,7 @@ Kişiselleştirilmiş beslenme planlama, öğün takibi, doğrulanmış besin ve
 
 **AI yorumlar ve önerir; sayısal doğruları kod hesaplar.** Kalori, protein, karbonhidrat, yağ, su, kalan hedefler ve ilerleme metrikleri doğrulanmış yapılandırılmış veriden deterministik olarak üretilir.
 
-ARVEN bir tanı veya tedavi ürünü değildir. Sağlık bağlamını açıklayabilir ve profesyonel değerlendirme önerebilir; tanı koymaz, reçete vermez ve ilaç başlatma/bırakma/doz değiştirme talimatı üretmez.
+ARVEN bir tanı veya tedavi ürünü değildir. Sağlık bağlamını açıklayabilir ve profesyonel değerlendirme önerebilir; tanı koymaz, reçete vermez ve ilaç kullanımı/değişikliği hakkında talimat üretmez. V1 ilaç verisi saklamaz veya ilaç takibi yapmaz. Beslenmeyle ilişkili takviyeler ileride ayrı bir kullanıcı modülü olarak ele alınır.
 
 ## Teknoloji
 

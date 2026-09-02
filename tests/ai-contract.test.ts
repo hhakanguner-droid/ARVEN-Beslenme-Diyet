@@ -9,11 +9,7 @@ const validSuggestion = {
   ingredients: [
     {
       foodQuery: "ızgara tavuk göğsü",
-      portionHint: {
-        measure: "palm",
-        quantity: 1,
-        naturalLabel: "1 avuç içi kadar",
-      },
+      portionHint: { measure: "palm", quantity: 1, naturalLabel: "1 avuç içi kadar" },
     },
   ],
   preparation: ["Izgarada pişir."],
@@ -26,43 +22,34 @@ test("AI meal contract accepts natural portion language", () => {
 });
 
 test("AI meal contract rejects suggested grams", () => {
-  const invalid = {
+  assert.throws(() => parseMealSuggestion({
     ...validSuggestion,
-    ingredients: [
-      {
-        ...validSuggestion.ingredients[0],
-        suggestedGrams: 120,
-      },
-    ],
-  };
-
-  assert.throws(() => parseMealSuggestion(invalid));
+    ingredients: [{ ...validSuggestion.ingredients[0], suggestedGrams: 120 }],
+  }));
 });
 
 test("AI meal contract rejects AI-authored calorie totals", () => {
-  const invalid = { ...validSuggestion, energyKcal: 430 };
-  assert.throws(() => parseMealSuggestion(invalid));
+  assert.throws(() => parseMealSuggestion({ ...validSuggestion, energyKcal: 430 }));
 });
 
-test("AI meal text cannot smuggle numeric gram or calorie claims", () => {
-  assert.throws(() => parseMealSuggestion({
-    ...validSuggestion,
-    rationale: "Bu öğün 430 kcal içerir.",
-  }), /numeric nutrition/);
+test("all user-facing meal text rejects numeric nutrition claims including contextual one", () => {
+  const cases = [
+    { ...validSuggestion, rationale: "Bu öğün 430 kcal içerir." },
+    { ...validSuggestion, rationale: "Bu öğün dört yüz kalori içerir." },
+    { ...validSuggestion, rationale: "Bu öğün bir gram protein içerir." },
+    { ...validSuggestion, title: "450 kcal protein öğünü" },
+    { ...validSuggestion, title: "Dört yüz kalorilik öğün" },
+  ];
 
-  assert.throws(() => parseMealSuggestion({
-    ...validSuggestion,
-    rationale: "Bu öğün dört yüz kalori içerir.",
-  }), /numeric nutrition/);
+  for (const candidate of cases) {
+    assert.throws(() => parseMealSuggestion(candidate), /numeric nutrition/, candidate.title);
+  }
 
   assert.throws(() => parseMealSuggestion({
     ...validSuggestion,
     ingredients: [{
       ...validSuggestion.ingredients[0],
-      portionHint: {
-        ...validSuggestion.ingredients[0].portionHint,
-        naturalLabel: "120 g tavuk",
-      },
+      portionHint: { ...validSuggestion.ingredients[0].portionHint, naturalLabel: "120 g tavuk" },
     }],
   }), /Natural portion labels/);
 });
@@ -98,6 +85,8 @@ test("weekly AI insight cannot hide invented numeric truth inside narrative stri
     "Uyumun yüzde doksan yedi.",
     "Ortalaman iki bin kalori civarında.",
     "Hedefin yüzde seksenine yaklaştın.",
+    "Hedefin yüzde bir altında kaldın.",
+    "Ortalaman bir gram protein arttı.",
   ];
 
   for (const summary of invalidSummaries) {

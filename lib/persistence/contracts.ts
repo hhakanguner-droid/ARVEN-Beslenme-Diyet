@@ -59,14 +59,13 @@ export interface NutritionLogRepository {
 }
 
 /**
- * Recommendation context is authenticated and includes every hard safety input.
- * Callers must not build food recommendations from display preferences alone.
+ * Recommendation context is authenticated and includes every hard safety input
+ * needed for nutrition recommendations. Medication data is intentionally absent:
+ * ARVEN does not store or track medications.
  */
 export interface UserContextRepository {
   getActiveAllergenIds(userId: UserId): Promise<string[]>;
   getActiveDietarySafetyExclusions(userId: UserId): Promise<DietarySafetyExclusion[]>;
-  /** Active medication names/brands used only to detect unsafe medication directives. */
-  getActiveMedicationNames(userId: UserId): Promise<string[]>;
   getActiveTargets(userId: UserId, localDate: string): Promise<NutritionTargets | null>;
   getNutritionPreferences(userId: UserId): Promise<UserNutritionPreferences>;
 }
