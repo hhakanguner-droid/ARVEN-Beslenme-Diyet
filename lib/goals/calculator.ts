@@ -31,6 +31,15 @@ function round(value: number, decimals: number): number {
   return Math.round((value + Number.EPSILON) * factor) / factor;
 }
 
+function assertDerivedTargets(targets: CalculatedGoalTargets): void {
+  finiteInRange(targets.energyKcal, 1, 20_000, "derived energyKcal");
+  finiteInRange(targets.proteinG, 0, 2_000, "derived proteinG");
+  finiteInRange(targets.carbsG, 0, 3_000, "derived carbsG");
+  finiteInRange(targets.fatG, 0, 2_000, "derived fatG");
+  finiteInRange(targets.fiberG, 0, 1_000, "derived fiberG");
+  finiteInRange(targets.waterMl, 0, 20_000, "derived waterMl");
+}
+
 export function deriveMifflinStJeorV1(inputs: MifflinStJeorV1Inputs): CalculatedGoalTargets {
   const weightKg = finiteInRange(inputs.weightKg, 20, 400, "weightKg");
   const heightCm = finiteInRange(inputs.heightCm, 100, 260, "heightCm");
@@ -50,8 +59,9 @@ export function deriveMifflinStJeorV1(inputs: MifflinStJeorV1Inputs): Calculated
   const carbsG = round(Math.max(0, (energyKcal - (proteinG * 4) - (fatG * 9)) / 4), 1);
   const fiberG = round((energyKcal / 1000) * 14, 1);
   const waterMl = round(weightKg * waterMlPerKg, 0);
-
-  return { energyKcal, proteinG, carbsG, fatG, fiberG, waterMl };
+  const targets = { energyKcal, proteinG, carbsG, fatG, fiberG, waterMl };
+  assertDerivedTargets(targets);
+  return targets;
 }
 
 export function deriveCalculatedGoal(
