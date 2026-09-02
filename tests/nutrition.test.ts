@@ -68,6 +68,26 @@ test("fractional natural portions are supported", () => {
   assert.equal(portion.display?.label, "0,5 küçük kase");
 });
 
+test("household portions that round below 0.1 g are rejected", () => {
+  const tinyOptionFood: Food = {
+    ...verifiedFood,
+    id: "tiny-option-food",
+    portionOptions: [{
+      id: "tiny-option",
+      measure: "piece",
+      label: "minik parça",
+      gramsPerUnit: 5,
+      source: { provider: "manual-verified", verifiedAt: "2026-09-02T00:00:00.000Z" },
+    }],
+  };
+
+  assert.throws(() => resolvePortionSelection(tinyOptionFood, {
+    kind: "household",
+    portionOptionId: "tiny-option",
+    quantity: 0.001,
+  }), /below ARVEN's 0.1 g precision/);
+});
+
 test("custom grams remain available as an advanced fallback", () => {
   const portion = resolvePortionSelection(verifiedFood, { kind: "custom-grams", grams: 135 });
   assert.equal(portion.grams, 135);
@@ -165,12 +185,17 @@ test("remaining micronutrients inherit completeness from both target and consump
 
 test("verified source is required by both validation and calculation boundary", () => {
   assert.doesNotThrow(() => assertVerifiedNutritionSource(verifiedFood));
-  const invalid: Food = {
+  const missingId: Food = {
     ...verifiedFood,
     source: { provider: "usda", verifiedAt: "2026-09-02T00:00:00.000Z" },
   };
-  assert.throws(() => assertVerifiedNutritionSource(invalid), /external source id/);
-  assert.throws(() => scaleNutrition({ food: invalid, grams: 100 }), /external source id/);
+  const blankId: Food = {
+    ...verifiedFood,
+    source: { provider: "usda", externalId: "   ", verifiedAt: "2026-09-02T00:00:00.000Z" },
+  };
+  assert.throws(() => assertVerifiedNutritionSource(missingId), /external source id/);
+  assert.throws(() => assertVerifiedNutritionSource(blankId), /external source id/);
+  assert.throws(() => scaleNutrition({ food: missingId, grams: 100 }), /external source id/);
 });
 
 test("core nutrition facts are validated before any portion scaling", () => {
