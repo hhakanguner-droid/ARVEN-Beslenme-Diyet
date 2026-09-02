@@ -8,6 +8,7 @@ import type { ExtendedNutritionFacts, NutrientCompleteness } from "./nutrients";
 import type { ConsumptionCoverage, NutritionFacts, NutritionTargets, Portion } from "./types";
 
 const ZERO: NutritionFacts = { energyKcal: 0, proteinG: 0, carbsG: 0, fatG: 0, fiberG: 0 };
+export const NUTRITION_SNAPSHOT_DECIMALS = 6;
 
 function finiteNonNegative(value: number, field: string): number {
   if (!Number.isFinite(value) || value < 0) throw new Error(`${field} must be a finite non-negative number`);
@@ -48,7 +49,10 @@ function scaleExtendedNutritionExact(
   return scaled;
 }
 
-function roundExtendedNutrition(extended: ExtendedNutritionFacts | undefined): ExtendedNutritionFacts | undefined {
+function roundExtendedNutrition(
+  extended: ExtendedNutritionFacts | undefined,
+  decimals = 3,
+): ExtendedNutritionFacts | undefined {
   if (!extended) return undefined;
   const rounded: ExtendedNutritionFacts = {};
   for (const [rawKey, value] of Object.entries(extended)) {
@@ -56,7 +60,7 @@ function roundExtendedNutrition(extended: ExtendedNutritionFacts | undefined): E
     const key = rawKey as keyof ExtendedNutritionFacts;
     rounded[key] = {
       ...value,
-      amount: value.amount == null ? null : round(value.amount, 3),
+      amount: value.amount == null ? null : round(value.amount, decimals),
     };
   }
   return rounded;
@@ -76,6 +80,22 @@ function scaleNutritionExact(portion: Portion): NutritionFacts {
     fatG: n.fatG * ratio,
     fiberG: n.fiberG == null ? undefined : n.fiberG * ratio,
     extended: scaleExtendedNutritionExact(n.extended, ratio),
+  };
+}
+
+/**
+ * Stable persistence boundary for historical meal snapshots. Storage keeps six
+ * decimals; user-facing/daily totals continue to round only after aggregation.
+ */
+export function scaleNutritionForStorage(portion: Portion): NutritionFacts {
+  const exact = scaleNutritionExact(portion);
+  return {
+    energyKcal: round(exact.energyKcal, NUTRITION_SNAPSHOT_DECIMALS),
+    proteinG: round(exact.proteinG, NUTRITION_SNAPSHOT_DECIMALS),
+    carbsG: round(exact.carbsG, NUTRITION_SNAPSHOT_DECIMALS),
+    fatG: round(exact.fatG, NUTRITION_SNAPSHOT_DECIMALS),
+    fiberG: exact.fiberG == null ? undefined : round(exact.fiberG, NUTRITION_SNAPSHOT_DECIMALS),
+    extended: roundExtendedNutrition(exact.extended, NUTRITION_SNAPSHOT_DECIMALS),
   };
 }
 
