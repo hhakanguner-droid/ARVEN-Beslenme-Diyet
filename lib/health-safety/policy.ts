@@ -33,37 +33,23 @@ function normalizeTurkishText(value: string): string {
     .replace(/ç/g, "c")
     .replace(/ö/g, "o")
     .replace(/ü/g, "u")
-    // Turkish proper-name case suffixes are often written with an apostrophe.
-    // Join them before tokenization so "Aspirin'i bırak" becomes "aspirini birak".
     .replace(/['’ʼ]/g, "")
     .replace(/[^a-z0-9\s]/g, " ")
     .replace(/\s+/g, " ");
 }
 
-const MEDICAL_MANAGEMENT_CONTEXT = [
-  "ilac",
-  "ilaclar",
-  "ilac kullanimi",
-  "medikasyon",
-  "recete",
-  "doz",
-  "tedavi",
-];
+const MEDICAL_MANAGEMENT_CONTEXT = ["ilac", "ilaclar", "ilac kullanimi", "medikasyon", "recete", "doz", "tedavi"];
 
 /**
- * This is not a user medication registry and is not used for medication tracking.
- * It is a small defense-in-depth vocabulary for common medicine names that may
- * appear in model output. Generic food/coaching verbs are never blocked unless
- * medical context or a recognized medicine token is present.
+ * Explicit nutrition context prevents ordinary coaching such as "Tuzu azalt"
+ * from being mistaken for treatment management. Outside this bounded nutrition
+ * vocabulary, direct start/stop/increase/decrease/use directives fail closed;
+ * ARVEN is not a medication-management product and does not keep a drug registry.
  */
-const MEDICATION_SAFETY_TERMS = [
-  "aspirin",
-  "metformin",
-  "euthyrox",
-  "levotiroksin",
-  "ibuprofen",
-  "parasetamol",
-  "parol",
+const NUTRITION_CONTEXT_TERMS = [
+  "besin", "gida", "yemek", "ogun", "porsiyon", "meyve", "sebze", "ekmek", "tuz", "seker",
+  "zeytinyagi", "yag", "protein", "karbonhidrat", "lif", "su", "kalori", "kahvalti", "corba",
+  "salata", "et", "tavuk", "balik", "yumurta", "sut", "yogurt", "peynir", "bakliyat", "kuruyemis",
 ];
 
 const TREATMENT_ACTION_PATTERNS = [
@@ -74,12 +60,6 @@ const TREATMENT_ACTION_PATTERNS = [
   /\b(?:artir|azalt|yukselt|dusur|surdur|devam)\b/,
 ];
 
-/**
- * Defense-in-depth vocabulary for direct diagnosis assertions. ARVEN is a
- * nutrition product, so named medical conditions and diagnostic language are
- * not valid AI-authored conclusions. Keeping the predicate tied to medical
- * context avoids false positives such as "Sen kararlısın" or "Bu dengelidir".
- */
 const DIAGNOSIS_TERM = "(?:diyabet|prediyabet|colyak|hipertansiyon|hipotansiyon|obezite|anemi|hipotiroidi|hipertiroidi|tiroid|insulin direnci|metabolik sendrom|alerji|intolerans|hastalik|sendrom)";
 const DIRECT_DIAGNOSIS_PATTERNS = [
   /\b(?:tani|teshis)\w*\b/,
@@ -87,30 +67,19 @@ const DIRECT_DIAGNOSIS_PATTERNS = [
   new RegExp(`\\b${DIAGNOSIS_TERM}(?:in|un|nin|nun)?\\s+var\\b`),
   new RegExp(`\\b${DIAGNOSIS_TERM}\\s+hastasi(?:sin|siniz|dir)?\\b`),
   new RegExp(`\\b(?:sen|siz)\\s+${DIAGNOSIS_TERM}(?:sin|siniz|sun|sunuz)?\\b`),
+  // Condition-specific suffix form: "Diyabetsin", "Çölyaksın". Keeping the
+  // condition vocabulary explicit avoids generic false positives like "kararlısın".
+  new RegExp(`\\b${DIAGNOSIS_TERM}(?:sin|siniz|sun|sunuz)\\b`),
   new RegExp(`\\bbu\\s+${DIAGNOSIS_TERM}(?:tir|dir|tur|dur)?\\b`),
   new RegExp(`\\b(?:belirti|belirtiler|bulgu|bulgular|sonuc|sonuclar|deger|degerler)\\w*\\b.{0,100}\\b${DIAGNOSIS_TERM}\\b.{0,50}\\b(?:oldugunu|gosteriyor|kanitliyor|dogruluyor)\\b`),
 ];
 
-function containsMedicationSafetyTerm(normalized: string): boolean {
-  return MEDICATION_SAFETY_TERMS.some((term) => {
-    const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    return new RegExp(`\\b${escaped}\\w*\\b`).test(normalized);
-  });
-}
-
-/**
- * ARVEN does not store or track medications. AI-authored health text therefore
- * cannot rely on a user medication registry for safety. Treatment-management
- * blocking is intentionally tied to explicit medical context or a recognized
- * medicine token so ordinary nutrition guidance such as "Meyve al" remains valid.
- * Safe escalation copy should be deterministic/server-authored.
- */
 export function assertNoMedicalOverreach(text: string): void {
   const normalized = normalizeTurkishText(text);
   const managementContext = MEDICAL_MANAGEMENT_CONTEXT.some((term) => normalized.includes(term));
-  const medicationTerm = containsMedicationSafetyTerm(normalized);
+  const nutritionContext = NUTRITION_CONTEXT_TERMS.some((term) => new RegExp(`\\b${term}\\w*\\b`).test(normalized));
   const treatmentAction = TREATMENT_ACTION_PATTERNS.some((pattern) => pattern.test(normalized));
-  const treatmentDirective = (managementContext || medicationTerm) && treatmentAction;
+  const treatmentDirective = treatmentAction && !nutritionContext;
   const diagnosisAssertion = DIRECT_DIAGNOSIS_PATTERNS.some((pattern) => pattern.test(normalized));
 
   if (managementContext || treatmentDirective || diagnosisAssertion) {
@@ -118,78 +87,46 @@ export function assertNoMedicalOverreach(text: string): void {
   }
 }
 
-/**
- * Allergy decisions are identifier based, never food-name substring based.
- * If a user has active allergies, foods with unknown allergen data are blocked
- * until they are resolved against a verified catalog/source. Malformed active
- * or candidate identifiers also fail closed rather than becoming "no allergy".
- */
-export function findAllergyConflicts(
-  candidates: ResolvedFoodAllergens[],
-  activeAllergenIds: string[],
-): string[] {
+export function findAllergyConflicts(candidates: ResolvedFoodAllergens[], activeAllergenIds: string[]): string[] {
   if (activeAllergenIds.length === 0) return [];
-
   const normalizedActiveIds = activeAllergenIds.map((id) => id.trim());
-  if (normalizedActiveIds.some((id) => id.length === 0)) {
-    return ["Active allergen identifier unresolved"];
-  }
-
+  if (normalizedActiveIds.some((id) => id.length === 0)) return ["Active allergen identifier unresolved"];
   const blocked = new Set(normalizedActiveIds);
   const conflicts: string[] = [];
   for (const candidate of candidates) {
-    if (candidate.allergenDataStatus === "unknown") {
+    // With an active allergy, only verified candidate evidence is sufficient.
+    // "not-applicable" is not trusted unless a future typed food class proves it.
+    if (candidate.allergenDataStatus !== "verified") {
       conflicts.push(`${candidate.foodName} (allergen data unresolved)`);
       continue;
     }
-
-    if (candidate.allergenIds.some((allergenId) => allergenId.trim().length === 0)) {
+    if (candidate.allergenIds.some((id) => id.trim().length === 0)) {
       conflicts.push(`${candidate.foodName} (allergen identifier unresolved)`);
       continue;
     }
-
-    if (candidate.allergenIds.some((allergenId) => blocked.has(allergenId.trim()))) {
-      conflicts.push(candidate.foodName);
-    }
+    if (candidate.allergenIds.some((id) => blocked.has(id.trim()))) conflicts.push(candidate.foodName);
   }
   return conflicts;
 }
 
-export function assertNoAllergyConflict(
-  candidates: ResolvedFoodAllergens[],
-  activeAllergenIds: string[],
-): void {
+export function assertNoAllergyConflict(candidates: ResolvedFoodAllergens[], activeAllergenIds: string[]): void {
   const conflicts = findAllergyConflicts(candidates, activeAllergenIds);
-  if (conflicts.length > 0) {
-    throw new Error(`Allergy conflict detected: ${conflicts.join(", ")}`);
-  }
+  if (conflicts.length > 0) throw new Error(`Allergy conflict detected: ${conflicts.join(", ")}`);
 }
 
-/**
- * Explicit avoid rules and dietary rules are recommendation hard-blocks.
- * Unresolved or malformed exclusions/candidate identifiers fail closed instead
- * of disappearing from the safety decision.
- */
-export function findDietaryExclusionConflicts(
-  candidates: ResolvedFoodDietarySafety[],
-  exclusions: DietarySafetyExclusion[],
-): string[] {
+export function findDietaryExclusionConflicts(candidates: ResolvedFoodDietarySafety[], exclusions: DietarySafetyExclusion[]): string[] {
   if (exclusions.length === 0) return [];
-
   const conflicts = new Set<string>();
   const foodIds = new Set<string>();
   const ruleIds = new Set<string>();
-
   for (const exclusion of exclusions) {
     const resolvedId = exclusion.id?.trim() ?? "";
     if (exclusion.resolutionStatus !== "resolved" || resolvedId.length === 0) {
       conflicts.add(`${exclusion.label} (dietary exclusion unresolved)`);
       continue;
     }
-    if (exclusion.kind === "food") foodIds.add(resolvedId);
-    else ruleIds.add(resolvedId);
+    if (exclusion.kind === "food") foodIds.add(resolvedId); else ruleIds.add(resolvedId);
   }
-
   for (const candidate of candidates) {
     const candidateFoodId = candidate.foodId.trim();
     if (foodIds.size > 0 && candidateFoodId.length === 0) {
@@ -197,32 +134,25 @@ export function findDietaryExclusionConflicts(
       continue;
     }
     if (foodIds.has(candidateFoodId)) conflicts.add(candidate.foodName);
-
     if (ruleIds.size > 0) {
-      if (candidate.dietarySafetyDataStatus === "unknown") {
+      // Active dietary rules require verified conflict evidence. Unrestricted
+      // "not-applicable" is intentionally fail-closed in V1.
+      if (candidate.dietarySafetyDataStatus !== "verified") {
         conflicts.add(`${candidate.foodName} (dietary safety data unresolved)`);
         continue;
       }
-      const normalizedCandidateRuleIds = candidate.dietaryConflictRuleIds.map((ruleId) => ruleId.trim());
-      if (normalizedCandidateRuleIds.some((ruleId) => ruleId.length === 0)) {
+      const ids = candidate.dietaryConflictRuleIds.map((id) => id.trim());
+      if (ids.some((id) => id.length === 0)) {
         conflicts.add(`${candidate.foodName} (dietary rule identifier unresolved)`);
         continue;
       }
-      if (normalizedCandidateRuleIds.some((ruleId) => ruleIds.has(ruleId))) {
-        conflicts.add(candidate.foodName);
-      }
+      if (ids.some((id) => ruleIds.has(id))) conflicts.add(candidate.foodName);
     }
   }
-
   return [...conflicts];
 }
 
-export function assertNoDietaryExclusionConflict(
-  candidates: ResolvedFoodDietarySafety[],
-  exclusions: DietarySafetyExclusion[],
-): void {
+export function assertNoDietaryExclusionConflict(candidates: ResolvedFoodDietarySafety[], exclusions: DietarySafetyExclusion[]): void {
   const conflicts = findDietaryExclusionConflicts(candidates, exclusions);
-  if (conflicts.length > 0) {
-    throw new Error(`Dietary safety conflict detected: ${conflicts.join(", ")}`);
-  }
+  if (conflicts.length > 0) throw new Error(`Dietary safety conflict detected: ${conflicts.join(", ")}`);
 }
