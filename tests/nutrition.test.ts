@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { remainingTargets, scaleNutrition, sumNutrition } from "../lib/nutrition/calculations";
+import { approximateGramLabel, resolvePortionSelection } from "../lib/nutrition/portions";
 import { assertVerifiedNutritionSource } from "../lib/nutrition/sources";
 import type { Food } from "../lib/nutrition/types";
 
@@ -10,6 +11,16 @@ const verifiedFood: Food = {
   basisGrams: 100,
   nutrition: { energyKcal: 200, proteinG: 20, carbsG: 10, fatG: 8, fiberG: 4 },
   source: { provider: "usda", externalId: "test-id", verifiedAt: "2026-09-02T00:00:00.000Z" },
+  portionOptions: [
+    {
+      id: "portion-bowl-small",
+      measure: "bowl",
+      size: "small",
+      label: "küçük kase",
+      gramsPerUnit: 180,
+      source: { provider: "manual-verified", verifiedAt: "2026-09-02T00:00:00.000Z" },
+    },
+  ],
 };
 
 test("portion nutrition scales deterministically", () => {
@@ -20,6 +31,36 @@ test("portion nutrition scales deterministically", () => {
     fatG: 12,
     fiberG: 6,
   });
+});
+
+test("household portion is resolved to internal grams", () => {
+  const portion = resolvePortionSelection(verifiedFood, {
+    kind: "household",
+    portionOptionId: "portion-bowl-small",
+    quantity: 1,
+  });
+
+  assert.equal(portion.grams, 180);
+  assert.equal(portion.display?.label, "1 küçük kase");
+  assert.equal(approximateGramLabel(portion), "≈ 180 g");
+  assert.equal(scaleNutrition(portion).energyKcal, 360);
+});
+
+test("fractional natural portions are supported", () => {
+  const portion = resolvePortionSelection(verifiedFood, {
+    kind: "household",
+    portionOptionId: "portion-bowl-small",
+    quantity: 0.5,
+  });
+
+  assert.equal(portion.grams, 90);
+  assert.equal(portion.display?.label, "0,5 küçük kase");
+});
+
+test("custom grams remain available as an advanced fallback", () => {
+  const portion = resolvePortionSelection(verifiedFood, { kind: "custom-grams", grams: 135 });
+  assert.equal(portion.grams, 135);
+  assert.equal(portion.display?.label, "135 g");
 });
 
 test("nutrition totals are summed by code", () => {
