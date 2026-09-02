@@ -101,19 +101,30 @@ export function assertNoMedicalOverreach(text: string): void {
 /**
  * Allergy decisions are identifier based, never food-name substring based.
  * If a user has active allergies, foods with unknown allergen data are blocked
- * until they are resolved against a verified catalog/source.
+ * until they are resolved against a verified catalog/source. Malformed active
+ * or candidate identifiers also fail closed rather than becoming "no allergy".
  */
 export function findAllergyConflicts(
   candidates: ResolvedFoodAllergens[],
   activeAllergenIds: string[],
 ): string[] {
-  const blocked = new Set(activeAllergenIds.map((id) => id.trim()).filter(Boolean));
-  if (blocked.size === 0) return [];
+  if (activeAllergenIds.length === 0) return [];
 
+  const normalizedActiveIds = activeAllergenIds.map((id) => id.trim());
+  if (normalizedActiveIds.some((id) => id.length === 0)) {
+    return ["Active allergen identifier unresolved"];
+  }
+
+  const blocked = new Set(normalizedActiveIds);
   const conflicts: string[] = [];
   for (const candidate of candidates) {
     if (candidate.allergenDataStatus === "unknown") {
       conflicts.push(`${candidate.foodName} (allergen data unresolved)`);
+      continue;
+    }
+
+    if (candidate.allergenIds.some((allergenId) => allergenId.trim().length === 0)) {
+      conflicts.push(`${candidate.foodName} (allergen identifier unresolved)`);
       continue;
     }
 
