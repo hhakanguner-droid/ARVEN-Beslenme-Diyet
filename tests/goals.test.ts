@@ -71,3 +71,15 @@ test("versioned goal calculator deterministically derives every target", () => {
   });
   assert.deepEqual(targets, { energyKcal: 2076, proteinG: 120, carbsG: 243.3, fatG: 69.2, fiberG: 29.1, waterMl: 2400 });
 });
+
+test("versioned goal calculator rejects input combinations that derive invalid targets", () => {
+  assert.throws(() => deriveCalculatedGoal({
+    method: "mifflin-st-jeor",
+    version: "v1",
+    inputs: {
+      weightKg: 20, heightCm: 100, ageYears: 120, sexAtBirth: "female", activityFactor: 1,
+      energyAdjustmentKcal: -1500, proteinGPerKg: 0.5, fatEnergyPct: 0.15, waterMlPerKg: 15,
+    },
+    referenceIds: ["mifflin-1990"],
+  }), /derived energyKcal is outside supported range/);
+});
