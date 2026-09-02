@@ -37,7 +37,7 @@ const MEDICATION_CHANGE_ACTIONS = [
 const DIRECT_MEDICAL_PATTERNS = [
   /\btani\s+koy/,
   /\btedavi\w*\s+(basla|uygula|degistir|durdur)/,
-  /\breçete\b/,
+  /\brecete\b/,
 ];
 
 export function assertNoMedicalOverreach(text: string): void {
