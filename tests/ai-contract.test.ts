@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseMealSuggestion } from "../lib/ai/contracts";
+import { parseMealSuggestion, parseWeeklyInsight } from "../lib/ai/contracts";
 
 const validSuggestion = {
   schemaVersion: "MealSuggestionV1",
@@ -42,4 +42,29 @@ test("AI meal contract rejects suggested grams", () => {
 test("AI meal contract rejects AI-authored calorie totals", () => {
   const invalid = { ...validSuggestion, energyKcal: 430 };
   assert.throws(() => parseMealSuggestion(invalid));
+});
+
+test("weekly insight contract accepts narrative interpretation", () => {
+  const parsed = parseWeeklyInsight({
+    schemaVersion: "WeeklyInsightV1",
+    summary: "Bu hafta öğün kayıtlarında daha düzenli bir ritim oluştu.",
+    positives: ["Planlanan öğünleri daha düzenli kaydettin."],
+    areasForImprovement: ["Su kaydı bazı günlerde eksik kaldı."],
+    suggestions: ["Su kaydını gün içine dağıtmayı deneyebilirsin."],
+    uncertainty: ["Eksik kayıt bulunan günler yorumun güvenini azaltıyor."],
+  });
+  assert.equal(parsed.positives.length, 1);
+});
+
+test("weekly AI insight cannot author adherence or calorie scores", () => {
+  assert.throws(() => parseWeeklyInsight({
+    schemaVersion: "WeeklyInsightV1",
+    summary: "Özet",
+    positives: [],
+    areasForImprovement: [],
+    suggestions: [],
+    uncertainty: [],
+    adherenceScore: 82,
+    averageCalories: 1940,
+  }));
 });
