@@ -20,7 +20,7 @@ const TURKISH_NUMBER_SUFFIXES = new Set([
   "ye", "lar", "ler", "lari", "leri", "larin", "lerin", "lara", "lere", "lik", "luk", "inci", "uncu",
 ]);
 const NUTRITION_UNIT_PATTERN = "(?:kcal|kilokalori[a-z]*|kilocalorie[a-z]*|calorie[a-z]*|calories|kj|kilojul[a-z]*|kilojoule[a-z]*|kalori[a-z]*|gram[a-z]*|miligram[a-z]*|mikrogram[a-z]*|mililitre[a-z]*|millilitre[a-z]*|litre[a-z]*|milligram[a-z]*|microgram[a-z]*|milliliter[a-z]*|liter[a-z]*|gr|g|mg|mcg|ml|kg|l)";
-const NUTRITION_METRIC_PATTERN = "(?:kalori|kcal|enerji|protein|karbonhidrat|karb|yag|lif|fiber|sodyum|tuz|seker|kilo|kilogram|agirlik|hedef(?:\s+kilo)?|hedef\s+agirlik|uyum|plan\s+uyumu|trend|calorie|calories|energy|carb|carbs|fat|sodium|sugar|weight|goal(?:\s+weight)?|target(?:\s+weight)?|adherence|trend)";
+const NUTRITION_METRIC_PATTERN = "(?:kalori|kcal|enerji|protein|karbonhidrat|karb|yag|lif|fiber|sodyum|tuz|seker|kilo|kilogram|agirlik|hedef[a-z]*|uyum[a-z]*|plan|trend|calorie|calories|energy|carb|carbs|fat|sodium|sugar|weight|goal|target|adherence|trend)";
 const MEASURE_LABELS: Record<z.infer<typeof PortionMeasure>, string> = {
   piece: "adet", slice: "dilim", teaspoon: "çay kaşığı", tablespoon: "yemek kaşığı", "tea-glass": "çay bardağı",
   "water-glass": "su bardağı", cup: "fincan", bowl: "kase", handful: "avuç", palm: "avuç içi", serving: "porsiyon",
