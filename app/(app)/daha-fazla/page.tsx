@@ -6,7 +6,7 @@ const menu = [
   ["Sağlık profilim", "/saglik/profil"],
   ["Beslenme stratejim", "/stratejim"],
   ["Tahlillerim", "/saglik/tahliller"],
-  ["İlaç & takviyeler", "/saglik/ilac-takviye"],
+  ["Takviyeler", "/saglik/takviyeler"],
   ["ARVEN hafızası", "/arven/hafiza"],
   ["Başarılarım", "/basarilarim"],
   ["Bildirimler", "/ayarlar/bildirimler"],
