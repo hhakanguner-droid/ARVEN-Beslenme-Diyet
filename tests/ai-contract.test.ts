@@ -39,6 +39,9 @@ test("all user-facing meal text rejects numeric nutrition claims including full 
     { ...validSuggestion, rationale: "Bu öğün bir gram protein içerir." },
     { ...validSuggestion, rationale: "Bu öğün iki miligram sodyum içerir." },
     { ...validSuggestion, rationale: "Bu öğün 200 mikrogram vitamin içerir." },
+    { ...validSuggestion, rationale: "Bu öğün iki kilokalori içerir." },
+    { ...validSuggestion, rationale: "Bu içecek 2 litre su içerir." },
+    { ...validSuggestion, rationale: "Bu içecek iki mililitre süt içerir." },
     { ...validSuggestion, title: "450 kcal protein öğünü" },
     { ...validSuggestion, title: "Dört yüz kalorilik öğün" },
   ];
@@ -56,8 +59,15 @@ test("all user-facing meal text rejects numeric nutrition claims including full 
   }), /Natural portion labels/);
 });
 
-test("food queries cannot smuggle model-authored gram or calorie quantities", () => {
-  for (const foodQuery of ["120 g tavuk", "400 kcal yoğurt", "iki miligram sodyum"] ) {
+test("food queries cannot smuggle model-authored quantities", () => {
+  for (const foodQuery of [
+    "120 g tavuk",
+    "400 kcal yoğurt",
+    "iki miligram sodyum",
+    "iki kilokalori yoğurt",
+    "2 litre su",
+    "iki mililitre süt",
+  ]) {
     assert.throws(() => parseMealSuggestion({
       ...validSuggestion,
       ingredients: [{ ...validSuggestion.ingredients[0], foodQuery }],
@@ -100,6 +110,8 @@ test("weekly AI insight cannot hide invented numeric truth inside narrative stri
     "Ortalaman bir gram protein arttı.",
     "Bu hafta hedefi bir kez aştın.",
     "Planı bir defa kaçırdın.",
+    "Bu hafta hedefi birer kez aştın.",
+    "Planı bir kereden fazla kaçırdın.",
   ];
 
   for (const summary of invalidSummaries) {
