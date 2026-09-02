@@ -71,21 +71,22 @@ def main() -> None:
       INSERT INTO goals (
         id,user_id,effective_from,energy_kcal,protein_g,carbs_g,fat_g,source,
         calculation_method,calculation_version,calculation_inputs_json,reference_ids_json,created_at
-      ) VALUES ('goal-empty-inputs','user-2','2026-07-01',2000,120,220,70,'arven-calculated','mifflin','v1','{ }','["ref-1"]',?)
+      ) VALUES ('goal-empty-inputs','user-2','2026-07-01',2000,120,220,70,'arven-calculated','mifflin-st-jeor','v1','{ }','["ref-1"]',?)
     """, (NOW,))
     expect_rejected(conn, "dangling scientific reference id", """
       INSERT INTO goals (
         id,user_id,effective_from,energy_kcal,protein_g,carbs_g,fat_g,source,
         calculation_method,calculation_version,calculation_inputs_json,reference_ids_json,created_at
-      ) VALUES ('goal-missing-ref','user-2','2026-07-01',2000,120,220,70,'arven-calculated','mifflin','v1','{"weightKg":80}','["missing-ref"]',?)
+      ) VALUES ('goal-missing-ref','user-2','2026-07-01',2000,120,220,70,'arven-calculated','mifflin-st-jeor','v1','{"weightKg":80}','["missing-ref"]',?)
     """, (NOW,))
 
+    goal_inputs = '{"weightKg":80,"heightCm":180,"ageYears":40,"sexAtBirth":"male","activityFactor":1.2,"energyAdjustmentKcal":0,"proteinGPerKg":1.5,"fatEnergyPct":0.3,"waterMlPerKg":30}'
     conn.execute("""
       INSERT INTO goals (
-        id,user_id,effective_from,energy_kcal,protein_g,carbs_g,fat_g,source,
+        id,user_id,effective_from,energy_kcal,protein_g,carbs_g,fat_g,fiber_g,water_ml,source,
         calculation_method,calculation_version,calculation_inputs_json,reference_ids_json,created_at
-      ) VALUES ('goal-current','user-1','2026-09-02',2000,120,220,70,'arven-calculated','mifflin','v1','{"weightKg":80}','["ref-1"]',?)
-    """, (NOW,))
+      ) VALUES ('goal-current','user-1','2026-09-02',2076,120,243.3,69.2,29.1,2400,'arven-calculated','mifflin-st-jeor','v1',?,'["ref-1"]',?)
+    """, (goal_inputs, NOW))
     expect_rejected(conn, "mutating calculated target without recalculation", "UPDATE goals SET energy_kcal=9999 WHERE id='goal-current'")
     expect_rejected(conn, "mutating calculated provenance without recalculation", """
       UPDATE goals SET calculation_inputs_json='{"weightKg":81}' WHERE id='goal-current'
@@ -215,6 +216,14 @@ def main() -> None:
     expect_rejected(conn, "changing payload after confirmation", """
       UPDATE ai_actions SET payload_json=?, status='applied', applied_at=? WHERE id='ai-good'
     """, (changed_meal_payload, NOW))
+    conn.execute("""
+      INSERT INTO meal_entries(id,user_id,local_date,meal_type,occurred_at,created_at,updated_at,ai_action_id)
+      VALUES('meal-ai-good','user-1','2026-09-02','lunch',?,?,?,'ai-good')
+    """, (NOW, NOW, NOW))
+    conn.execute("""
+      INSERT INTO meal_entry_items(id,meal_entry_id,food_id,grams,energy_kcal,protein_g,carbs_g,fat_g,calculation_version,created_at,ai_action_item_index)
+      VALUES('item-ai-good','meal-ai-good','food-a',50,50,5,5,1,'v1',?,0)
+    """, (NOW,))
     conn.execute("UPDATE ai_actions SET status='applied', applied_at=? WHERE id='ai-good'", (NOW,))
     expect_rejected(conn, "applied action is terminal", "UPDATE ai_actions SET status='proposed' WHERE id='ai-good'")
 
