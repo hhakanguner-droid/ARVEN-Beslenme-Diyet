@@ -100,8 +100,9 @@ def main():
 
     conn.execute("INSERT INTO allergen_catalog(id,canonical_name,created_at) VALUES('milk','Milk',?)", (NOW,))
     conn.execute("INSERT INTO user_allergies(user_id,allergen_id,active,created_at) VALUES('u1','milk',1,?)", (NOW,))
-    add_food(conn, "milk-food")
+    add_food(conn, "milk-food", allergen_status="unknown")
     conn.execute("INSERT INTO food_allergens(food_id,allergen_id,source_provider,verified_at) VALUES('milk-food','milk','manual-verified',?)", (NOW,))
+    conn.execute("UPDATE foods SET allergen_data_status='verified' WHERE id='milk-food'")
     milk_payload = '{"localDate":"2026-09-02","occurredAt":"' + ACTION_TIME + '","mealType":"lunch","items":[{"foodId":"milk-food","grams":50,"calculationVersion":"v1"}]}'
     reject(conn, "allergen-conflicting proposal", """
       INSERT INTO ai_actions(id,user_id,action_type,schema_version,request_hash,payload_json,status,idempotency_key,created_at)
