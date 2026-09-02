@@ -1,3 +1,5 @@
+import { isCanonicalUtcInstant } from "../time/canonical";
+
 export const ARVEN_EXPORT_FORMAT = "ArvenNutritionExportV1" as const;
 
 export const EXPORT_SECTIONS = [
@@ -39,8 +41,8 @@ export function validateExportManifest(manifest: unknown): asserts manifest is E
 
   const candidate = manifest as Record<string, unknown>;
   if (candidate.format !== ARVEN_EXPORT_FORMAT) throw new Error("Unsupported ARVEN export format");
-  if (typeof candidate.exportedAt !== "string" || !Number.isFinite(Date.parse(candidate.exportedAt))) {
-    throw new Error("exportedAt must be a valid timestamp");
+  if (typeof candidate.exportedAt !== "string" || !isCanonicalUtcInstant(candidate.exportedAt)) {
+    throw new Error("exportedAt must be a canonical UTC timestamp");
   }
   if (typeof candidate.locale !== "string" || !candidate.locale.trim()) throw new Error("locale is required");
   if (typeof candidate.timezone !== "string" || !candidate.timezone.trim()) throw new Error("timezone is required");
