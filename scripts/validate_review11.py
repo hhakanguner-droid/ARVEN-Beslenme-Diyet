@@ -29,16 +29,13 @@ def main():
     for uid in ("u1", "u2"):
         conn.execute("INSERT INTO users(id,external_subject,created_at,updated_at) VALUES(?,?,?,?)", (uid, uid, NOW, NOW))
 
-    # Authenticated safety ownership cannot move between accounts.
     conn.execute("INSERT INTO allergen_catalog(id,canonical_name,created_at) VALUES('milk','Milk',?)", (NOW,))
     conn.execute("INSERT INTO user_allergies(user_id,allergen_id,active,created_at) VALUES('u1','milk',1,?)", (NOW,))
     reject(conn, "active allergy owner transfer", "UPDATE user_allergies SET user_id='u2' WHERE user_id='u1' AND allergen_id='milk'")
 
-    # Canonical machine IDs and the complete whitespace family are rejected.
     reject(conn, "unicode-space allergen id", "INSERT INTO allergen_catalog(id,canonical_name,created_at) VALUES(?, 'Bad', ?)", ("\u2003", NOW))
     reject(conn, "nbsp-only dietary name", "INSERT INTO dietary_rule_catalog(id,canonical_name,created_at) VALUES('veg', ?, ?)", ("\u00a0", NOW))
 
-    # Direct log writes require exact canonical UTC syntax rather than CAST-friendly text.
     reject(conn, "malformed meal instant separators", """
       INSERT INTO meal_entries(id,user_id,local_date,meal_type,occurred_at,created_at,updated_at)
       VALUES('m-bad','u1','2026-09-02','lunch','2026-09-02X12x00x00Z',?,?)
@@ -48,7 +45,6 @@ def main():
       VALUES('w-bad','u1','2026-09-02Taa:bb:ccZ','2026-09-02',250,?)
     """, (NOW,))
 
-    # Verification timestamps are canonical for nutrition and hard-safety evidence.
     reject(conn, "food verification uses space separator", """
       INSERT INTO foods(id,name,normalized_name,energy_kcal_100g,protein_g_100g,carbs_g_100g,fat_g_100g,source_provider,verified_at,created_at,updated_at)
       VALUES('bad-food','bad','bad',100,10,20,5,'manual-verified','2026-09-02 12:00:00Z',?,?)
@@ -66,13 +62,9 @@ def main():
     conn.execute("UPDATE foods SET allergen_data_status='verified' WHERE id='food'")
     reject(conn, "delete verified allergen evidence", "DELETE FROM food_allergens WHERE food_id='food' AND allergen_id='milk'")
 
-    # Verified nutrition cannot change while retaining stale evidence.
     reject(conn, "nutrition update without provenance refresh", "UPDATE foods SET energy_kcal_100g=101 WHERE id='food'")
-
-    # Extended source nutrients are established before the food produces history.
     conn.execute("INSERT INTO food_nutrients(food_id,nutrient_key,amount_per_100g,unit,completeness) VALUES('food','sodium',100,'mg','complete')")
 
-    # Portion label and resolved grams are one deterministic representation.
     conn.execute("""
       INSERT INTO food_portion_options(id,food_id,measure,label,grams_per_unit,source_provider,verified_at,created_at,updated_at)
       VALUES('slice','food','slice','1 dilim',30,'manual-verified',?,?,?)
@@ -87,8 +79,6 @@ def main():
       VALUES('item','m1','food','slice',1,'1 dilim',30,30,3,6,1.5,0.6,'v1',?)
     """, (NOW,))
 
-    # The current invariant materializes the complete extended snapshot during
-    # item insertion, then freezes it as historical numeric truth.
     stored = conn.execute("SELECT amount FROM meal_entry_item_nutrients WHERE meal_entry_item_id='item' AND nutrient_key='sodium'").fetchone()
     assert stored is not None and abs(stored[0] - 30) < 1e-9
     reject(conn, "invented extended nutrient snapshot correction", """
@@ -96,7 +86,6 @@ def main():
       WHERE meal_entry_item_id='item' AND nutrient_key='sodium'
     """)
 
-    # Supported calculator inputs must reproduce every stored target exactly.
     conn.execute("INSERT INTO scientific_references(id,title,citation,created_at) VALUES('mifflin-1990','Mifflin','Citation',?)", (NOW,))
     inputs = '{"weightKg":80,"heightCm":180,"ageYears":40,"sexAtBirth":"male","activityFactor":1.2,"energyAdjustmentKcal":0,"proteinGPerKg":1.5,"fatEnergyPct":0.3,"waterMlPerKg":30}'
     reject(conn, "arbitrary calculated target", """
@@ -108,7 +97,6 @@ def main():
       VALUES('goal','u1','2026-09-02',2076,120,243.3,69.2,29.1,2400,'arven-calculated','mifflin-st-jeor','v1',?,'["mifflin-1990"]',?)
     """, (inputs, NOW))
 
-    # AI creation time is canonical and action identities cannot be REPLACEd/reset.
     payload = '{"localDate":"2026-09-02","occurredAt":"2026-09-02T18:00:00Z","milliliters":250}'
     reject(conn, "garbage AI created_at", """
       INSERT INTO ai_actions(id,user_id,action_type,schema_version,request_hash,payload_json,status,idempotency_key,created_at)
@@ -119,6 +107,7 @@ def main():
       VALUES('a1','u1','water-log','WaterLogActionV1','h',?,'proposed','idem-a1',?)
     """, (payload, NOW))
     conn.execute("UPDATE ai_actions SET status='confirmed',confirmed_at=? WHERE id='a1'", (NOW,))
+    conn.execute("INSERT INTO water_logs(id,user_id,occurred_at,local_date,milliliters,created_at,ai_action_id) VALUES('w-a1','u1','2026-09-02T18:00:00Z','2026-09-02',250,?,'a1')", (NOW,))
     conn.execute("UPDATE ai_actions SET status='applied',applied_at=? WHERE id='a1'", (LATER,))
     reject(conn, "replace applied action by id", """
       INSERT OR REPLACE INTO ai_actions(id,user_id,action_type,schema_version,request_hash,payload_json,status,idempotency_key,created_at)
