@@ -20,8 +20,20 @@ const TURKISH_NUMBER_SUFFIXES = new Set([
 ]);
 const NUTRITION_UNIT_PATTERN = "(?:kcal|kilokalori[a-z]*|kilocalorie[a-z]*|calorie[a-z]*|calories|kj|kilojul[a-z]*|kilojoule[a-z]*|kalori[a-z]*|gram[a-z]*|miligram[a-z]*|mikrogram[a-z]*|mililitre[a-z]*|millilitre[a-z]*|litre[a-z]*|milligram[a-z]*|microgram[a-z]*|milliliter[a-z]*|liter[a-z]*|gr|g|mg|mcg|ml|kg|l)";
 
+function asciiDigit(codePoint: number): string | null {
+  const ranges = [0x30, 0x660, 0x6f0, 0xff10];
+  for (const zero of ranges) {
+    if (codePoint >= zero && codePoint <= zero + 9) return String(codePoint - zero);
+  }
+  return null;
+}
+
+function normalizeUnicodeDigits(value: string): string {
+  return Array.from(value, (char) => asciiDigit(char.codePointAt(0) ?? -1) ?? char).join("");
+}
+
 function normalizeNumberText(value: string): string {
-  return value.toLocaleLowerCase("tr-TR").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+  return normalizeUnicodeDigits(value).toLocaleLowerCase("tr-TR").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
     .replace(/ı/g, "i").replace(/ş/g, "s").replace(/ğ/g, "g").replace(/ç/g, "c")
     .replace(/ö/g, "o").replace(/ü/g, "u").replace(/[^a-z0-9\s.,+\-]/g, " ").replace(/\s+/g, " ");
 }
