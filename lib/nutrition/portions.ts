@@ -19,9 +19,14 @@ function assertResolvedGramPrecision(value: number, kind: string): number {
   return grams;
 }
 
-function formatQuantity(quantity: number): string {
+export function formatPortionQuantity(quantity: number): string {
   if (Number.isInteger(quantity)) return String(quantity);
   return String(Math.round(quantity * 100) / 100).replace(".", ",");
+}
+
+export function canonicalHouseholdPortionLabel(quantity: number, optionLabel: string): string {
+  const normalizedOption = optionLabel.trim().replace(/^1(?:[.,]0+)?\s+/u, "");
+  return `${formatPortionQuantity(quantity)} ${normalizedOption}`.trim();
 }
 
 export function resolvePortionSelection(food: Food, selection: PortionSelection): Portion {
@@ -30,7 +35,7 @@ export function resolvePortionSelection(food: Food, selection: PortionSelection)
     return {
       food,
       grams,
-      display: { label: `${formatQuantity(grams)} g` },
+      display: { label: `${formatPortionQuantity(grams)} g` },
     };
   }
 
@@ -47,7 +52,7 @@ export function resolvePortionSelection(food: Food, selection: PortionSelection)
     display: {
       portionOptionId: option.id,
       quantity,
-      label: `${formatQuantity(quantity)} ${option.label}`,
+      label: canonicalHouseholdPortionLabel(quantity, option.label),
     },
   };
 }
