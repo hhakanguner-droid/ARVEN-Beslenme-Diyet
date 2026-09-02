@@ -26,6 +26,9 @@ export function resolvePortionSelection(food: Food, selection: PortionSelection)
 
   const gramsPerUnit = finitePositive(option.gramsPerUnit, "gramsPerUnit");
   const grams = Math.round((gramsPerUnit * quantity + Number.EPSILON) * 10) / 10;
+  if (grams <= 0) {
+    throw new Error("Resolved household portion is below ARVEN's 0.1 g precision; choose a larger amount or custom grams");
+  }
 
   return {
     food,
