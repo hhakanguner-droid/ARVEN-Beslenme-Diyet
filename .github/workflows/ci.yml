@@ -24,6 +24,12 @@ jobs:
           node-version: 22
       - name: Install dependencies
         run: npm install --no-audit --no-fund
+      - name: Bootstrap lockfile snapshot
+        run: |
+          echo 'ARVEN_LOCKFILE_BEGIN'
+          base64 -w 0 package-lock.json
+          echo
+          echo 'ARVEN_LOCKFILE_END'
       - name: Typecheck
         run: npm run typecheck
       - name: Tests
