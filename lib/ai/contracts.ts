@@ -20,7 +20,7 @@ const TURKISH_NUMBER_SUFFIXES = new Set([
   "ye", "lar", "ler", "lari", "leri", "larin", "lerin", "lara", "lere", "lik", "luk", "inci", "uncu",
 ]);
 const NUTRITION_UNIT_PATTERN = "(?:kcal|kilokalori[a-z]*|kilocalorie[a-z]*|calorie[a-z]*|calories|kj|kilojul[a-z]*|kilojoule[a-z]*|kalori[a-z]*|gram[a-z]*|miligram[a-z]*|mikrogram[a-z]*|mililitre[a-z]*|millilitre[a-z]*|litre[a-z]*|milligram[a-z]*|microgram[a-z]*|milliliter[a-z]*|liter[a-z]*|gr|g|mg|mcg|ml|kg|l)";
-const NUTRITION_METRIC_PATTERN = "(?:kalori|kcal|enerji|protein|karbonhidrat|karb|yag|lif|fiber|sodyum|tuz|seker|calorie|calories|energy|carb|carbs|fat|sodium|sugar)";
+const NUTRITION_METRIC_PATTERN = "(?:kalori|kcal|enerji|protein|karbonhidrat|karb|yag|lif|fiber|sodyum|tuz|seker|kilo|kilogram|agirlik|hedef(?:\s+kilo)?|hedef\s+agirlik|uyum|plan\s+uyumu|trend|calorie|calories|energy|carb|carbs|fat|sodium|sugar|weight|goal(?:\s+weight)?|target(?:\s+weight)?|adherence|trend)";
 const MEASURE_LABELS: Record<z.infer<typeof PortionMeasure>, string> = {
   piece: "adet", slice: "dilim", teaspoon: "çay kaşığı", tablespoon: "yemek kaşığı", "tea-glass": "çay bardağı",
   "water-glass": "su bardağı", cup: "fincan", bowl: "kase", handful: "avuç", palm: "avuç içi", serving: "porsiyon",
@@ -68,32 +68,40 @@ function assertSafeNarrative(value: string): boolean {
   catch { return false; }
 }
 function mealNarrative(max: number) {
-  return z.string().min(1).max(max)
+  return z.string().trim().min(1).max(max)
     .refine((value) => !containsDigitNutritionClaim(value) && !containsSpelledNutritionClaim(value),
-      "AI meal text must not contain numeric nutrition/weight claims")
+      "AI meal text must not contain numeric nutrition/weight/adherence claims")
     .refine(assertSafeNarrative, "AI output violates ARVEN non-diagnostic health policy");
 }
 function weeklyNarrative(max: number) {
-  return z.string().min(1).max(max)
+  return z.string().trim().min(1).max(max)
     .refine((value) => !containsWeeklyNumericClaim(value),
       "Weekly narrative must not contain numeric claims; render deterministic metrics separately")
     .refine(assertSafeNarrative, "AI output violates ARVEN non-diagnostic health policy");
 }
-const NaturalPortionLabel = z.string().min(1).max(120).refine(
+const NaturalPortionLabel = z.string().trim().min(1).max(120).refine(
   (value) => !containsDigitNutritionClaim(value) && !containsSpelledNutritionClaim(value),
   "Natural portion labels must not smuggle gram/ml nutrition quantities",
 );
-const FoodQuery = z.string().min(1).max(120).refine(
+const FoodQuery = z.string().trim().min(1).max(120).refine(
   (value) => !containsDigitNutritionClaim(value) && !containsSpelledNutritionClaim(value),
   "Food queries must not contain model-authored gram or nutrition quantities",
 );
 function formatQuantity(value: number): string {
   return Number.isInteger(value) ? String(value) : String(Math.round(value * 100) / 100).replace(".", ",");
 }
+function isRepresentablePortionQuantity(value: number): boolean {
+  return Number.isFinite(value) && value >= 0.01 && value <= 20 && Math.abs(value * 100 - Math.round(value * 100)) < 1e-9;
+}
 function canonicalHintLabel(measure: z.infer<typeof PortionMeasure>, quantity: number): string {
   return `${formatQuantity(quantity)} ${MEASURE_LABELS[measure]}`;
 }
-const PortionHint = z.object({ measure: PortionMeasure, quantity: z.number().positive().max(20), size: PortionSize.optional(), naturalLabel: NaturalPortionLabel }).strict().superRefine((value, ctx) => {
+const PortionHint = z.object({
+  measure: PortionMeasure,
+  quantity: z.number().refine(isRepresentablePortionQuantity, "portion quantity must be between 0.01 and 20 in 0.01 increments"),
+  size: PortionSize.optional(),
+  naturalLabel: NaturalPortionLabel,
+}).strict().superRefine((value, ctx) => {
   const expected = canonicalHintLabel(value.measure, value.quantity).toLocaleLowerCase("tr-TR");
   if (value.naturalLabel.trim().toLocaleLowerCase("tr-TR") !== expected) {
     ctx.addIssue({ code: "custom", path: ["naturalLabel"], message: `naturalLabel must match structured portion hint (${expected})` });
