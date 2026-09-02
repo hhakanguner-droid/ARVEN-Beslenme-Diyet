@@ -31,7 +31,7 @@ test("AI medication or treatment management is blocked without a medication regi
     "Metformini artık alma.", "Metformin dozunu atla.", "Euthyrox kullanımını sürdür.",
     "Aspirin kullanmalısın.", "Metformini almalısın.", "Aspirin'i bırak.", "Metformin'e başla.",
     "Warfarini bırak.", "İnsülini azalt.", "Antibiyotiği kes.",
-    "Warfarini bırak ve sebze ye.", "Warfarini bırak; etkileşim riski var.",
+    "Warfarini bırak ve sebze ye.", "Warfarini bırak; etkileşim riski var.", "Warfarini sebze ile kullan.",
     "Bunu ilacın yerine kullanmamalısın.", "Bu ilacı kullanman gerekiyor.",
   ];
   for (const message of unsafe) assert.throws(() => assertNoMedicalOverreach(message), /non-diagnostic/, message);
@@ -48,10 +48,12 @@ test("direct diagnosis assertions are rejected without blocking ordinary coachin
   const unsafe = [
     "Sende diyabet var.", "Diyabetin var.", "Bu belirtiler çölyak olduğunu gösteriyor.", "Bu değerlere göre teşhisin kesin.",
     "Diyabet hastasısın.", "Sen çölyaksın.", "Bu diyabettir.", "Diyabetsin.", "Çölyaksın.",
-    "Kanserlisin.", "Depresyondasın.", "Astımlısın.",
+    "Kanserlisin.", "Depresyondasın.", "Astımlısın.", "Parkinsonlusun.", "Endometriozisin.",
   ];
   for (const message of unsafe) assert.throws(() => assertNoMedicalOverreach(message), /non-diagnostic/, message);
-  for (const message of ["Sen kararlısın.", "Bu dengelidir.", "Bu doğrudur."]) assert.doesNotThrow(() => assertNoMedicalOverreach(message), message);
+  for (const message of ["Sen kararlısın.", "Bu dengelidir.", "Bu doğrudur.", "Yeni tatlarla tanışmalısın."]) {
+    assert.doesNotThrow(() => assertNoMedicalOverreach(message), message);
+  }
 });
 
 test("explicit dietary exclusions are hard blocks and malformed exclusions fail closed", () => {
