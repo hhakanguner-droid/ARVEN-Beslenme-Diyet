@@ -84,6 +84,7 @@ def main():
     reject(conn, "noncanonical confirmation instant", "UPDATE ai_actions SET status='confirmed',confirmed_at='2026-02-31T12:00:00Z' WHERE id='a1'")
     conn.execute("UPDATE ai_actions SET status='confirmed',confirmed_at=? WHERE id='a1'", (NOW,))
     reject(conn, "noncanonical application instant", "UPDATE ai_actions SET status='applied',applied_at='2026-09-02 18:01:00Z' WHERE id='a1'")
+    conn.execute("INSERT INTO water_logs(id,user_id,occurred_at,local_date,milliliters,created_at,ai_action_id) VALUES('w-a1','u1','2026-09-02T18:00:00Z','2026-09-02',250,?,'a1')", (NOW,))
     conn.execute("UPDATE ai_actions SET status='applied',applied_at=? WHERE id='a1'", (LATER,))
 
     print('REVIEW12_CONTRACTS_OK')
