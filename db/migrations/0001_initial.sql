@@ -31,9 +31,9 @@ CREATE TABLE user_ui_preferences (
 );
 
 CREATE TABLE scientific_references (
-  id TEXT PRIMARY KEY,
-  title TEXT NOT NULL,
-  citation TEXT NOT NULL,
+  id TEXT PRIMARY KEY CHECK (length(trim(id)) > 0),
+  title TEXT NOT NULL CHECK (length(trim(title)) > 0),
+  citation TEXT NOT NULL CHECK (length(trim(citation)) > 0),
   evidence_url TEXT,
   published_year INTEGER,
   created_at TEXT NOT NULL
@@ -50,11 +50,12 @@ CREATE TABLE goals (
   fat_g REAL NOT NULL CHECK (fat_g >= 0),
   fiber_g REAL CHECK (fiber_g IS NULL OR fiber_g >= 0),
   water_ml REAL CHECK (water_ml IS NULL OR water_ml >= 0),
-  source TEXT NOT NULL,
+  source TEXT NOT NULL CHECK (source IN ('manual','arven-calculated')),
   calculation_method TEXT,
   calculation_version TEXT,
   calculation_inputs_json TEXT,
-  reference_ids_json TEXT NOT NULL DEFAULT '[]',
+  reference_ids_json TEXT NOT NULL DEFAULT '[]'
+    CHECK (json_valid(reference_ids_json) = 1 AND json_type(reference_ids_json) = 'array'),
   created_at TEXT NOT NULL,
   CHECK (
     source <> 'arven-calculated' OR (
@@ -63,8 +64,6 @@ CREATE TABLE goals (
       AND calculation_inputs_json IS NOT NULL
       AND json_valid(calculation_inputs_json) = 1
       AND json_type(calculation_inputs_json) = 'object'
-      AND json_valid(reference_ids_json) = 1
-      AND json_type(reference_ids_json) = 'array'
       AND json_array_length(reference_ids_json) > 0
     )
   )
@@ -90,7 +89,8 @@ BEGIN
 END;
 
 CREATE TRIGGER goals_validate_arven_calculated_update
-BEFORE UPDATE OF source, calculation_method, calculation_version, calculation_inputs_json, reference_ids_json ON goals
+BEFORE UPDATE OF source, calculation_method, calculation_version, calculation_inputs_json, reference_ids_json,
+  energy_kcal, protein_g, carbs_g, fat_g, fiber_g, water_ml ON goals
 WHEN NEW.source = 'arven-calculated'
 BEGIN
   SELECT CASE WHEN
@@ -101,8 +101,6 @@ BEGIN
     OR json_type(NEW.calculation_inputs_json) <> 'object'
     OR (SELECT COUNT(*) FROM json_each(NEW.calculation_inputs_json)) = 0
     OR (SELECT COUNT(*) FROM json_each(NEW.calculation_inputs_json) WHERE length(trim(key)) = 0) > 0
-    OR json_valid(NEW.reference_ids_json) <> 1
-    OR json_type(NEW.reference_ids_json) <> 'array'
     OR json_array_length(NEW.reference_ids_json) = 0
     OR (SELECT COUNT(*) FROM json_each(NEW.reference_ids_json)
         WHERE type = 'text' AND length(trim(CAST(value AS TEXT))) > 0)
@@ -113,6 +111,20 @@ BEGIN
       WHERE sr.id IS NULL
     )
   THEN RAISE(ABORT, 'ARVEN-calculated goals require resolvable scientific provenance') END;
+END;
+
+CREATE TRIGGER goals_prevent_calculated_target_mutation
+BEFORE UPDATE OF energy_kcal, protein_g, carbs_g, fat_g, fiber_g, water_ml ON goals
+WHEN OLD.source = 'arven-calculated' AND (
+  NEW.energy_kcal IS NOT OLD.energy_kcal
+  OR NEW.protein_g IS NOT OLD.protein_g
+  OR NEW.carbs_g IS NOT OLD.carbs_g
+  OR NEW.fat_g IS NOT OLD.fat_g
+  OR NEW.fiber_g IS NOT OLD.fiber_g
+  OR NEW.water_ml IS NOT OLD.water_ml
+)
+BEGIN
+  SELECT RAISE(ABORT, 'calculated goal targets are immutable; create a recalculated goal');
 END;
 
 CREATE TRIGGER scientific_references_prevent_delete
@@ -162,12 +174,50 @@ BEGIN
   SELECT RAISE(ABORT, 'goal interval overlap');
 END;
 
+-- Meal allocations are stored as one atomic validated set so an incomplete
+-- row-by-row aggregate can never be committed as a valid plan.
 CREATE TABLE goal_meal_allocations (
-  goal_id TEXT NOT NULL REFERENCES goals(id) ON DELETE CASCADE,
-  meal_type TEXT NOT NULL CHECK (meal_type IN ('breakfast','morning-snack','lunch','afternoon-snack','dinner','snack','custom')),
-  energy_share_bps INTEGER NOT NULL CHECK (energy_share_bps BETWEEN 0 AND 10000),
-  PRIMARY KEY (goal_id, meal_type)
+  goal_id TEXT PRIMARY KEY REFERENCES goals(id) ON DELETE CASCADE,
+  allocations_json TEXT NOT NULL
+    CHECK (json_valid(allocations_json) = 1 AND json_type(allocations_json) = 'array' AND json_array_length(allocations_json) > 0),
+  updated_at TEXT NOT NULL
 );
+
+CREATE TRIGGER goal_meal_allocations_validate_insert
+BEFORE INSERT ON goal_meal_allocations
+BEGIN
+  SELECT CASE WHEN
+    EXISTS (
+      SELECT 1 FROM json_each(NEW.allocations_json) item
+      WHERE json_type(item.value) <> 'object'
+         OR json_type(item.value, '$.mealType') <> 'text'
+         OR json_extract(item.value, '$.mealType') NOT IN ('breakfast','morning-snack','lunch','afternoon-snack','dinner','snack','custom')
+         OR json_type(item.value, '$.energyShareBps') <> 'integer'
+         OR CAST(json_extract(item.value, '$.energyShareBps') AS INTEGER) NOT BETWEEN 0 AND 10000
+    )
+    OR (SELECT COUNT(*) FROM json_each(NEW.allocations_json)) <>
+       (SELECT COUNT(DISTINCT json_extract(item.value, '$.mealType')) FROM json_each(NEW.allocations_json) item)
+    OR COALESCE((SELECT SUM(CAST(json_extract(item.value, '$.energyShareBps') AS INTEGER)) FROM json_each(NEW.allocations_json) item), 0) <> 10000
+  THEN RAISE(ABORT, 'meal allocations must be canonical, unique and total 10000 basis points') END;
+END;
+
+CREATE TRIGGER goal_meal_allocations_validate_update
+BEFORE UPDATE OF allocations_json ON goal_meal_allocations
+BEGIN
+  SELECT CASE WHEN
+    EXISTS (
+      SELECT 1 FROM json_each(NEW.allocations_json) item
+      WHERE json_type(item.value) <> 'object'
+         OR json_type(item.value, '$.mealType') <> 'text'
+         OR json_extract(item.value, '$.mealType') NOT IN ('breakfast','morning-snack','lunch','afternoon-snack','dinner','snack','custom')
+         OR json_type(item.value, '$.energyShareBps') <> 'integer'
+         OR CAST(json_extract(item.value, '$.energyShareBps') AS INTEGER) NOT BETWEEN 0 AND 10000
+    )
+    OR (SELECT COUNT(*) FROM json_each(NEW.allocations_json)) <>
+       (SELECT COUNT(DISTINCT json_extract(item.value, '$.mealType')) FROM json_each(NEW.allocations_json) item)
+    OR COALESCE((SELECT SUM(CAST(json_extract(item.value, '$.energyShareBps') AS INTEGER)) FROM json_each(NEW.allocations_json) item), 0) <> 10000
+  THEN RAISE(ABORT, 'meal allocations must be canonical, unique and total 10000 basis points') END;
+END;
 
 CREATE TABLE foods (
   id TEXT PRIMARY KEY,
@@ -188,7 +238,7 @@ CREATE TABLE foods (
   source_external_id TEXT,
   source_evidence_url TEXT,
   source_license_id TEXT,
-  verified_at TEXT NOT NULL,
+  verified_at TEXT NOT NULL CHECK (length(trim(verified_at)) > 0 AND julianday(verified_at) IS NOT NULL),
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   CHECK (source_provider = 'manual-verified' OR (source_external_id IS NOT NULL AND length(trim(source_external_id)) > 0))
@@ -197,6 +247,15 @@ CREATE INDEX foods_name_idx ON foods(normalized_name);
 CREATE INDEX foods_owner_idx ON foods(owner_user_id);
 CREATE INDEX foods_barcode_idx ON foods(barcode);
 CREATE INDEX foods_source_idx ON foods(source_provider, source_external_id);
+
+-- Ownership changes are not an edit operation. Publishing a private food must
+-- create a separately reviewed global record rather than nulling owner_user_id.
+CREATE TRIGGER foods_owner_immutable
+BEFORE UPDATE OF owner_user_id ON foods
+WHEN NEW.owner_user_id IS NOT OLD.owner_user_id
+BEGIN
+  SELECT RAISE(ABORT, 'food ownership is immutable');
+END;
 
 CREATE TABLE nutrient_catalog (
   nutrient_key TEXT PRIMARY KEY,
@@ -237,7 +296,7 @@ CREATE TABLE food_portion_options (
   source_external_id TEXT,
   source_evidence_url TEXT,
   source_license_id TEXT,
-  verified_at TEXT NOT NULL,
+  verified_at TEXT NOT NULL CHECK (length(trim(verified_at)) > 0 AND julianday(verified_at) IS NOT NULL),
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   CHECK (source_provider = 'manual-verified' OR (source_external_id IS NOT NULL AND length(trim(source_external_id)) > 0)),
@@ -266,7 +325,7 @@ CREATE TABLE food_allergens (
   allergen_id TEXT NOT NULL REFERENCES allergen_catalog(id),
   source_provider TEXT NOT NULL CHECK (source_provider IN ('open-food-facts','usda','turkomp','bls','swiss-fcd','manual-verified')),
   source_external_id TEXT,
-  verified_at TEXT NOT NULL,
+  verified_at TEXT NOT NULL CHECK (length(trim(verified_at)) > 0 AND julianday(verified_at) IS NOT NULL),
   CHECK (source_provider = 'manual-verified' OR (source_external_id IS NOT NULL AND length(trim(source_external_id)) > 0)),
   PRIMARY KEY (food_id, allergen_id)
 );
@@ -283,7 +342,7 @@ CREATE TABLE food_dietary_rule_conflicts (
   dietary_rule_id TEXT NOT NULL REFERENCES dietary_rule_catalog(id),
   source_provider TEXT NOT NULL CHECK (source_provider IN ('open-food-facts','usda','turkomp','bls','swiss-fcd','manual-verified')),
   source_external_id TEXT,
-  verified_at TEXT NOT NULL,
+  verified_at TEXT NOT NULL CHECK (length(trim(verified_at)) > 0 AND julianday(verified_at) IS NOT NULL),
   CHECK (source_provider = 'manual-verified' OR (source_external_id IS NOT NULL AND length(trim(source_external_id)) > 0)),
   PRIMARY KEY (food_id, dietary_rule_id)
 );
@@ -423,23 +482,6 @@ BEGIN
   SELECT RAISE(ABORT, 'meal user change would violate private food ownership');
 END;
 
-CREATE TRIGGER foods_private_owner_update
-BEFORE UPDATE OF owner_user_id ON foods
-WHEN NEW.owner_user_id IS NOT NULL AND (
-  EXISTS (
-    SELECT 1 FROM meal_entry_items i
-    JOIN meal_entries m ON m.id = i.meal_entry_id
-    WHERE i.food_id = NEW.id AND m.user_id <> NEW.owner_user_id
-  )
-  OR EXISTS (
-    SELECT 1 FROM food_preferences p
-    WHERE p.food_id = NEW.id AND p.user_id <> NEW.owner_user_id
-  )
-)
-BEGIN
-  SELECT RAISE(ABORT, 'food owner change would violate private ownership');
-END;
-
 CREATE TABLE meal_entry_item_nutrients (
   meal_entry_item_id TEXT NOT NULL REFERENCES meal_entry_items(id) ON DELETE CASCADE,
   nutrient_key TEXT NOT NULL,
@@ -464,12 +506,15 @@ CREATE INDEX water_logs_user_date_idx ON water_logs(user_id, local_date, occurre
 CREATE TABLE ai_actions (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  action_type TEXT NOT NULL CHECK (length(trim(action_type)) > 0),
-  schema_version TEXT NOT NULL CHECK (length(trim(schema_version)) > 0),
-  request_hash TEXT NOT NULL,
+  action_type TEXT NOT NULL CHECK (action_type IN ('meal-log','water-log')),
+  schema_version TEXT NOT NULL CHECK (
+    (action_type = 'meal-log' AND schema_version = 'MealLogActionV1')
+    OR (action_type = 'water-log' AND schema_version = 'WaterLogActionV1')
+  ),
+  request_hash TEXT NOT NULL CHECK (length(trim(request_hash)) > 0),
   payload_json TEXT NOT NULL CHECK (json_valid(payload_json) = 1 AND json_type(payload_json) = 'object'),
   status TEXT NOT NULL CHECK (status IN ('proposed','confirmed','rejected','applied','failed')),
-  idempotency_key TEXT NOT NULL,
+  idempotency_key TEXT NOT NULL CHECK (length(trim(idempotency_key)) > 0),
   created_at TEXT NOT NULL,
   confirmed_at TEXT CHECK (
     confirmed_at IS NULL OR (length(trim(confirmed_at)) > 0 AND julianday(confirmed_at) IS NOT NULL)
@@ -488,3 +533,81 @@ CREATE TABLE ai_actions (
   UNIQUE(user_id, idempotency_key)
 );
 CREATE INDEX ai_actions_user_status_idx ON ai_actions(user_id, status);
+
+CREATE TRIGGER ai_actions_validate_payload_insert
+BEFORE INSERT ON ai_actions
+BEGIN
+  SELECT CASE
+    WHEN NEW.action_type = 'meal-log' AND (
+      json_type(NEW.payload_json, '$.localDate') <> 'text'
+      OR date(json_extract(NEW.payload_json, '$.localDate')) IS NULL
+      OR json_extract(NEW.payload_json, '$.localDate') <> date(json_extract(NEW.payload_json, '$.localDate'))
+      OR json_type(NEW.payload_json, '$.occurredAt') <> 'text'
+      OR julianday(json_extract(NEW.payload_json, '$.occurredAt')) IS NULL
+      OR json_extract(NEW.payload_json, '$.mealType') NOT IN ('breakfast','morning-snack','lunch','afternoon-snack','dinner','snack','custom')
+      OR json_type(NEW.payload_json, '$.items') <> 'array'
+      OR json_array_length(json_extract(NEW.payload_json, '$.items')) = 0
+      OR EXISTS (
+        SELECT 1 FROM json_each(NEW.payload_json, '$.items') item
+        WHERE json_type(item.value) <> 'object'
+           OR json_type(item.value, '$.foodId') <> 'text'
+           OR length(trim(json_extract(item.value, '$.foodId'))) = 0
+           OR json_type(item.value, '$.grams') NOT IN ('integer','real')
+           OR CAST(json_extract(item.value, '$.grams') AS REAL) <= 0
+           OR json_type(item.value, '$.calculationVersion') <> 'text'
+           OR length(trim(json_extract(item.value, '$.calculationVersion'))) = 0
+      )
+    ) THEN RAISE(ABORT, 'invalid MealLogActionV1 payload')
+    WHEN NEW.action_type = 'water-log' AND (
+      json_type(NEW.payload_json, '$.occurredAt') <> 'text'
+      OR julianday(json_extract(NEW.payload_json, '$.occurredAt')) IS NULL
+      OR json_type(NEW.payload_json, '$.milliliters') NOT IN ('integer','real')
+      OR CAST(json_extract(NEW.payload_json, '$.milliliters') AS REAL) <= 0
+    ) THEN RAISE(ABORT, 'invalid WaterLogActionV1 payload')
+  END;
+END;
+
+CREATE TRIGGER ai_actions_validate_payload_update
+BEFORE UPDATE OF action_type, schema_version, payload_json ON ai_actions
+BEGIN
+  SELECT CASE
+    WHEN NEW.action_type = 'meal-log' AND (
+      json_type(NEW.payload_json, '$.localDate') <> 'text'
+      OR date(json_extract(NEW.payload_json, '$.localDate')) IS NULL
+      OR json_extract(NEW.payload_json, '$.localDate') <> date(json_extract(NEW.payload_json, '$.localDate'))
+      OR json_type(NEW.payload_json, '$.occurredAt') <> 'text'
+      OR julianday(json_extract(NEW.payload_json, '$.occurredAt')) IS NULL
+      OR json_extract(NEW.payload_json, '$.mealType') NOT IN ('breakfast','morning-snack','lunch','afternoon-snack','dinner','snack','custom')
+      OR json_type(NEW.payload_json, '$.items') <> 'array'
+      OR json_array_length(json_extract(NEW.payload_json, '$.items')) = 0
+      OR EXISTS (
+        SELECT 1 FROM json_each(NEW.payload_json, '$.items') item
+        WHERE json_type(item.value) <> 'object'
+           OR json_type(item.value, '$.foodId') <> 'text'
+           OR length(trim(json_extract(item.value, '$.foodId'))) = 0
+           OR json_type(item.value, '$.grams') NOT IN ('integer','real')
+           OR CAST(json_extract(item.value, '$.grams') AS REAL) <= 0
+           OR json_type(item.value, '$.calculationVersion') <> 'text'
+           OR length(trim(json_extract(item.value, '$.calculationVersion'))) = 0
+      )
+    ) THEN RAISE(ABORT, 'invalid MealLogActionV1 payload')
+    WHEN NEW.action_type = 'water-log' AND (
+      json_type(NEW.payload_json, '$.occurredAt') <> 'text'
+      OR julianday(json_extract(NEW.payload_json, '$.occurredAt')) IS NULL
+      OR json_type(NEW.payload_json, '$.milliliters') NOT IN ('integer','real')
+      OR CAST(json_extract(NEW.payload_json, '$.milliliters') AS REAL) <= 0
+    ) THEN RAISE(ABORT, 'invalid WaterLogActionV1 payload')
+  END;
+END;
+
+CREATE TRIGGER ai_actions_freeze_confirmed_proposal
+BEFORE UPDATE OF action_type, schema_version, request_hash, payload_json ON ai_actions
+WHEN OLD.confirmed_at IS NOT NULL AND (
+  NEW.action_type IS NOT OLD.action_type
+  OR NEW.schema_version IS NOT OLD.schema_version
+  OR NEW.request_hash IS NOT OLD.request_hash
+  OR NEW.payload_json IS NOT OLD.payload_json
+)
+BEGIN
+  SELECT RAISE(ABORT, 'confirmed AI action proposal is immutable');
+END;
