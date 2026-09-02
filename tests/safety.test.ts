@@ -30,6 +30,16 @@ test("unknown allergen data is blocked when a user has active allergies", () => 
   );
 });
 
+test("malformed active or candidate allergen identifiers fail closed", () => {
+  const candidate = [
+    { foodId: "zucchini-1", foodName: "Izgara kabak", allergenDataStatus: "verified" as const, allergenIds: [] },
+  ];
+  assert.throws(() => assertNoAllergyConflict(candidate, ["   "]), /unresolved/);
+  assert.throws(() => assertNoAllergyConflict([
+    { foodId: "mystery-1", foodName: "Belirsiz etiket", allergenDataStatus: "verified", allergenIds: ["   "] },
+  ], ["milk"]), /unresolved/);
+});
+
 test("verified non-conflicting food is allowed", () => {
   assert.doesNotThrow(() => assertNoAllergyConflict([
     { foodId: "zucchini-1", foodName: "Izgara kabak", allergenDataStatus: "verified", allergenIds: [] },
