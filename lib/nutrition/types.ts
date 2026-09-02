@@ -11,6 +11,9 @@ export type NutritionFacts = {
   extended?: ExtendedNutritionFacts;
 };
 
+/** Distinguishes a genuinely empty day from logged foods with incomplete nutrient coverage. */
+export type ConsumptionCoverage = "logged-foods" | "empty-day";
+
 export type NutritionSourceProvider =
   | "open-food-facts"
   | "usda"
