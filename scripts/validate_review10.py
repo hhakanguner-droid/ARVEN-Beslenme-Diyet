@@ -47,12 +47,13 @@ def main():
     conn.execute("INSERT INTO scientific_references(id,title,citation,created_at) VALUES('r10','R10','Citation',?)", (NOW,))
     reject(conn, "duplicate calculation input keys", """
       INSERT INTO goals(id,user_id,effective_from,energy_kcal,protein_g,carbs_g,fat_g,source,calculation_method,calculation_version,calculation_inputs_json,reference_ids_json,created_at)
-      VALUES('gdup','u1','2026-09-02',2000,120,220,70,'arven-calculated','m','v1','{"weightKg":80,"weightKg":100}','["r10"]',?)
+      VALUES('gdup','u1','2026-09-02',2000,120,220,70,'arven-calculated','mifflin-st-jeor','v1','{"weightKg":80,"weightKg":100}','["r10"]',?)
     """, (NOW,))
+    goal_inputs = '{"weightKg":80,"heightCm":180,"ageYears":40,"sexAtBirth":"male","activityFactor":1.2,"energyAdjustmentKcal":0,"proteinGPerKg":1.5,"fatEnergyPct":0.3,"waterMlPerKg":30}'
     conn.execute("""
-      INSERT INTO goals(id,user_id,effective_from,energy_kcal,protein_g,carbs_g,fat_g,source,calculation_method,calculation_version,calculation_inputs_json,reference_ids_json,created_at)
-      VALUES('g10','u1','2026-09-02',2000,120,220,70,'arven-calculated','m','v1','{"weightKg":80}','["r10"]',?)
-    """, (NOW,))
+      INSERT INTO goals(id,user_id,effective_from,energy_kcal,protein_g,carbs_g,fat_g,fiber_g,water_ml,source,calculation_method,calculation_version,calculation_inputs_json,reference_ids_json,created_at)
+      VALUES('g10','u1','2026-09-02',2076,120,243.3,69.2,29.1,2400,'arven-calculated','mifflin-st-jeor','v1',?,'["r10"]',?)
+    """, (goal_inputs, NOW))
     reject(conn, "null in-use scientific reference id", "UPDATE scientific_references SET id=NULL WHERE id='r10'")
 
     reject(conn, "tab-only allergen id", "INSERT INTO allergen_catalog(id,canonical_name,created_at) VALUES(?, 'Milk', ?)", ("\t", NOW))
@@ -111,6 +112,7 @@ def main():
     reject(conn, "confirmation before creation", "UPDATE ai_actions SET status='confirmed', confirmed_at='2026-09-01T12:00:00.000Z' WHERE id='a10'")
     conn.execute("UPDATE ai_actions SET status='confirmed', confirmed_at=? WHERE id='a10'", (NOW,))
     reject(conn, "rewrite confirmation timestamp", "UPDATE ai_actions SET confirmed_at='2026-09-02T17:01:00.000Z' WHERE id='a10'")
+    conn.execute("INSERT INTO water_logs(id,user_id,occurred_at,local_date,milliliters,created_at,ai_action_id) VALUES('w-a10','u1','2026-09-02T12:00:00Z','2026-09-02',250,?,'a10')", (NOW,))
     conn.execute("UPDATE ai_actions SET status='applied', applied_at='2026-09-02T17:02:00.000Z' WHERE id='a10'")
     reject(conn, "rewrite applied timestamp", "UPDATE ai_actions SET applied_at='2026-09-02T17:03:00.000Z' WHERE id='a10'")
 
