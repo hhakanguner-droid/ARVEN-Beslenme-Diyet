@@ -5,11 +5,9 @@ import {
 } from "./nutrients";
 import { assertVerifiedNutritionSource } from "./sources";
 import type { ExtendedNutritionFacts, NutrientCompleteness } from "./nutrients";
-import type { NutritionFacts, NutritionTargets, Portion } from "./types";
+import type { ConsumptionCoverage, NutritionFacts, NutritionTargets, Portion } from "./types";
 
 const ZERO: NutritionFacts = { energyKcal: 0, proteinG: 0, carbsG: 0, fatG: 0, fiberG: 0 };
-
-export type ConsumptionCoverage = "logged-foods" | "empty-day";
 
 function finiteNonNegative(value: number, field: string): number {
   if (!Number.isFinite(value) || value < 0) throw new Error(`${field} must be a finite non-negative number`);
