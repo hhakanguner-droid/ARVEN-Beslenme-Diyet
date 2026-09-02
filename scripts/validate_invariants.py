@@ -32,6 +32,7 @@ def main() -> None:
     apply_migrations(conn)
 
     now = "2026-09-02T18:45:00Z"
+    fresh = "2026-09-02T18:46:00Z"
     conn.executemany(
         "INSERT INTO users(id,external_subject,created_at,updated_at) VALUES(?,?,?,?)",
         [("u1", "subject-1", now, now), ("u2", "subject-2", now, now)],
@@ -55,6 +56,31 @@ def main() -> None:
         (now, now),
     )
     must_fail(conn, "UPDATE assessment_snapshots SET user_id='u2' WHERE id='assessment-1'")
+
+    # Extended nutrients carry their own snapshot of the parent verification
+    # instant. Values cannot change under stale evidence even before first use.
+    conn.execute(
+        """
+        INSERT INTO foods(
+          id,name,normalized_name,energy_kcal_100g,protein_g_100g,carbs_g_100g,fat_g_100g,
+          source_provider,source_external_id,verified_at,created_at,updated_at
+        ) VALUES('provenance-food','Provenance food','provenance food',100,10,20,5,'usda','prov-1',?,?,?)
+        """,
+        (now, now, now),
+    )
+    conn.execute(
+        "INSERT INTO food_nutrients(food_id,nutrient_key,amount_per_100g,unit,completeness) VALUES('provenance-food','sodium',100,'mg','complete')"
+    )
+    stamp = conn.execute(
+        "SELECT source_verified_at FROM food_nutrients WHERE food_id='provenance-food' AND nutrient_key='sodium'"
+    ).fetchone()[0]
+    assert stamp == now, stamp
+    must_fail(conn, "UPDATE food_nutrients SET amount_per_100g=200 WHERE food_id='provenance-food' AND nutrient_key='sodium'")
+    conn.execute("UPDATE foods SET verified_at=?, updated_at=? WHERE id='provenance-food'", (fresh, fresh))
+    conn.execute(
+        "UPDATE food_nutrients SET amount_per_100g=200, source_verified_at=? WHERE food_id='provenance-food' AND nutrient_key='sodium'",
+        (fresh,),
+    )
 
     # A verified food with an extended nutrient. Keep source values deliberately
     # fractional so early-rounding regressions are visible.
@@ -97,7 +123,7 @@ def main() -> None:
 
     # Once a verified source has produced history, its extended nutrient set is
     # versioned/immutable. Silent provenance rewrites are impossible.
-    must_fail(conn, "UPDATE food_nutrients SET amount_per_100g=2 WHERE food_id='precision-food' AND nutrient_key='sodium'")
+    must_fail(conn, "UPDATE food_nutrients SET amount_per_100g=2, source_verified_at=? WHERE food_id='precision-food' AND nutrient_key='sodium'", (fresh,))
     must_fail(conn, "DELETE FROM food_nutrients WHERE food_id='precision-food' AND nutrient_key='sodium'")
     must_fail(conn, "INSERT INTO food_nutrients(food_id,nutrient_key,amount_per_100g,unit,completeness) VALUES('precision-food','calcium',1,'mg','complete')")
 
