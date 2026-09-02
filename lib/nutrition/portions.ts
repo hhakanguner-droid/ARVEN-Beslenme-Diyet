@@ -12,7 +12,11 @@ function roundResolvedGrams(value: number): number {
 }
 
 function assertResolvedGramPrecision(value: number, kind: string): number {
-  const grams = roundResolvedGrams(finitePositive(value, "grams"));
+  const rawGrams = finitePositive(value, "grams");
+  if (rawGrams < PORTION_GRAM_PRECISION) {
+    throw new Error(`Resolved ${kind} portion is below ARVEN's 0.1 g precision; choose a larger amount`);
+  }
+  const grams = roundResolvedGrams(rawGrams);
   if (grams < PORTION_GRAM_PRECISION) {
     throw new Error(`Resolved ${kind} portion is below ARVEN's 0.1 g precision; choose a larger amount`);
   }
