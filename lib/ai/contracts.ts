@@ -19,73 +19,19 @@ const PortionMeasure = z.enum([
 ]);
 
 const PortionSize = z.enum(["small", "medium", "large"]);
-const NUMERIC_NUTRITION_CLAIM = /\p{N}+(?:[.,]\p{N}+)?\s*(?:kcal|kj|kalori|gram|gr|g|mg|mcg|ml|kg)\b/iu;
 const ANY_DIGIT = /\p{N}/u;
-const NUTRITION_UNIT_WORD = /\b(?:kcal|kj|kalori|gram|gr|g|mg|mcg|ml|kg)\b/iu;
 const NUMBER_WORDS = new Set([
-  "sifir",
-  "iki",
-  "uc",
-  "dort",
-  "bes",
-  "alti",
-  "yedi",
-  "sekiz",
-  "dokuz",
-  "on",
-  "yirmi",
-  "otuz",
-  "kirk",
-  "elli",
-  "altmis",
-  "yetmis",
-  "seksen",
-  "doksan",
-  "yuz",
-  "bin",
-  "milyon",
-  "milyar",
-  "trilyon",
-  "yarim",
-  "bucuk",
-  "ceyrek",
-  "yuzde",
-  "zero",
-  "two",
-  "three",
-  "four",
-  "five",
-  "six",
-  "seven",
-  "eight",
-  "nine",
-  "ten",
-  "twenty",
-  "thirty",
-  "forty",
-  "fifty",
-  "sixty",
-  "seventy",
-  "eighty",
-  "ninety",
-  "hundred",
-  "thousand",
-  "million",
-  "billion",
-  "half",
-  "quarter",
-  "percent",
+  "sifir", "iki", "uc", "dort", "bes", "alti", "yedi", "sekiz", "dokuz",
+  "on", "yirmi", "otuz", "kirk", "elli", "altmis", "yetmis", "seksen", "doksan",
+  "yuz", "bin", "milyon", "milyar", "trilyon", "yarim", "bucuk", "ceyrek", "yuzde",
+  "zero", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+  "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety",
+  "hundred", "thousand", "million", "billion", "half", "quarter", "percent",
 ]);
 const TURKISH_NUMBER_SUFFIXES = new Set([
-  "i", "u", "a", "e",
-  "si", "su",
-  "in", "un", "nin", "nun",
-  "ini", "unu", "sini", "sunu",
-  "ina", "ine", "una", "une", "sina", "sine", "suna", "sune",
-  "dan", "den", "tan", "ten",
-  "da", "de", "ta", "te",
-  "ya", "ye",
-  "lar", "ler", "lari", "leri", "larin", "lerin", "lara", "lere",
+  "i", "u", "a", "e", "si", "su", "in", "un", "nin", "nun", "ini", "unu", "sini", "sunu",
+  "ina", "ine", "una", "une", "sina", "sine", "suna", "sune", "dan", "den", "tan", "ten",
+  "da", "de", "ta", "te", "ya", "ye", "lar", "ler", "lari", "leri", "larin", "lerin", "lara", "lere",
   "lik", "luk", "inci", "uncu",
 ]);
 
@@ -100,7 +46,7 @@ function normalizeNumberText(value: string): string {
     .replace(/ç/g, "c")
     .replace(/ö/g, "o")
     .replace(/ü/g, "u")
-    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/[^a-z0-9\s.,]/g, " ")
     .replace(/\s+/g, " ");
 }
 
@@ -115,26 +61,32 @@ function isWrittenNumberToken(token: string): boolean {
 }
 
 function containsSpelledNumberWord(value: string): boolean {
-  return normalizeNumberText(value).split(/\s+/).filter(Boolean).some(isWrittenNumberToken);
+  return normalizeNumberText(value).split(/[^a-z0-9]+/).filter(Boolean).some(isWrittenNumberToken);
 }
 
 function containsContextualOneClaim(value: string): boolean {
   const normalized = normalizeNumberText(value);
-  return /\b(?:yuzde\s+bir|percent\s+one|bir\s+(?:kcal|kj|kalori|gram|gr|g|mg|mcg|ml|kg|puan|adim|saat|gun|hafta|ogun|porsiyon|kilo|kilogram)|one\s+(?:kcal|kj|calorie|gram|mg|mcg|ml|kg|point|step|hour|day|week))\b/i.test(normalized);
+  return /\b(?:yuzde\s+bir|percent\s+one|bir\s+(?:kcal|kj|kalori[a-z]*|gram[a-z]*|gr|g|mg|mcg|ml|kg|puan|adim|saat|gun|hafta|ogun|porsiyon|kilo|kilogram)|one\s+(?:kcal|kj|calorie[a-z]*|gram[a-z]*|mg|mcg|ml|kg|point|step|hour|day|week))\b/i.test(normalized);
+}
+
+function containsDigitNutritionClaim(value: string): boolean {
+  const normalized = normalizeNumberText(value);
+  return /\b\d+(?:[.,]\d+)?\s*(?:kcal|kj|kalori[a-z]*|gram[a-z]*|gr|g|mg|mcg|ml|kg)\b/i.test(normalized);
+}
+
+function containsSpelledNutritionClaim(value: string): boolean {
+  const normalized = normalizeNumberText(value);
+  const hasNutritionUnit = /\b(?:kcal|kj|kalori[a-z]*|gram[a-z]*|gr|g|mg|mcg|ml|kg)\b/i.test(normalized);
+  return hasNutritionUnit && (containsSpelledNumberWord(normalized) || containsContextualOneClaim(normalized));
 }
 
 function containsWeeklyNumericClaim(value: string): boolean {
   return ANY_DIGIT.test(value) || containsSpelledNumberWord(value) || containsContextualOneClaim(value);
 }
 
-function containsSpelledNutritionClaim(value: string): boolean {
-  return NUTRITION_UNIT_WORD.test(value)
-    && (containsSpelledNumberWord(value) || containsContextualOneClaim(value));
-}
-
 function mealNarrative(max: number) {
   return z.string().min(1).max(max).refine(
-    (value) => !NUMERIC_NUTRITION_CLAIM.test(value) && !containsSpelledNutritionClaim(value),
+    (value) => !containsDigitNutritionClaim(value) && !containsSpelledNutritionClaim(value),
     "AI meal text must not contain numeric nutrition/weight claims",
   );
 }
@@ -147,7 +99,7 @@ function weeklyNarrative(max: number) {
 }
 
 const NaturalPortionLabel = z.string().min(1).max(120).refine(
-  (value) => !NUMERIC_NUTRITION_CLAIM.test(value) && !containsSpelledNutritionClaim(value),
+  (value) => !containsDigitNutritionClaim(value) && !containsSpelledNutritionClaim(value),
   "Natural portion labels must not smuggle gram/ml nutrition quantities",
 );
 
@@ -189,19 +141,13 @@ export type WeeklyInsight = z.infer<typeof WeeklyInsightV1>;
  * Deliberately absent from the AI schema: grams, calories, protein,
  * carbohydrate, fat and other nutrient totals. Strict schemas reject those
  * fields and all user-facing meal text fields reject digit- or word-authored
- * nutrition claims. AI speaks in natural portion language. The server resolves
- * that hint against verified FoodPortionOptions, converts it to grams internally,
- * then calculates nutrition deterministically.
+ * nutrition claims, including Turkish inflections such as "kalorilik".
  */
 export function parseMealSuggestion(input: unknown): MealSuggestion {
   return MealSuggestionV1.parse(input);
 }
 
-/**
- * Weekly numeric metrics (adherence, averages, trends) are computed before the
- * model call and rendered separately. The model output is number-free narrative,
- * including Turkish inflections and contextual one-valued metric claims.
- */
+/** Weekly numeric metrics are deterministic and rendered separately from number-free AI narrative. */
 export function parseWeeklyInsight(input: unknown): WeeklyInsight {
   return WeeklyInsightV1.parse(input);
 }
