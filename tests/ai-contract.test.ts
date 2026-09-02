@@ -68,6 +68,18 @@ test("food queries cannot smuggle model-authored quantities", () => {
   }
 });
 
+test("AI meal parser enforces non-diagnostic and non-medication policy on every narrative surface", () => {
+  const unsafe = [
+    { ...validSuggestion, title: "Diyabetsin" },
+    { ...validSuggestion, rationale: "İlacını bırak." },
+    { ...validSuggestion, preparation: ["Warfarini kullan."] },
+    { ...validSuggestion, uncertainty: ["Sende kanser var."] },
+  ];
+  for (const candidate of unsafe) {
+    assert.throws(() => parseMealSuggestion(candidate), /non-diagnostic health policy/);
+  }
+});
+
 test("weekly insight contract accepts qualitative narrative interpretation", () => {
   const parsed = parseWeeklyInsight({
     schemaVersion: "WeeklyInsightV1", summary: "Bu hafta öğün kayıtlarında daha düzenli ritim oluştu.",
@@ -85,4 +97,10 @@ test("weekly AI insight cannot author numeric truth", () => {
     "Bu hafta hedefi bir kez aştın.", "Planı bir defa kaçırdın.", "Bu hafta hedefi birer kez aştın.", "Planı bir kereden fazla kaçırdın.",
   ];
   for (const summary of invalidSummaries) assert.throws(() => parseWeeklyInsight({ schemaVersion: "WeeklyInsightV1", summary, positives: [], areasForImprovement: [], suggestions: [], uncertainty: [] }), /must not contain numeric claims/, summary);
+});
+
+test("weekly insight parser enforces the same health policy on all narrative arrays", () => {
+  const base = { schemaVersion: "WeeklyInsightV1", summary: "Nitel bir haftalık özet.", positives: [], areasForImprovement: [], suggestions: [], uncertainty: [] };
+  assert.throws(() => parseWeeklyInsight({ ...base, summary: "Çölyaksın." }), /non-diagnostic health policy/);
+  assert.throws(() => parseWeeklyInsight({ ...base, suggestions: ["İlacını kes."] }), /non-diagnostic health policy/);
 });
