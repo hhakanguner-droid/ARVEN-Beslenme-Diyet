@@ -32,6 +32,7 @@ test("AI medication or treatment management is blocked without a medication regi
     "Aspirin kullanmalısın.", "Metformini almalısın.", "Aspirin'i bırak.", "Metformin'e başla.",
     "Warfarini bırak.", "İnsülini azalt.", "Antibiyotiği kes.",
     "Warfarini bırak ve sebze ye.", "Warfarini bırak; etkileşim riski var.", "Warfarini sebze ile kullan.",
+    "Warfarini kullan sebzeyi azalt.",
     "Bunu ilacın yerine kullanmamalısın.", "Bu ilacı kullanman gerekiyor.",
   ];
   for (const message of unsafe) assert.throws(() => assertNoMedicalOverreach(message), /non-diagnostic/, message);
@@ -51,7 +52,7 @@ test("direct diagnosis assertions are rejected without blocking ordinary coachin
     "Kanserlisin.", "Depresyondasın.", "Astımlısın.", "Parkinsonlusun.", "Endometriozisin.",
   ];
   for (const message of unsafe) assert.throws(() => assertNoMedicalOverreach(message), /non-diagnostic/, message);
-  for (const message of ["Sen kararlısın.", "Bu dengelidir.", "Bu doğrudur.", "Yeni tatlarla tanışmalısın."]) {
+  for (const message of ["Sen kararlısın.", "Bu dengelidir.", "Bu doğrudur.", "Yeni tatlarla tanışmalısın.", "Bu iş için diplomalısın."]) {
     assert.doesNotThrow(() => assertNoMedicalOverreach(message), message);
   }
 });
