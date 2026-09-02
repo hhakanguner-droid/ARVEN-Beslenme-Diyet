@@ -38,3 +38,27 @@ test("negative weekly consumption metrics are rejected before AI narrative", () 
     );
   }
 });
+
+test("empty weeks keep nutrition averages and adherence unknown", () => {
+  assert.doesNotThrow(() => assertWeeklyInsightMetrics({
+    ...validMetrics,
+    loggedDays: 0,
+    plannedDays: 0,
+    adherencePercent: null,
+    averageEnergyKcal: null,
+    averageProteinG: null,
+    averageWaterMl: null,
+  }));
+
+  assert.throws(() => assertWeeklyInsightMetrics({
+    ...validMetrics,
+    loggedDays: 0,
+    averageEnergyKcal: 2000,
+  }), /nutrition averages must be null/);
+
+  assert.throws(() => assertWeeklyInsightMetrics({
+    ...validMetrics,
+    plannedDays: 0,
+    adherencePercent: 90,
+  }), /adherencePercent must be null/);
+});
