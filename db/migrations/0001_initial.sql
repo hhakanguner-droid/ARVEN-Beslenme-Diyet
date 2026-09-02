@@ -115,6 +115,28 @@ BEGIN
   THEN RAISE(ABORT, 'ARVEN-calculated goals require resolvable scientific provenance') END;
 END;
 
+CREATE TRIGGER scientific_references_prevent_delete
+BEFORE DELETE ON scientific_references
+WHEN EXISTS (
+  SELECT 1
+  FROM goals g, json_each(g.reference_ids_json) refs
+  WHERE trim(CAST(refs.value AS TEXT)) = OLD.id
+)
+BEGIN
+  SELECT RAISE(ABORT, 'scientific reference is still used by a goal');
+END;
+
+CREATE TRIGGER scientific_references_prevent_id_update
+BEFORE UPDATE OF id ON scientific_references
+WHEN NEW.id <> OLD.id AND EXISTS (
+  SELECT 1
+  FROM goals g, json_each(g.reference_ids_json) refs
+  WHERE trim(CAST(refs.value AS TEXT)) = OLD.id
+)
+BEGIN
+  SELECT RAISE(ABORT, 'scientific reference id is still used by a goal');
+END;
+
 CREATE TRIGGER goals_prevent_overlap_insert
 BEFORE INSERT ON goals
 WHEN EXISTS (
@@ -168,7 +190,8 @@ CREATE TABLE foods (
   source_license_id TEXT,
   verified_at TEXT NOT NULL,
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  CHECK (source_provider = 'manual-verified' OR (source_external_id IS NOT NULL AND length(trim(source_external_id)) > 0))
 );
 CREATE INDEX foods_name_idx ON foods(normalized_name);
 CREATE INDEX foods_owner_idx ON foods(owner_user_id);
@@ -217,6 +240,7 @@ CREATE TABLE food_portion_options (
   verified_at TEXT NOT NULL,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
+  CHECK (source_provider = 'manual-verified' OR (source_external_id IS NOT NULL AND length(trim(source_external_id)) > 0)),
   UNIQUE (id, food_id)
 );
 CREATE INDEX food_portion_options_food_idx ON food_portion_options(food_id);
@@ -243,6 +267,7 @@ CREATE TABLE food_allergens (
   source_provider TEXT NOT NULL CHECK (source_provider IN ('open-food-facts','usda','turkomp','bls','swiss-fcd','manual-verified')),
   source_external_id TEXT,
   verified_at TEXT NOT NULL,
+  CHECK (source_provider = 'manual-verified' OR (source_external_id IS NOT NULL AND length(trim(source_external_id)) > 0)),
   PRIMARY KEY (food_id, allergen_id)
 );
 
@@ -259,6 +284,7 @@ CREATE TABLE food_dietary_rule_conflicts (
   source_provider TEXT NOT NULL CHECK (source_provider IN ('open-food-facts','usda','turkomp','bls','swiss-fcd','manual-verified')),
   source_external_id TEXT,
   verified_at TEXT NOT NULL,
+  CHECK (source_provider = 'manual-verified' OR (source_external_id IS NOT NULL AND length(trim(source_external_id)) > 0)),
   PRIMARY KEY (food_id, dietary_rule_id)
 );
 
@@ -292,6 +318,30 @@ CREATE TABLE food_preferences (
 );
 CREATE INDEX food_preferences_user_idx ON food_preferences(user_id);
 CREATE INDEX food_preferences_safety_idx ON food_preferences(user_id, preference, resolution_status);
+
+CREATE TRIGGER food_preferences_private_food_insert
+BEFORE INSERT ON food_preferences
+WHEN NEW.food_id IS NOT NULL AND EXISTS (
+  SELECT 1 FROM foods f
+  WHERE f.id = NEW.food_id
+    AND f.owner_user_id IS NOT NULL
+    AND f.owner_user_id <> NEW.user_id
+)
+BEGIN
+  SELECT RAISE(ABORT, 'private preference food ownership mismatch');
+END;
+
+CREATE TRIGGER food_preferences_private_food_update
+BEFORE UPDATE OF user_id, food_id ON food_preferences
+WHEN NEW.food_id IS NOT NULL AND EXISTS (
+  SELECT 1 FROM foods f
+  WHERE f.id = NEW.food_id
+    AND f.owner_user_id IS NOT NULL
+    AND f.owner_user_id <> NEW.user_id
+)
+BEGIN
+  SELECT RAISE(ABORT, 'private preference food ownership mismatch');
+END;
 
 CREATE TABLE assessment_snapshots (
   id TEXT PRIMARY KEY,
@@ -360,6 +410,36 @@ BEGIN
   SELECT RAISE(ABORT, 'private food ownership mismatch');
 END;
 
+CREATE TRIGGER meal_entries_private_food_user_update
+BEFORE UPDATE OF user_id ON meal_entries
+WHEN EXISTS (
+  SELECT 1 FROM meal_entry_items i
+  JOIN foods f ON f.id = i.food_id
+  WHERE i.meal_entry_id = NEW.id
+    AND f.owner_user_id IS NOT NULL
+    AND f.owner_user_id <> NEW.user_id
+)
+BEGIN
+  SELECT RAISE(ABORT, 'meal user change would violate private food ownership');
+END;
+
+CREATE TRIGGER foods_private_owner_update
+BEFORE UPDATE OF owner_user_id ON foods
+WHEN NEW.owner_user_id IS NOT NULL AND (
+  EXISTS (
+    SELECT 1 FROM meal_entry_items i
+    JOIN meal_entries m ON m.id = i.meal_entry_id
+    WHERE i.food_id = NEW.id AND m.user_id <> NEW.owner_user_id
+  )
+  OR EXISTS (
+    SELECT 1 FROM food_preferences p
+    WHERE p.food_id = NEW.id AND p.user_id <> NEW.owner_user_id
+  )
+)
+BEGIN
+  SELECT RAISE(ABORT, 'food owner change would violate private ownership');
+END;
+
 CREATE TABLE meal_entry_item_nutrients (
   meal_entry_item_id TEXT NOT NULL REFERENCES meal_entry_items(id) ON DELETE CASCADE,
   nutrient_key TEXT NOT NULL,
@@ -384,10 +464,10 @@ CREATE INDEX water_logs_user_date_idx ON water_logs(user_id, local_date, occurre
 CREATE TABLE ai_actions (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  action_type TEXT NOT NULL,
-  schema_version TEXT NOT NULL,
+  action_type TEXT NOT NULL CHECK (length(trim(action_type)) > 0),
+  schema_version TEXT NOT NULL CHECK (length(trim(schema_version)) > 0),
   request_hash TEXT NOT NULL,
-  payload_json TEXT NOT NULL,
+  payload_json TEXT NOT NULL CHECK (json_valid(payload_json) = 1 AND json_type(payload_json) = 'object'),
   status TEXT NOT NULL CHECK (status IN ('proposed','confirmed','rejected','applied','failed')),
   idempotency_key TEXT NOT NULL,
   created_at TEXT NOT NULL,
