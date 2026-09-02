@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { deriveCalculatedGoal } from "../lib/goals/calculator";
 import { assertGoalCalculationProvenance, assertMealEnergyAllocations } from "../lib/goals/types";
 
 test("meal target allocations must total one hundred percent", () => {
@@ -30,18 +31,43 @@ test("meal allocation ids must be canonical and whitespace-free", () => {
   ]), /Invalid mealType/);
 });
 
-test("ARVEN-calculated goal provenance requires method, inputs and scientific references", () => {
+test("ARVEN-calculated goal provenance requires finite primitive inputs and scientific references", () => {
   assert.doesNotThrow(() => assertGoalCalculationProvenance({
-    method: "iom-eer",
-    version: "1.0.0",
-    inputs: { age: 47, heightCm: 195, activityLevel: "moderate" },
-    referenceIds: ["iom-2005-eer"],
+    method: "mifflin-st-jeor",
+    version: "v1",
+    inputs: { weightKg: 80, heightCm: 180, ageYears: 40, sexAtBirth: "male" },
+    referenceIds: ["mifflin-1990"],
   }));
 
   assert.throws(() => assertGoalCalculationProvenance({
-    method: "iom-eer",
-    version: "1.0.0",
+    method: "mifflin-st-jeor",
+    version: "v1",
     inputs: {},
     referenceIds: [],
   }), /inputs cannot be empty|scientific reference/);
+  assert.throws(() => assertGoalCalculationProvenance({
+    method: "mifflin-st-jeor",
+    version: "v1",
+    inputs: { weightKg: Infinity },
+    referenceIds: ["mifflin-1990"],
+  }), /must be finite/);
+  assert.throws(() => assertGoalCalculationProvenance({
+    method: "mifflin-st-jeor",
+    version: "v1",
+    inputs: { weightKg: [80] as never },
+    referenceIds: ["mifflin-1990"],
+  }), /primitive scalar/);
+});
+
+test("versioned goal calculator deterministically derives every target", () => {
+  const targets = deriveCalculatedGoal({
+    method: "mifflin-st-jeor",
+    version: "v1",
+    inputs: {
+      weightKg: 80, heightCm: 180, ageYears: 40, sexAtBirth: "male", activityFactor: 1.2,
+      energyAdjustmentKcal: 0, proteinGPerKg: 1.5, fatEnergyPct: 0.3, waterMlPerKg: 30,
+    },
+    referenceIds: ["mifflin-1990"],
+  });
+  assert.deepEqual(targets, { energyKcal: 2076, proteinG: 120, carbsG: 243.3, fatG: 69.2, fiberG: 29.1, waterMl: 2400 });
 });
