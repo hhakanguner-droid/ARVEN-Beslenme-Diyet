@@ -69,6 +69,9 @@ def main():
     # Verified nutrition cannot change while retaining stale evidence.
     reject(conn, "nutrition update without provenance refresh", "UPDATE foods SET energy_kcal_100g=101 WHERE id='food'")
 
+    # Extended source nutrients are established before the food produces history.
+    conn.execute("INSERT INTO food_nutrients(food_id,nutrient_key,amount_per_100g,unit,completeness) VALUES('food','sodium',100,'mg','complete')")
+
     # Portion label and resolved grams are one deterministic representation.
     conn.execute("""
       INSERT INTO food_portion_options(id,food_id,measure,label,grams_per_unit,source_provider,verified_at,created_at,updated_at)
@@ -84,13 +87,14 @@ def main():
       VALUES('item','m1','food','slice',1,'1 dilim',30,30,3,6,1.5,0.6,'v1',?)
     """, (NOW,))
 
-    # Extended nutrient snapshots are derived from food_nutrients + item grams.
-    conn.execute("INSERT INTO food_nutrients(food_id,nutrient_key,amount_per_100g,unit,completeness) VALUES('food','sodium',100,'mg','complete')")
-    reject(conn, "invented extended nutrient snapshot", """
-      INSERT INTO meal_entry_item_nutrients(meal_entry_item_id,nutrient_key,amount,unit,completeness)
-      VALUES('item','sodium',999999,'mg','complete')
+    # The current invariant materializes the complete extended snapshot during
+    # item insertion, then freezes it as historical numeric truth.
+    stored = conn.execute("SELECT amount FROM meal_entry_item_nutrients WHERE meal_entry_item_id='item' AND nutrient_key='sodium'").fetchone()
+    assert stored is not None and abs(stored[0] - 30) < 1e-9
+    reject(conn, "invented extended nutrient snapshot correction", """
+      UPDATE meal_entry_item_nutrients SET amount=999999
+      WHERE meal_entry_item_id='item' AND nutrient_key='sodium'
     """)
-    conn.execute("INSERT INTO meal_entry_item_nutrients(meal_entry_item_id,nutrient_key,amount,unit,completeness) VALUES('item','sodium',30,'mg','complete')")
 
     # Supported calculator inputs must reproduce every stored target exactly.
     conn.execute("INSERT INTO scientific_references(id,title,citation,created_at) VALUES('mifflin-1990','Mifflin','Citation',?)", (NOW,))
