@@ -1,3 +1,5 @@
+import { assertSevenDayLocalInterval } from "../time/canonical";
+
 export type WeeklyInsightMetrics = {
   localWeekStart: string;
   localWeekEnd: string;
@@ -24,6 +26,8 @@ function finiteNonNegativeOrNull(value: number | null | undefined, field: string
 }
 
 export function assertWeeklyInsightMetrics(metrics: WeeklyInsightMetrics): void {
+  assertSevenDayLocalInterval(metrics.localWeekStart, metrics.localWeekEnd, "weekly insight interval");
+
   finiteNonNegativeOrNull(metrics.adherencePercent, "adherencePercent");
   finiteNonNegativeOrNull(metrics.averageEnergyKcal, "averageEnergyKcal");
   finiteNonNegativeOrNull(metrics.averageProteinG, "averageProteinG");
