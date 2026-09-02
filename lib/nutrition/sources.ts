@@ -19,7 +19,7 @@ function assertSource(source: NutritionSource, subject: string): void {
     throw new Error(`${subject} has an invalid verifiedAt timestamp`);
   }
 
-  if (source.provider !== "manual-verified" && !source.externalId) {
+  if (source.provider !== "manual-verified" && (!source.externalId || source.externalId.trim().length === 0)) {
     throw new Error(`${subject} is missing its external source id`);
   }
 }
