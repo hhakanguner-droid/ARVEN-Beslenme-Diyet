@@ -57,15 +57,16 @@ def main() -> None:
         "INSERT INTO scientific_references (id,title,citation,created_at) VALUES ('ref-r8','Reference R8','Citation R8',?)",
         (NOW,),
     )
+    goal_inputs = '{"weightKg":80,"heightCm":180,"ageYears":40,"sexAtBirth":"male","activityFactor":1.2,"energyAdjustmentKcal":0,"proteinGPerKg":1.5,"fatEnergyPct":0.3,"waterMlPerKg":30}'
     conn.execute("""
       INSERT INTO goals (
-        id,user_id,effective_from,energy_kcal,protein_g,carbs_g,fat_g,source,
+        id,user_id,effective_from,energy_kcal,protein_g,carbs_g,fat_g,fiber_g,water_ml,source,
         calculation_method,calculation_version,calculation_inputs_json,reference_ids_json,created_at
       ) VALUES (
-        'goal-r8','user-1','2026-09-02',2000,120,220,70,'arven-calculated',
-        'mifflin','v1','{"weightKg":80}','["ref-r8"]',?
+        'goal-r8','user-1','2026-09-02',2076,120,243.3,69.2,29.1,2400,'arven-calculated',
+        'mifflin-st-jeor','v1',?,'["ref-r8"]',?
       )
-    """, (NOW,))
+    """, (goal_inputs, NOW))
     expect_rejected(conn, "rewrite used scientific evidence", """
       UPDATE scientific_references SET citation='Different evidence' WHERE id='ref-r8'
     """)
@@ -150,6 +151,14 @@ def main() -> None:
     expect_rejected(conn, "delete food referenced by active AI action", "DELETE FROM foods WHERE id='food-global'")
 
     conn.execute("UPDATE ai_actions SET status='confirmed', confirmed_at=? WHERE id='ai-active'", (NOW,))
+    conn.execute("""
+      INSERT INTO meal_entries(id,user_id,local_date,meal_type,occurred_at,created_at,updated_at,ai_action_id)
+      VALUES('meal-action-r8','user-1','2026-09-02','lunch',?,?,?,'ai-active')
+    """, (NOW, NOW, NOW))
+    conn.execute("""
+      INSERT INTO meal_entry_items(id,meal_entry_id,food_id,grams,energy_kcal,protein_g,carbs_g,fat_g,calculation_version,created_at,ai_action_item_index)
+      VALUES('meal-action-item-r8','meal-action-r8','food-global',50,50,5,5,1,'v1',?,0)
+    """, (NOW,))
     conn.execute("UPDATE ai_actions SET status='applied', applied_at=? WHERE id='ai-active'", (NOW,))
 
     print("REVIEW8_CONTRACTS_OK")
