@@ -1,6 +1,13 @@
 import { BrandWordmark } from "@/components/layout/AppShell";
 import { EmptyState } from "@/components/states/EmptyState";
 
+const quickStarts = [
+  { icon: "🥗", label: "Öğün önerisi" },
+  { icon: "⌕", label: "Yemek analizi" },
+  { icon: "🍽", label: "Restoran seçimi" },
+  { icon: "▤", label: "Tahlil yorumu" },
+] as const;
+
 export default function BugunPage() {
   return (
     <>
@@ -23,10 +30,13 @@ export default function BugunPage() {
 
       <h2 className="section-heading">ARVEN ile hızlı başla</h2>
       <div className="quick-grid">
-        <div className="quick-card"><span className="quick-icon">🥗</span><strong>Öğün önerisi</strong></div>
-        <div className="quick-card"><span className="quick-icon">⌕</span><strong>Yemek analizi</strong></div>
-        <div className="quick-card"><span className="quick-icon">🍽</span><strong>Restoran seçimi</strong></div>
-        <div className="quick-card"><span className="quick-icon">▤</span><strong>Tahlil yorumu</strong></div>
+        {quickStarts.map((item) => (
+          <button key={item.label} className="quick-card unavailable" type="button" disabled>
+            <span className="quick-icon" aria-hidden="true">{item.icon}</span>
+            <strong>{item.label}</strong>
+            <span className="coming-soon">Yakında</span>
+          </button>
+        ))}
       </div>
 
       <h2 className="section-heading">Bugünün planı</h2>
