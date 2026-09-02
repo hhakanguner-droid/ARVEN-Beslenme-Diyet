@@ -32,7 +32,7 @@ test("AI meal contract rejects AI-authored calorie totals", () => {
   assert.throws(() => parseMealSuggestion({ ...validSuggestion, energyKcal: 430 }));
 });
 
-test("all user-facing meal text rejects numeric nutrition claims including full Turkish units", () => {
+test("all user-facing meal text rejects numeric nutrition claims including scientific notation", () => {
   const cases = [
     { ...validSuggestion, rationale: "Bu öğün 430 kcal içerir." },
     { ...validSuggestion, rationale: "Bu öğün dört yüz kalori içerir." },
@@ -42,8 +42,11 @@ test("all user-facing meal text rejects numeric nutrition claims including full 
     { ...validSuggestion, rationale: "Bu öğün iki kilokalori içerir." },
     { ...validSuggestion, rationale: "Bu içecek 2 litre su içerir." },
     { ...validSuggestion, rationale: "Bu içecek iki mililitre süt içerir." },
+    { ...validSuggestion, rationale: "Bu öğün 1e3 kcal içerir." },
+    { ...validSuggestion, rationale: "Bu öğün 2.5e+2 gram içerir." },
     { ...validSuggestion, title: "450 kcal protein öğünü" },
     { ...validSuggestion, title: "Dört yüz kalorilik öğün" },
+    { ...validSuggestion, title: "1e3 kcal öğün" },
   ];
 
   for (const candidate of cases) {
@@ -67,6 +70,7 @@ test("food queries cannot smuggle model-authored quantities", () => {
     "iki kilokalori yoğurt",
     "2 litre su",
     "iki mililitre süt",
+    "1e3 kcal yoğurt",
   ]) {
     assert.throws(() => parseMealSuggestion({
       ...validSuggestion,
