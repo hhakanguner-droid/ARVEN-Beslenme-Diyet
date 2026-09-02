@@ -32,11 +32,13 @@ test("AI meal contract rejects AI-authored calorie totals", () => {
   assert.throws(() => parseMealSuggestion({ ...validSuggestion, energyKcal: 430 }));
 });
 
-test("all user-facing meal text rejects numeric nutrition claims including contextual one", () => {
+test("all user-facing meal text rejects numeric nutrition claims including full Turkish units", () => {
   const cases = [
     { ...validSuggestion, rationale: "Bu öğün 430 kcal içerir." },
     { ...validSuggestion, rationale: "Bu öğün dört yüz kalori içerir." },
     { ...validSuggestion, rationale: "Bu öğün bir gram protein içerir." },
+    { ...validSuggestion, rationale: "Bu öğün iki miligram sodyum içerir." },
+    { ...validSuggestion, rationale: "Bu öğün 200 mikrogram vitamin içerir." },
     { ...validSuggestion, title: "450 kcal protein öğünü" },
     { ...validSuggestion, title: "Dört yüz kalorilik öğün" },
   ];
@@ -52,6 +54,15 @@ test("all user-facing meal text rejects numeric nutrition claims including conte
       portionHint: { ...validSuggestion.ingredients[0].portionHint, naturalLabel: "120 g tavuk" },
     }],
   }), /Natural portion labels/);
+});
+
+test("food queries cannot smuggle model-authored gram or calorie quantities", () => {
+  for (const foodQuery of ["120 g tavuk", "400 kcal yoğurt", "iki miligram sodyum"] ) {
+    assert.throws(() => parseMealSuggestion({
+      ...validSuggestion,
+      ingredients: [{ ...validSuggestion.ingredients[0], foodQuery }],
+    }), /Food queries/, foodQuery);
+  }
 });
 
 test("weekly insight contract accepts qualitative narrative interpretation", () => {
@@ -87,6 +98,8 @@ test("weekly AI insight cannot hide invented numeric truth inside narrative stri
     "Hedefin yüzde seksenine yaklaştın.",
     "Hedefin yüzde bir altında kaldın.",
     "Ortalaman bir gram protein arttı.",
+    "Bu hafta hedefi bir kez aştın.",
+    "Planı bir defa kaçırdın.",
   ];
 
   for (const summary of invalidSummaries) {
