@@ -38,6 +38,10 @@ function assertDerivedTargets(targets: CalculatedGoalTargets): void {
   finiteInRange(targets.fatG, 0, 2_000, "derived fatG");
   finiteInRange(targets.fiberG, 0, 1_000, "derived fiberG");
   finiteInRange(targets.waterMl, 0, 20_000, "derived waterMl");
+  const macroEnergyKcal = (targets.proteinG * 4) + (targets.carbsG * 4) + (targets.fatG * 9);
+  if (macroEnergyKcal > targets.energyKcal + 5) {
+    throw new Error("Derived macro targets exceed the derived energy target");
+  }
 }
 
 export function deriveMifflinStJeorV1(inputs: MifflinStJeorV1Inputs): CalculatedGoalTargets {
@@ -56,7 +60,11 @@ export function deriveMifflinStJeorV1(inputs: MifflinStJeorV1Inputs): Calculated
   const energyKcal = round((bmr * activityFactor) + energyAdjustmentKcal, 0);
   const proteinG = round(weightKg * proteinGPerKg, 1);
   const fatG = round((energyKcal * fatEnergyPct) / 9, 1);
-  const carbsG = round(Math.max(0, (energyKcal - (proteinG * 4) - (fatG * 9)) / 4), 1);
+  const remainingEnergyKcal = energyKcal - (proteinG * 4) - (fatG * 9);
+  if (remainingEnergyKcal < -5) {
+    throw new Error("Goal inputs are internally inconsistent: protein and fat targets exceed available energy");
+  }
+  const carbsG = round(Math.max(0, remainingEnergyKcal / 4), 1);
   const fiberG = round((energyKcal / 1000) * 14, 1);
   const waterMl = round(weightKg * waterMlPerKg, 0);
   const targets = { energyKcal, proteinG, carbsG, fatG, fiberG, waterMl };
