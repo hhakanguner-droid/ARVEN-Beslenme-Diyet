@@ -24,6 +24,15 @@ function assertNutritionFactsValid(facts: NutritionFacts, field = "nutrition"): 
   assertExtendedNutritionFacts(facts.extended);
 }
 
+function assertCoverageConsistent(consumed: NutritionFacts, coverage: ConsumptionCoverage): void {
+  if (coverage !== "empty-day") return;
+  const hasCoreConsumption = consumed.energyKcal > 0 || consumed.proteinG > 0 || consumed.carbsG > 0 || consumed.fatG > 0 || (consumed.fiberG ?? 0) > 0;
+  const hasExtendedConsumption = Object.values(consumed.extended ?? {}).some((value) => value?.amount != null && value.amount > 0);
+  if (hasCoreConsumption || hasExtendedConsumption) {
+    throw new Error("empty-day coverage requires zero logged food consumption");
+  }
+}
+
 export function round(value: number, decimals = 1): number {
   const factor = 10 ** decimals;
   return Math.round((value + Number.EPSILON) * factor) / factor;
@@ -213,6 +222,7 @@ export function remainingTargets(
 ): NutritionTargets {
   assertNutritionFactsValid(targets, "targets");
   assertNutritionFactsValid(consumed, "consumed");
+  assertCoverageConsistent(consumed, coverage);
   finiteNonNegative(consumedWaterMl, "consumedWaterMl");
   if (targets.waterMl != null) finiteNonNegative(targets.waterMl, "targets.waterMl");
 
