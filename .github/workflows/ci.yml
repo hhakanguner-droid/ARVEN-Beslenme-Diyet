@@ -43,5 +43,7 @@ jobs:
         run: python3 scripts/validate_review12.py
       - name: Validate cross-cutting invariants
         run: python3 scripts/validate_invariants.py
+      - name: Validate review 14 systemic contracts
+        run: python3 scripts/validate_review14.py
       - name: Production build
         run: npm run build
