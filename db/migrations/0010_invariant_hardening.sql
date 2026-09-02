@@ -115,10 +115,67 @@ BEGIN
 END;
 
 -- ---------------------------------------------------------------------------
--- 3) Once a verified food has produced history, its extended nutrient source
--- set becomes versioned/immutable. Corrected nutrition requires a new food
--- version rather than silently rewriting historical provenance.
+-- 3) Extended nutrient values carry their own verification snapshot. Updates
+-- require a genuinely refreshed parent-food verification instant, so a sodium
+-- or vitamin value cannot inherit evidence that predates the changed value.
 -- ---------------------------------------------------------------------------
+ALTER TABLE food_nutrients ADD COLUMN source_verified_at TEXT;
+
+UPDATE food_nutrients
+SET source_verified_at = (
+  SELECT f.verified_at FROM foods f WHERE f.id = food_nutrients.food_id
+)
+WHERE source_verified_at IS NULL;
+
+CREATE TRIGGER food_nutrients_provenance_insert_r13
+BEFORE INSERT ON food_nutrients
+WHEN NEW.source_verified_at IS NOT NULL AND (
+  NEW.source_verified_at IS NOT (SELECT f.verified_at FROM foods f WHERE f.id = NEW.food_id)
+  OR length(NEW.source_verified_at) NOT IN (20,24)
+  OR substr(NEW.source_verified_at,11,1) <> 'T'
+  OR substr(NEW.source_verified_at,14,1) <> ':'
+  OR substr(NEW.source_verified_at,17,1) <> ':'
+  OR substr(NEW.source_verified_at,-1,1) <> 'Z'
+  OR strftime('%Y-%m-%dT%H:%M:%SZ',NEW.source_verified_at) IS NULL
+  OR strftime('%Y-%m-%dT%H:%M:%SZ',NEW.source_verified_at) <> substr(NEW.source_verified_at,1,19)||'Z'
+  OR (length(NEW.source_verified_at)=24 AND (substr(NEW.source_verified_at,20,1)<>'.' OR substr(NEW.source_verified_at,21,3) NOT GLOB '[0-9][0-9][0-9]'))
+)
+BEGIN
+  SELECT RAISE(ABORT, 'extended nutrient verification must match canonical food verification');
+END;
+
+CREATE TRIGGER food_nutrients_provenance_stamp_r13
+AFTER INSERT ON food_nutrients
+WHEN NEW.source_verified_at IS NULL
+BEGIN
+  UPDATE food_nutrients
+  SET source_verified_at = (SELECT f.verified_at FROM foods f WHERE f.id = NEW.food_id)
+  WHERE food_id = NEW.food_id AND nutrient_key = NEW.nutrient_key;
+END;
+
+CREATE TRIGGER food_nutrients_provenance_refresh_r13
+BEFORE UPDATE OF amount_per_100g, unit, completeness ON food_nutrients
+WHEN NEW.amount_per_100g IS NOT OLD.amount_per_100g
+  OR NEW.unit IS NOT OLD.unit
+  OR NEW.completeness IS NOT OLD.completeness
+BEGIN
+  SELECT CASE WHEN
+    NEW.source_verified_at IS NULL
+    OR NEW.source_verified_at IS OLD.source_verified_at
+    OR NEW.source_verified_at IS NOT (SELECT f.verified_at FROM foods f WHERE f.id = NEW.food_id)
+    OR length(NEW.source_verified_at) NOT IN (20,24)
+    OR substr(NEW.source_verified_at,11,1) <> 'T'
+    OR substr(NEW.source_verified_at,14,1) <> ':'
+    OR substr(NEW.source_verified_at,17,1) <> ':'
+    OR substr(NEW.source_verified_at,-1,1) <> 'Z'
+    OR strftime('%Y-%m-%dT%H:%M:%SZ',NEW.source_verified_at) IS NULL
+    OR strftime('%Y-%m-%dT%H:%M:%SZ',NEW.source_verified_at) <> substr(NEW.source_verified_at,1,19)||'Z'
+    OR (length(NEW.source_verified_at)=24 AND (substr(NEW.source_verified_at,20,1)<>'.' OR substr(NEW.source_verified_at,21,3) NOT GLOB '[0-9][0-9][0-9]'))
+  THEN RAISE(ABORT, 'extended nutrient changes require refreshed verification provenance') END;
+END;
+
+-- Once a verified food has produced history, its extended nutrient source set
+-- becomes versioned/immutable. Corrected nutrition requires a new food version.
 CREATE TRIGGER food_nutrients_used_insert_freeze_r13
 BEFORE INSERT ON food_nutrients
 WHEN EXISTS (SELECT 1 FROM meal_entry_items i WHERE i.food_id = NEW.food_id)
