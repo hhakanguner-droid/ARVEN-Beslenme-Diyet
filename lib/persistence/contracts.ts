@@ -1,6 +1,7 @@
 import type { DietarySafetyExclusion } from "@/lib/health-safety/policy";
 import type { UserNutritionPreferences } from "@/lib/preferences/types";
 import type {
+  ConsumptionCoverage,
   Food,
   NutritionFacts,
   NutritionSourceProvider,
@@ -23,6 +24,8 @@ export type DailyNutritionSnapshot = {
   date: string;
   targets: NutritionTargets | null;
   consumed: NutritionFacts;
+  /** Explicitly distinguishes no logged foods from logged foods with incomplete micronutrient data. */
+  consumptionCoverage: ConsumptionCoverage;
   waterMl: number;
 };
 
