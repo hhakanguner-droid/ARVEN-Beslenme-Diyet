@@ -1,0 +1,11 @@
+{
+  "name": "ARVEN Beslenme & Diyet",
+  "short_name": "ARVEN",
+  "description": "Kişiselleştirilmiş beslenme koçu",
+  "start_url": "/bugun",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#075a3c",
+  "lang": "tr-TR",
+  "orientation": "portrait-primary"
+}
