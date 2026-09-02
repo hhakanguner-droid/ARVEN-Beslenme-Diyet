@@ -80,10 +80,36 @@ export const NUTRIENT_UNITS: Readonly<Record<ExtendedNutrientKey, NutrientUnit>>
   "vitamin-k": "mcg",
 };
 
+const NUTRIENT_KEY_SET = new Set<string>(Object.keys(NUTRIENT_UNITS));
+
+export function isExtendedNutrientKey(value: string): value is ExtendedNutrientKey {
+  return NUTRIENT_KEY_SET.has(value);
+}
+
 function finiteNonNegativeOrNull(value: number | null, field: string): number | null {
   if (value == null) return null;
   if (!Number.isFinite(value) || value < 0) throw new Error(`${field} must be null or a finite non-negative number`);
   return value;
+}
+
+export function assertCanonicalNutrientValue(key: string, value: NutrientValue): asserts key is ExtendedNutrientKey {
+  if (!isExtendedNutrientKey(key)) throw new Error(`Unsupported nutrient key: ${key}`);
+  const expectedUnit = NUTRIENT_UNITS[key];
+  if (value.unit !== expectedUnit) {
+    throw new Error(`Nutrient ${key} must use canonical unit ${expectedUnit}; got ${value.unit}`);
+  }
+  const amount = finiteNonNegativeOrNull(value.amount, `${key} amount`);
+  if (amount == null && value.completeness === "complete") {
+    throw new Error(`Nutrient ${key} cannot be complete with a null amount`);
+  }
+}
+
+export function assertExtendedNutritionFacts(extended: ExtendedNutritionFacts | undefined): void {
+  if (!extended) return;
+  for (const [key, value] of Object.entries(extended)) {
+    if (!value) continue;
+    assertCanonicalNutrientValue(key, value);
+  }
 }
 
 export function scaleNutrientValue(value: NutrientValue, ratio: number): NutrientValue {
@@ -131,7 +157,11 @@ export function sumNutrientValues(values: NutrientValue[], unit: NutrientUnit): 
 export function sumExtendedNutrition(items: ExtendedNutritionFacts[]): ExtendedNutritionFacts {
   const keys = new Set<ExtendedNutrientKey>();
   for (const item of items) {
-    for (const key of Object.keys(item) as ExtendedNutrientKey[]) keys.add(key);
+    assertExtendedNutritionFacts(item);
+    for (const rawKey of Object.keys(item)) {
+      if (!isExtendedNutrientKey(rawKey)) throw new Error(`Unsupported nutrient key: ${rawKey}`);
+      keys.add(rawKey);
+    }
   }
 
   const result: ExtendedNutritionFacts = {};

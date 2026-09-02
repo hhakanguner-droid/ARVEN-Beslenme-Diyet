@@ -43,17 +43,6 @@ function normalizeTurkishText(value: string): string {
 }
 
 const MEDICATION_CONTEXT = ["ilac", "ilaclar", "ilac kullanimi", "medikasyon", "recete", "doz"];
-const MEDICATION_CHANGE_ACTIONS = [
-  "birak",
-  "kes",
-  "durdur",
-  "basla",
-  "artir",
-  "azalt",
-  "degistir",
-  "yukselt",
-  "dusur",
-];
 
 const DIRECT_MEDICAL_PATTERNS = [
   /\btani\s+koy/,
@@ -69,18 +58,20 @@ function mentionsKnownMedication(normalizedText: string, medicationNames: readon
 }
 
 /**
- * Medication-changing language must be evaluated with the authenticated user's
- * active medication names whenever that context exists. This catches directives
- * such as "Metformini bırak" in addition to generic phrases such as "ilacı bırak".
+ * AI-generated coaching text is not allowed to manage medication at all.
+ * The guard intentionally fails closed whenever the model mentions a generic
+ * medication-management concept or one of the authenticated user's active
+ * medication names. Any safe medication notice must be deterministic,
+ * server-authored copy outside the model output. This avoids an endless and
+ * incomplete list of imperative verbs such as "bırak", "alma" or "atla".
  */
 export function assertNoMedicalOverreach(text: string, context: MedicalSafetyContext = {}): void {
   const normalized = normalizeTurkishText(text);
   const genericMedicationContext = MEDICATION_CONTEXT.some((term) => normalized.includes(term));
   const namedMedicationContext = mentionsKnownMedication(normalized, context.medicationNames ?? []);
-  const medicationChange = MEDICATION_CHANGE_ACTIONS.some((term) => normalized.includes(term));
   const directOverreach = DIRECT_MEDICAL_PATTERNS.some((pattern) => pattern.test(normalized));
 
-  if (((genericMedicationContext || namedMedicationContext) && medicationChange) || directOverreach) {
+  if (genericMedicationContext || namedMedicationContext || directOverreach) {
     throw new Error("AI output violates ARVEN non-diagnostic health policy");
   }
 }

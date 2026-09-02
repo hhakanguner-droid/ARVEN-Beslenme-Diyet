@@ -52,6 +52,11 @@ test("AI meal text cannot smuggle numeric gram or calorie claims", () => {
 
   assert.throws(() => parseMealSuggestion({
     ...validSuggestion,
+    rationale: "Bu öğün dört yüz kalori içerir.",
+  }), /numeric nutrition/);
+
+  assert.throws(() => parseMealSuggestion({
+    ...validSuggestion,
     ingredients: [{
       ...validSuggestion.ingredients[0],
       portionHint: {
@@ -62,10 +67,10 @@ test("AI meal text cannot smuggle numeric gram or calorie claims", () => {
   }), /Natural portion labels/);
 });
 
-test("weekly insight contract accepts narrative interpretation", () => {
+test("weekly insight contract accepts qualitative narrative interpretation", () => {
   const parsed = parseWeeklyInsight({
     schemaVersion: "WeeklyInsightV1",
-    summary: "Bu hafta öğün kayıtlarında daha düzenli bir ritim oluştu.",
+    summary: "Bu hafta öğün kayıtlarında daha düzenli ritim oluştu.",
     positives: ["Planlanan öğünleri daha düzenli kaydettin."],
     areasForImprovement: ["Su kaydı bazı günlerde eksik kaldı."],
     suggestions: ["Su kaydını gün içine dağıtmayı deneyebilirsin."],
@@ -88,12 +93,21 @@ test("weekly AI insight cannot author adherence or calorie fields", () => {
 });
 
 test("weekly AI insight cannot hide invented numeric truth inside narrative strings", () => {
-  assert.throws(() => parseWeeklyInsight({
-    schemaVersion: "WeeklyInsightV1",
-    summary: "Uyum puanın %97 ve ortalaman 1900 kcal.",
-    positives: [],
-    areasForImprovement: [],
-    suggestions: [],
-    uncertainty: [],
-  }), /must not contain numeric claims/);
+  const invalidSummaries = [
+    "Uyum puanın %97 ve ortalaman 1900 kcal.",
+    "Uyumun yüzde doksan yedi.",
+    "Ortalaman iki bin kalori civarında.",
+    "Hedefin yüzde seksenine yaklaştın.",
+  ];
+
+  for (const summary of invalidSummaries) {
+    assert.throws(() => parseWeeklyInsight({
+      schemaVersion: "WeeklyInsightV1",
+      summary,
+      positives: [],
+      areasForImprovement: [],
+      suggestions: [],
+      uncertainty: [],
+    }), /must not contain numeric claims/, summary);
+  }
 });

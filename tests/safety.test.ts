@@ -57,10 +57,10 @@ test("verified non-conflicting food is allowed", () => {
   ], ["milk"]));
 });
 
-test("Turkish medication-changing language across common inflections is rejected", () => {
+test("AI medication-management context fails closed", () => {
   const unsafe = [
     "Bu durumda ilacı bırak.",
-    "İlaçları bırak.",
+    "İlaçları doktoruna sormadan değiştirme.",
     "İlaç kullanımını kes.",
     "Dozu azalt.",
     "Medikasyonu değiştir.",
@@ -74,15 +74,19 @@ test("Turkish medication-changing language across common inflections is rejected
   assert.doesNotThrow(() => assertNoMedicalOverreach("Bu sonuçları doktorunla değerlendirmen uygun olur."));
 });
 
-test("direct medication names are blocked when the authenticated medication context is supplied", () => {
-  assert.throws(
-    () => assertNoMedicalOverreach("Metformini bırak.", { medicationNames: ["Metformin"] }),
-    /non-diagnostic/,
-  );
-  assert.throws(
-    () => assertNoMedicalOverreach("Euthyrox dozunu azalt.", { medicationNames: ["Euthyrox"] }),
-    /non-diagnostic/,
-  );
+test("active medication names fail closed regardless of the action verb", () => {
+  const context = { medicationNames: ["Metformin", "Euthyrox"] };
+  const unsafe = [
+    "Metformini bırak.",
+    "Metformini artık alma.",
+    "Metformin dozunu atla.",
+    "Euthyrox kullanımını sürdür.",
+    "Euthyrox hakkında bugün değişiklik yapma.",
+  ];
+
+  for (const message of unsafe) {
+    assert.throws(() => assertNoMedicalOverreach(message, context), /non-diagnostic/, message);
+  }
 });
 
 test("explicit dietary exclusions are hard blocks and unresolved exclusions fail closed", () => {

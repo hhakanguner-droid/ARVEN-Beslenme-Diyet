@@ -48,8 +48,8 @@ CREATE TABLE goals (
   protein_g REAL NOT NULL CHECK (protein_g >= 0),
   carbs_g REAL NOT NULL CHECK (carbs_g >= 0),
   fat_g REAL NOT NULL CHECK (fat_g >= 0),
-  fiber_g REAL,
-  water_ml REAL,
+  fiber_g REAL CHECK (fiber_g IS NULL OR fiber_g >= 0),
+  water_ml REAL CHECK (water_ml IS NULL OR water_ml >= 0),
   source TEXT NOT NULL,
   calculation_method TEXT,
   calculation_version TEXT,
@@ -63,7 +63,6 @@ CREATE TABLE goals (
       AND calculation_inputs_json IS NOT NULL
       AND json_valid(calculation_inputs_json) = 1
       AND json_type(calculation_inputs_json) = 'object'
-      AND calculation_inputs_json <> '{}'
       AND json_valid(reference_ids_json) = 1
       AND json_type(reference_ids_json) = 'array'
       AND json_array_length(reference_ids_json) > 0
@@ -71,6 +70,40 @@ CREATE TABLE goals (
   )
 );
 CREATE INDEX goals_user_effective_idx ON goals(user_id, effective_from, effective_to);
+
+CREATE TRIGGER goals_validate_arven_calculated_insert
+BEFORE INSERT ON goals
+WHEN NEW.source = 'arven-calculated'
+BEGIN
+  SELECT CASE WHEN
+    (SELECT COUNT(*) FROM json_each(NEW.calculation_inputs_json)) = 0
+    OR (SELECT COUNT(*) FROM json_each(NEW.calculation_inputs_json) WHERE length(trim(key)) = 0) > 0
+    OR (SELECT COUNT(*) FROM json_each(NEW.reference_ids_json)
+        WHERE type = 'text' AND length(trim(CAST(value AS TEXT))) > 0)
+       <> json_array_length(NEW.reference_ids_json)
+  THEN RAISE(ABORT, 'ARVEN-calculated goals require meaningful provenance') END;
+END;
+
+CREATE TRIGGER goals_validate_arven_calculated_update
+BEFORE UPDATE OF source, calculation_method, calculation_version, calculation_inputs_json, reference_ids_json ON goals
+WHEN NEW.source = 'arven-calculated'
+BEGIN
+  SELECT CASE WHEN
+    NEW.calculation_method IS NULL OR length(trim(NEW.calculation_method)) = 0
+    OR NEW.calculation_version IS NULL OR length(trim(NEW.calculation_version)) = 0
+    OR NEW.calculation_inputs_json IS NULL
+    OR json_valid(NEW.calculation_inputs_json) <> 1
+    OR json_type(NEW.calculation_inputs_json) <> 'object'
+    OR (SELECT COUNT(*) FROM json_each(NEW.calculation_inputs_json)) = 0
+    OR (SELECT COUNT(*) FROM json_each(NEW.calculation_inputs_json) WHERE length(trim(key)) = 0) > 0
+    OR json_valid(NEW.reference_ids_json) <> 1
+    OR json_type(NEW.reference_ids_json) <> 'array'
+    OR json_array_length(NEW.reference_ids_json) = 0
+    OR (SELECT COUNT(*) FROM json_each(NEW.reference_ids_json)
+        WHERE type = 'text' AND length(trim(CAST(value AS TEXT))) > 0)
+       <> json_array_length(NEW.reference_ids_json)
+  THEN RAISE(ABORT, 'ARVEN-calculated goals require meaningful provenance') END;
+END;
 
 CREATE TABLE goal_meal_allocations (
   goal_id TEXT NOT NULL REFERENCES goals(id) ON DELETE CASCADE,
@@ -93,7 +126,7 @@ CREATE TABLE foods (
   protein_g_100g REAL NOT NULL CHECK (protein_g_100g >= 0),
   carbs_g_100g REAL NOT NULL CHECK (carbs_g_100g >= 0),
   fat_g_100g REAL NOT NULL CHECK (fat_g_100g >= 0),
-  fiber_g_100g REAL,
+  fiber_g_100g REAL CHECK (fiber_g_100g IS NULL OR fiber_g_100g >= 0),
   source_provider TEXT NOT NULL CHECK (source_provider IN ('open-food-facts','usda','turkomp','bls','swiss-fcd','manual-verified')),
   source_external_id TEXT,
   source_evidence_url TEXT,
@@ -107,14 +140,56 @@ CREATE INDEX foods_owner_idx ON foods(owner_user_id);
 CREATE INDEX foods_barcode_idx ON foods(barcode);
 CREATE INDEX foods_source_idx ON foods(source_provider, source_external_id);
 
+CREATE TABLE nutrient_catalog (
+  nutrient_key TEXT PRIMARY KEY,
+  unit TEXT NOT NULL CHECK (unit IN ('g','mg','mcg')),
+  UNIQUE (nutrient_key, unit)
+);
+
+INSERT INTO nutrient_catalog (nutrient_key, unit) VALUES
+  ('saturated-fat','g'),
+  ('trans-fat','g'),
+  ('monounsaturated-fat','g'),
+  ('polyunsaturated-fat','g'),
+  ('omega-3','g'),
+  ('omega-6','g'),
+  ('sugars','g'),
+  ('added-sugars','g'),
+  ('sodium','mg'),
+  ('salt','g'),
+  ('cholesterol','mg'),
+  ('caffeine','mg'),
+  ('calcium','mg'),
+  ('iron','mg'),
+  ('potassium','mg'),
+  ('magnesium','mg'),
+  ('zinc','mg'),
+  ('phosphorus','mg'),
+  ('selenium','mcg'),
+  ('iodine','mcg'),
+  ('vitamin-a','mcg'),
+  ('vitamin-b1','mg'),
+  ('vitamin-b2','mg'),
+  ('vitamin-b3','mg'),
+  ('vitamin-b5','mg'),
+  ('vitamin-b6','mg'),
+  ('vitamin-b7','mcg'),
+  ('vitamin-b9','mcg'),
+  ('vitamin-b12','mcg'),
+  ('vitamin-c','mg'),
+  ('vitamin-d','mcg'),
+  ('vitamin-e','mg'),
+  ('vitamin-k','mcg');
+
 CREATE TABLE food_nutrients (
   food_id TEXT NOT NULL REFERENCES foods(id) ON DELETE CASCADE,
   nutrient_key TEXT NOT NULL,
-  amount_per_100g REAL,
+  amount_per_100g REAL CHECK (amount_per_100g IS NULL OR amount_per_100g >= 0),
   unit TEXT NOT NULL CHECK (unit IN ('g','mg','mcg')),
   completeness TEXT NOT NULL CHECK (completeness IN ('complete','partial','unknown')),
   CHECK (amount_per_100g IS NOT NULL OR completeness <> 'complete'),
-  PRIMARY KEY (food_id, nutrient_key)
+  PRIMARY KEY (food_id, nutrient_key),
+  FOREIGN KEY (nutrient_key, unit) REFERENCES nutrient_catalog(nutrient_key, unit)
 );
 
 CREATE TABLE food_portion_options (
@@ -130,7 +205,8 @@ CREATE TABLE food_portion_options (
   source_license_id TEXT,
   verified_at TEXT NOT NULL,
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  UNIQUE (id, food_id)
 );
 CREATE INDEX food_portion_options_food_idx ON food_portion_options(food_id);
 
@@ -244,28 +320,30 @@ CREATE TABLE meal_entry_items (
   id TEXT PRIMARY KEY,
   meal_entry_id TEXT NOT NULL REFERENCES meal_entries(id) ON DELETE CASCADE,
   food_id TEXT NOT NULL REFERENCES foods(id),
-  portion_option_id TEXT REFERENCES food_portion_options(id),
-  portion_quantity REAL,
+  portion_option_id TEXT,
+  portion_quantity REAL CHECK (portion_quantity IS NULL OR portion_quantity > 0),
   portion_label TEXT,
   grams REAL NOT NULL CHECK (grams > 0),
   energy_kcal REAL NOT NULL CHECK (energy_kcal >= 0),
   protein_g REAL NOT NULL CHECK (protein_g >= 0),
   carbs_g REAL NOT NULL CHECK (carbs_g >= 0),
   fat_g REAL NOT NULL CHECK (fat_g >= 0),
-  fiber_g REAL,
+  fiber_g REAL CHECK (fiber_g IS NULL OR fiber_g >= 0),
   calculation_version TEXT NOT NULL,
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (portion_option_id, food_id) REFERENCES food_portion_options(id, food_id)
 );
 CREATE INDEX meal_entry_items_entry_idx ON meal_entry_items(meal_entry_id);
 
 CREATE TABLE meal_entry_item_nutrients (
   meal_entry_item_id TEXT NOT NULL REFERENCES meal_entry_items(id) ON DELETE CASCADE,
   nutrient_key TEXT NOT NULL,
-  amount REAL,
+  amount REAL CHECK (amount IS NULL OR amount >= 0),
   unit TEXT NOT NULL CHECK (unit IN ('g','mg','mcg')),
   completeness TEXT NOT NULL CHECK (completeness IN ('complete','partial','unknown')),
   CHECK (amount IS NOT NULL OR completeness <> 'complete'),
-  PRIMARY KEY (meal_entry_item_id, nutrient_key)
+  PRIMARY KEY (meal_entry_item_id, nutrient_key),
+  FOREIGN KEY (nutrient_key, unit) REFERENCES nutrient_catalog(nutrient_key, unit)
 );
 
 CREATE TABLE water_logs (
@@ -290,6 +368,8 @@ CREATE TABLE ai_actions (
   created_at TEXT NOT NULL,
   confirmed_at TEXT,
   applied_at TEXT,
+  CHECK (status NOT IN ('confirmed','applied') OR confirmed_at IS NOT NULL),
+  CHECK (status <> 'applied' OR applied_at IS NOT NULL),
   UNIQUE(user_id, idempotency_key)
 );
 CREATE INDEX ai_actions_user_status_idx ON ai_actions(user_id, status);

@@ -1,7 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { remainingTargets, scaleNutrition, sumNutrition } from "../lib/nutrition/calculations";
-import { scaleNutrientValue, sumNutrientValues } from "../lib/nutrition/nutrients";
+import {
+  calculatePortions,
+  remainingTargets,
+  scaleNutrition,
+  sumNutrition,
+} from "../lib/nutrition/calculations";
+import {
+  assertExtendedNutritionFacts,
+  scaleNutrientValue,
+  sumNutrientValues,
+} from "../lib/nutrition/nutrients";
 import { approximateGramLabel, resolvePortionSelection } from "../lib/nutrition/portions";
 import { assertVerifiedNutritionSource } from "../lib/nutrition/sources";
 import type { Food } from "../lib/nutrition/types";
@@ -103,6 +112,16 @@ test("null nutrient amounts can never remain complete", () => {
   ], "mg"), { amount: 100, unit: "mg", completeness: "partial" });
 });
 
+test("canonical nutrient key and unit pairs are enforced at runtime", () => {
+  assert.throws(() => assertExtendedNutritionFacts({
+    sodium: { amount: 100, unit: "g", completeness: "complete" },
+  }), /canonical unit mg/);
+
+  assert.throws(() => assertExtendedNutritionFacts({
+    typo: { amount: 1, unit: "mg", completeness: "complete" },
+  } as never), /Unsupported nutrient key/);
+});
+
 test("remaining targets never go below zero and subtract logged water", () => {
   const result = remainingTargets(
     { energyKcal: 2000, proteinG: 150, carbsG: 200, fatG: 70, waterMl: 2000 },
@@ -116,6 +135,34 @@ test("remaining targets never go below zero and subtract logged water", () => {
   assert.equal(result.waterMl, 1000);
 });
 
+test("remaining micronutrients inherit completeness from both target and consumption", () => {
+  const result = remainingTargets(
+    {
+      energyKcal: 2000,
+      proteinG: 150,
+      carbsG: 200,
+      fatG: 70,
+      extended: {
+        sodium: { amount: 2000, unit: "mg", completeness: "partial" },
+        calcium: { amount: 1000, unit: "mg", completeness: "unknown" },
+      },
+    },
+    {
+      energyKcal: 1000,
+      proteinG: 50,
+      carbsG: 100,
+      fatG: 30,
+      extended: {
+        sodium: { amount: 500, unit: "mg", completeness: "complete" },
+        calcium: { amount: 300, unit: "mg", completeness: "complete" },
+      },
+    },
+  );
+
+  assert.deepEqual(result.extended?.sodium, { amount: 1500, unit: "mg", completeness: "partial" });
+  assert.deepEqual(result.extended?.calcium, { amount: 700, unit: "mg", completeness: "unknown" });
+});
+
 test("verified source is required by both validation and calculation boundary", () => {
   assert.doesNotThrow(() => assertVerifiedNutritionSource(verifiedFood));
   const invalid: Food = {
@@ -124,4 +171,40 @@ test("verified source is required by both validation and calculation boundary", 
   };
   assert.throws(() => assertVerifiedNutritionSource(invalid), /external source id/);
   assert.throws(() => scaleNutrition({ food: invalid, grams: 100 }), /external source id/);
+});
+
+test("core nutrition facts are validated before any portion scaling", () => {
+  const invalidFoods: Food[] = [
+    { ...verifiedFood, id: "negative", nutrition: { ...verifiedFood.nutrition, energyKcal: -1 } },
+    { ...verifiedFood, id: "nan", nutrition: { ...verifiedFood.nutrition, proteinG: Number.NaN } },
+    { ...verifiedFood, id: "infinite", nutrition: { ...verifiedFood.nutrition, carbsG: Number.POSITIVE_INFINITY } },
+  ];
+
+  for (const food of invalidFoods) {
+    assert.throws(() => scaleNutrition({ food, grams: 100 }), /finite non-negative/);
+  }
+});
+
+test("meal totals accumulate exact portion values before final rounding", () => {
+  const tinyFood: Food = {
+    ...verifiedFood,
+    id: "tiny-energy",
+    nutrition: { energyKcal: 49, proteinG: 0, carbsG: 0, fatG: 0 },
+  };
+  const portions = Array.from({ length: 100 }, () => ({ food: tinyFood, grams: 1 }));
+
+  assert.equal(scaleNutrition(portions[0]!).energyKcal, 0);
+  assert.equal(calculatePortions(portions).energyKcal, 49);
+});
+
+test("negative optional targets are rejected before remaining calculations", () => {
+  assert.throws(() => remainingTargets(
+    { energyKcal: 2000, proteinG: 100, carbsG: 200, fatG: 70, fiberG: -1 },
+    { energyKcal: 0, proteinG: 0, carbsG: 0, fatG: 0 },
+  ), /finite non-negative/);
+
+  assert.throws(() => remainingTargets(
+    { energyKcal: 2000, proteinG: 100, carbsG: 200, fatG: 70, waterMl: -100 },
+    { energyKcal: 0, proteinG: 0, carbsG: 0, fatG: 0 },
+  ), /finite non-negative/);
 });
