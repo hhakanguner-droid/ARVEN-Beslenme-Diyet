@@ -1,9 +1,11 @@
-import type { Food, NutritionSource } from "./types";
+import type { Food, NutritionSource, NutritionSourceProvider } from "./types";
 
-const ALLOWED_PROVIDERS = new Set<NutritionSource["provider"]>([
+const ALLOWED_PROVIDERS = new Set<NutritionSourceProvider>([
   "open-food-facts",
   "usda",
   "turkomp",
+  "bls",
+  "swiss-fcd",
   "manual-verified",
 ]);
 
