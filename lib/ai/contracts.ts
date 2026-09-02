@@ -47,7 +47,7 @@ function normalizeNumberText(value: string): string {
     .replace(/ç/g, "c")
     .replace(/ö/g, "o")
     .replace(/ü/g, "u")
-    .replace(/[^a-z0-9\s.,]/g, " ")
+    .replace(/[^a-z0-9\s.,+\-]/g, " ")
     .replace(/\s+/g, " ");
 }
 
@@ -75,7 +75,8 @@ function containsContextualOneClaim(value: string): boolean {
 
 function containsDigitNutritionClaim(value: string): boolean {
   const normalized = normalizeNumberText(value);
-  return new RegExp(`\\b\\d+(?:[.,]\\d+)?\\s*${NUTRITION_UNIT_PATTERN}\\b`, "i").test(normalized);
+  const numericLiteral = "\\d+(?:[.,]\\d+)?(?:e[+\\-]?\\d+)?";
+  return new RegExp(`\\b${numericLiteral}\\s*${NUTRITION_UNIT_PATTERN}\\b`, "i").test(normalized);
 }
 
 function containsSpelledNutritionClaim(value: string): boolean {
@@ -149,8 +150,8 @@ export type WeeklyInsight = z.infer<typeof WeeklyInsightV1>;
 /**
  * Deliberately absent from the AI schema: grams, calories, protein,
  * carbohydrate, fat and other nutrient totals. Strict schemas reject those
- * fields and all model-authored meal text/query fields reject digit- or
- * word-authored nutrition claims, including Turkish inflections and full units.
+ * fields and all model-authored meal text/query fields reject digit-, scientific-
+ * notation-, or word-authored nutrition claims, including Turkish inflections.
  */
 export function parseMealSuggestion(input: unknown): MealSuggestion {
   return MealSuggestionV1.parse(input);
