@@ -92,16 +92,20 @@ function finiteNonNegativeOrNull(value: number | null, field: string): number | 
   return value;
 }
 
+function assertNutrientValueSemantics(value: NutrientValue, field: string): void {
+  const amount = finiteNonNegativeOrNull(value.amount, `${field} amount`);
+  if (amount == null && value.completeness !== "unknown") {
+    throw new Error(`${field} with a null amount must use unknown completeness`);
+  }
+}
+
 export function assertCanonicalNutrientValue(key: string, value: NutrientValue): asserts key is ExtendedNutrientKey {
   if (!isExtendedNutrientKey(key)) throw new Error(`Unsupported nutrient key: ${key}`);
   const expectedUnit = NUTRIENT_UNITS[key];
   if (value.unit !== expectedUnit) {
     throw new Error(`Nutrient ${key} must use canonical unit ${expectedUnit}; got ${value.unit}`);
   }
-  const amount = finiteNonNegativeOrNull(value.amount, `${key} amount`);
-  if (amount == null && value.completeness === "complete") {
-    throw new Error(`Nutrient ${key} cannot be complete with a null amount`);
-  }
+  assertNutrientValueSemantics(value, `Nutrient ${key}`);
 }
 
 export function assertExtendedNutritionFacts(extended: ExtendedNutritionFacts | undefined): void {
@@ -114,13 +118,13 @@ export function assertExtendedNutritionFacts(extended: ExtendedNutritionFacts | 
 
 export function scaleNutrientValue(value: NutrientValue, ratio: number): NutrientValue {
   if (!Number.isFinite(ratio) || ratio < 0) throw new Error("ratio must be a finite non-negative number");
-  const amount = finiteNonNegativeOrNull(value.amount, "nutrient amount");
-  if (amount == null) {
+  assertNutrientValueSemantics(value, "nutrient");
+  if (value.amount == null) {
     return { ...value, amount: null, completeness: "unknown" };
   }
   return {
     ...value,
-    amount: Math.round((amount * ratio + Number.EPSILON) * 1000) / 1000,
+    amount: Math.round((value.amount * ratio + Number.EPSILON) * 1000) / 1000,
   };
 }
 
@@ -128,13 +132,10 @@ export function sumNutrientValues(values: NutrientValue[], unit: NutrientUnit): 
   if (values.length === 0) return { amount: 0, unit, completeness: "complete" };
   for (const value of values) {
     if (value.unit !== unit) throw new Error(`Cannot sum nutrient units ${value.unit} and ${unit}`);
+    assertNutrientValueSemantics(value, "nutrient");
   }
 
-  const normalized = values.map((value) => ({
-    ...value,
-    amount: finiteNonNegativeOrNull(value.amount, "nutrient amount"),
-  }));
-  const knownAmounts = normalized
+  const knownAmounts = values
     .map((value) => value.amount)
     .filter((value): value is number => value != null);
 
@@ -142,7 +143,7 @@ export function sumNutrientValues(values: NutrientValue[], unit: NutrientUnit): 
     ? null
     : Math.round((knownAmounts.reduce((sum, value) => sum + value, 0) + Number.EPSILON) * 1000) / 1000;
 
-  const allComplete = normalized.every(
+  const allComplete = values.every(
     (value) => value.amount != null && value.completeness === "complete",
   );
   const completeness: NutrientCompleteness = amount == null
