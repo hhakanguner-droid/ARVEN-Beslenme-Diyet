@@ -20,28 +20,33 @@ const PortionMeasure = z.enum([
 
 const PortionSize = z.enum(["small", "medium", "large"]);
 
+const PortionHint = z.object({
+  measure: PortionMeasure,
+  quantity: z.number().positive().max(20),
+  size: PortionSize.optional(),
+  naturalLabel: z.string().min(1).max(120),
+}).strict();
+
+const SuggestedIngredient = z.object({
+  foodQuery: z.string().min(1).max(120),
+  portionHint: PortionHint,
+}).strict();
+
 export const MealSuggestionV1 = z.object({
   schemaVersion: z.literal("MealSuggestionV1"),
   title: z.string().min(1).max(120),
   rationale: z.string().min(1).max(600),
-  ingredients: z.array(z.object({
-    foodQuery: z.string().min(1).max(120),
-    portionHint: z.object({
-      measure: PortionMeasure,
-      quantity: z.number().positive().max(20),
-      size: PortionSize.optional(),
-      naturalLabel: z.string().min(1).max(120),
-    }),
-  })).min(1).max(20),
+  ingredients: z.array(SuggestedIngredient).min(1).max(20),
   preparation: z.array(z.string().min(1).max(300)).max(12),
   uncertainty: z.array(z.string().min(1).max(240)).max(8),
-});
+}).strict();
 
 export type MealSuggestion = z.infer<typeof MealSuggestionV1>;
 
 /**
  * Deliberately absent from the AI schema: grams, calories, protein,
- * carbohydrate, fat and other nutrient totals. AI speaks in natural portion
+ * carbohydrate, fat and other nutrient totals. Strict schemas reject those
+ * fields if a model tries to include them. AI speaks in natural portion
  * language. The server resolves that hint against verified FoodPortionOptions,
  * converts it to grams internally, then calculates nutrition deterministically.
  */
