@@ -47,17 +47,39 @@ const MEDICAL_MANAGEMENT_CONTEXT = [
   "tedavi",
 ];
 
+/**
+ * The health boundary intentionally rejects obligation/permission wording around
+ * treatment-style action verbs without trying to identify a drug name. ARVEN V1
+ * stores no medication registry, so a registry-independent fail-closed rule is
+ * safer than guessing whether the preceding noun is a medicine.
+ */
+const TREATMENT_MODAL_PATTERNS = [
+  /\b(?:al|kullan|birak|kes|durdur|basla|atla|degistir)(?:ma|me)?(?:mali|meli)(?:sin|siniz)?\b/,
+  /\b(?:al|kullan|birak|kes|durdur|basla|atla|degistir)(?:abil|ebil)(?:ir)?(?:sin|siniz)?\b/,
+  /\b(?:al|kullan|birak|kes|durdur|basla|atla|degistir)(?:man|men|maniz|meniz)\s+(?:gerekir|gerekiyor|lazim)\b/,
+];
+
 const DIRECT_TREATMENT_PATTERNS = [
   /\b[a-z0-9]{3,}\w*\s+(?:artik\s+)?(?:al|alma|kullan|kullanma|birak|kes|durdur|basla|atla|degistir|degistirme)\b/,
   /\b[a-z0-9]{3,}\w*\s+(?:doz\w*|kullanim\w*)\s+(?:artir|azalt|degistir|yukselt|dusur|atla|surdur|devam)\b/,
   /\btedavi\w*\s+(?:basla|uygula|degistir|durdur|surdur)\b/,
   /\brecete\w*\b/,
+  ...TREATMENT_MODAL_PATTERNS,
 ];
 
+/**
+ * Health AI must not label the user with a diagnosis. These patterns are
+ * intentionally broader than a disease-name allowlist: direct second-person
+ * predicate labels and definitive "bu X'tir" assertions are rejected so a new
+ * disease term cannot silently bypass the boundary.
+ */
 const DIRECT_DIAGNOSIS_PATTERNS = [
   /\b(?:tani|teshis)\w*\b/,
   /\b(?:sende|sizde)\b.{0,80}\b(?:var|hastasin|hastaligi|oldugun|oldugunu)\b/,
   /\b(?:belirti|belirtiler|bulgu|bulgular|sonuc|sonuclar|deger|degerler)\w*\b.{0,100}\b(?:oldugunu|gosteriyor|kanitliyor|dogruluyor)\b/,
+  /\b[a-z0-9]{3,}(?:\s+[a-z0-9]{3,}){0,2}\s+hastasi(?:sin|siniz|dir)?\b/,
+  /\b(?:sen|siz)\s+(?:[a-z0-9]{2,}\s+){0,2}[a-z0-9]{3,}(?:sin|siniz|sun|sunuz)\b/,
+  /\bbu\s+[a-z0-9]{3,}(?:tir|dir|tur|dur)\b/,
 ];
 
 /**
