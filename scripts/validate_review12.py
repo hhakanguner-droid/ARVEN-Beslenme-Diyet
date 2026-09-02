@@ -69,7 +69,7 @@ def main():
     conn.execute("INSERT INTO meal_entries(id,user_id,local_date,meal_type,occurred_at,created_at,updated_at) VALUES('m1','u1','2026-09-02','lunch',?,?,?)", (NOW, NOW, NOW))
     conn.execute("""
       INSERT INTO meal_entry_items(id,meal_entry_id,food_id,portion_option_id,portion_quantity,portion_label,grams,energy_kcal,protein_g,carbs_g,fat_g,fiber_g,calculation_version,created_at)
-      VALUES('item','m1','food','slice',1,'1 dilim',30,30,3,6,1.5,0.6,'v1',?)
+      VALUES('item','m1','food','slice',1,'1 dilim',30,30.3,3,6,1.5,0.6,'v1',?)
     """, (NOW,))
     snapshot = conn.execute("SELECT amount,unit,completeness FROM meal_entry_item_nutrients WHERE meal_entry_item_id='item' AND nutrient_key='sodium'").fetchone()
     assert snapshot == (30.0, 'mg', 'complete'), snapshot
