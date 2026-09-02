@@ -35,5 +35,7 @@ jobs:
         run: python3 scripts/validate_review8.py
       - name: Validate review 9 database contracts
         run: python3 scripts/validate_review9.py
+      - name: Validate review 10 database contracts
+        run: python3 scripts/validate_review10.py
       - name: Production build
         run: npm run build
