@@ -1,16 +1,30 @@
+import type { ExtendedNutritionFacts } from "./nutrients";
+
 export type NutritionFacts = {
   energyKcal: number;
   proteinG: number;
   carbsG: number;
   fatG: number;
+  /** Undefined means the source does not provide a trustworthy fibre value. */
   fiberG?: number;
+  /** Optional extended nutrients preserve complete/partial/unknown state per nutrient. */
+  extended?: ExtendedNutritionFacts;
 };
 
+export type NutritionSourceProvider =
+  | "open-food-facts"
+  | "usda"
+  | "turkomp"
+  | "bls"
+  | "swiss-fcd"
+  | "manual-verified";
+
 export type NutritionSource = {
-  provider: "open-food-facts" | "usda" | "turkomp" | "manual-verified";
+  provider: NutritionSourceProvider;
   externalId?: string;
   verifiedAt: string;
   evidenceUrl?: string;
+  licenseId?: string;
 };
 
 export type PortionMeasure =
@@ -45,13 +59,21 @@ export type FoodPortionOption = {
   source: NutritionSource;
 };
 
+export type AllergenDataStatus = "verified" | "unknown" | "not-applicable";
+
 export type Food = {
   id: string;
   name: string;
+  brand?: string;
+  barcode?: string;
+  isLiquid?: boolean;
   basisGrams: 100;
   nutrition: NutritionFacts;
   source: NutritionSource;
   portionOptions?: FoodPortionOption[];
+  /** Stable allergen identifiers resolved from verified source data. */
+  allergenIds?: string[];
+  allergenDataStatus?: AllergenDataStatus;
 };
 
 /**
