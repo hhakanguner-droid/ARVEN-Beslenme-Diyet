@@ -59,8 +59,8 @@ test("AI medication or treatment management is blocked without storing a medicat
     "Metformini almalısın.",
     "Aspirin'i bırak.",
     "Metformin'e başla.",
-    "Bunu kullanmamalısın.",
-    "Bunu kullanman gerekiyor.",
+    "Bunu ilacın yerine kullanmamalısın.",
+    "Bu ilacı kullanman gerekiyor.",
   ];
 
   for (const message of unsafe) {
@@ -68,6 +68,12 @@ test("AI medication or treatment management is blocked without storing a medicat
   }
 
   assert.doesNotThrow(() => assertNoMedicalOverreach("Bu sonuçları bir sağlık profesyoneliyle değerlendirmen uygun olur."));
+});
+
+test("ordinary nutrition commands are not mistaken for medication management", () => {
+  for (const message of ["Meyve al.", "Zeytinyağı kullan.", "Ekmeği kes.", "Tuzu azalt."]) {
+    assert.doesNotThrow(() => assertNoMedicalOverreach(message), message);
+  }
 });
 
 test("direct diagnosis assertions are rejected without blocking ordinary coaching predicates", () => {
@@ -112,4 +118,18 @@ test("explicit dietary exclusions are hard blocks and malformed exclusions fail 
   ]) {
     assert.throws(() => assertNoDietaryExclusionConflict(candidate, [exclusion]), /unresolved/);
   }
+});
+
+test("malformed candidate dietary-rule identifiers fail closed", () => {
+  assert.throws(() => assertNoDietaryExclusionConflict([{
+    foodId: "mystery-food",
+    foodName: "Belirsiz ürün",
+    dietarySafetyDataStatus: "verified",
+    dietaryConflictRuleIds: ["   "],
+  }], [{
+    kind: "rule",
+    id: "vegetarian",
+    label: "Vejetaryen",
+    resolutionStatus: "resolved",
+  }]), /dietary rule identifier unresolved/);
 });
