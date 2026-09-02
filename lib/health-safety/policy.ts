@@ -50,18 +50,28 @@ const MEDICAL_MANAGEMENT_CONTEXT = [
   "tedavi",
 ];
 
-const TREATMENT_MODAL_PATTERNS = [
+/**
+ * This is not a user medication registry and is not used for medication tracking.
+ * It is a small defense-in-depth vocabulary for common medicine names that may
+ * appear in model output. Generic food/coaching verbs are never blocked unless
+ * medical context or a recognized medicine token is present.
+ */
+const MEDICATION_SAFETY_TERMS = [
+  "aspirin",
+  "metformin",
+  "euthyrox",
+  "levotiroksin",
+  "ibuprofen",
+  "parasetamol",
+  "parol",
+];
+
+const TREATMENT_ACTION_PATTERNS = [
+  /\b(?:al|alma|kullan|kullanma|birak|kes|durdur|basla|atla|degistir|degistirme)\b/,
   /\b(?:al|kullan|birak|kes|durdur|basla|atla|degistir)(?:ma|me)?(?:mali|meli)(?:sin|siniz)?\b/,
   /\b(?:al|kullan|birak|kes|durdur|basla|atla|degistir)(?:abil|ebil)(?:ir)?(?:sin|siniz)?\b/,
   /\b(?:al|kullan|birak|kes|durdur|basla|atla|degistir)(?:man|men|maniz|meniz)\s+(?:gerekir|gerekiyor|lazim)\b/,
-];
-
-const DIRECT_TREATMENT_PATTERNS = [
-  /\b[a-z0-9]{3,}\w*\s+(?:artik\s+)?(?:al|alma|kullan|kullanma|birak|kes|durdur|basla|atla|degistir|degistirme)\b/,
-  /\b[a-z0-9]{3,}\w*\s+(?:doz\w*|kullanim\w*)\s+(?:artir|azalt|degistir|yukselt|dusur|atla|surdur|devam)\b/,
-  /\btedavi\w*\s+(?:basla|uygula|degistir|durdur|surdur)\b/,
-  /\brecete\w*\b/,
-  ...TREATMENT_MODAL_PATTERNS,
+  /\b(?:artir|azalt|yukselt|dusur|surdur|devam)\b/,
 ];
 
 /**
@@ -81,16 +91,26 @@ const DIRECT_DIAGNOSIS_PATTERNS = [
   new RegExp(`\\b(?:belirti|belirtiler|bulgu|bulgular|sonuc|sonuclar|deger|degerler)\\w*\\b.{0,100}\\b${DIAGNOSIS_TERM}\\b.{0,50}\\b(?:oldugunu|gosteriyor|kanitliyor|dogruluyor)\\b`),
 ];
 
+function containsMedicationSafetyTerm(normalized: string): boolean {
+  return MEDICATION_SAFETY_TERMS.some((term) => {
+    const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`\\b${escaped}\\w*\\b`).test(normalized);
+  });
+}
+
 /**
  * ARVEN does not store or track medications. AI-authored health text therefore
- * cannot rely on a user medication registry for safety. Instead this boundary
- * rejects medication/treatment-management language and diagnosis assertions
- * directly. Safe escalation copy should be deterministic/server-authored.
+ * cannot rely on a user medication registry for safety. Treatment-management
+ * blocking is intentionally tied to explicit medical context or a recognized
+ * medicine token so ordinary nutrition guidance such as "Meyve al" remains valid.
+ * Safe escalation copy should be deterministic/server-authored.
  */
 export function assertNoMedicalOverreach(text: string): void {
   const normalized = normalizeTurkishText(text);
   const managementContext = MEDICAL_MANAGEMENT_CONTEXT.some((term) => normalized.includes(term));
-  const treatmentDirective = DIRECT_TREATMENT_PATTERNS.some((pattern) => pattern.test(normalized));
+  const medicationTerm = containsMedicationSafetyTerm(normalized);
+  const treatmentAction = TREATMENT_ACTION_PATTERNS.some((pattern) => pattern.test(normalized));
+  const treatmentDirective = (managementContext || medicationTerm) && treatmentAction;
   const diagnosisAssertion = DIRECT_DIAGNOSIS_PATTERNS.some((pattern) => pattern.test(normalized));
 
   if (managementContext || treatmentDirective || diagnosisAssertion) {
@@ -147,7 +167,8 @@ export function assertNoAllergyConflict(
 
 /**
  * Explicit avoid rules and dietary rules are recommendation hard-blocks.
- * Unresolved or malformed exclusions fail closed instead of disappearing.
+ * Unresolved or malformed exclusions/candidate identifiers fail closed instead
+ * of disappearing from the safety decision.
  */
 export function findDietaryExclusionConflicts(
   candidates: ResolvedFoodDietarySafety[],
@@ -170,14 +191,24 @@ export function findDietaryExclusionConflicts(
   }
 
   for (const candidate of candidates) {
-    if (foodIds.has(candidate.foodId.trim())) conflicts.add(candidate.foodName);
+    const candidateFoodId = candidate.foodId.trim();
+    if (foodIds.size > 0 && candidateFoodId.length === 0) {
+      conflicts.add(`${candidate.foodName} (food identifier unresolved)`);
+      continue;
+    }
+    if (foodIds.has(candidateFoodId)) conflicts.add(candidate.foodName);
 
     if (ruleIds.size > 0) {
       if (candidate.dietarySafetyDataStatus === "unknown") {
         conflicts.add(`${candidate.foodName} (dietary safety data unresolved)`);
         continue;
       }
-      if (candidate.dietaryConflictRuleIds.some((ruleId) => ruleIds.has(ruleId.trim()))) {
+      const normalizedCandidateRuleIds = candidate.dietaryConflictRuleIds.map((ruleId) => ruleId.trim());
+      if (normalizedCandidateRuleIds.some((ruleId) => ruleId.length === 0)) {
+        conflicts.add(`${candidate.foodName} (dietary rule identifier unresolved)`);
+        continue;
+      }
+      if (normalizedCandidateRuleIds.some((ruleId) => ruleIds.has(ruleId))) {
         conflicts.add(candidate.foodName);
       }
     }
