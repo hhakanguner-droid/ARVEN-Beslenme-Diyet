@@ -57,6 +57,22 @@ CREATE TABLE foods (
 CREATE INDEX foods_name_idx ON foods(normalized_name);
 CREATE INDEX foods_owner_idx ON foods(owner_user_id);
 
+CREATE TABLE food_portion_options (
+  id TEXT PRIMARY KEY,
+  food_id TEXT NOT NULL REFERENCES foods(id) ON DELETE CASCADE,
+  measure TEXT NOT NULL CHECK (measure IN ('piece','slice','teaspoon','tablespoon','tea-glass','water-glass','cup','bowl','handful','palm','serving','package','bottle','can','ladle')),
+  size TEXT CHECK (size IN ('small','medium','large')),
+  label TEXT NOT NULL,
+  grams_per_unit REAL NOT NULL CHECK (grams_per_unit > 0),
+  source_provider TEXT NOT NULL CHECK (source_provider IN ('open-food-facts','usda','turkomp','manual-verified')),
+  source_external_id TEXT,
+  source_evidence_url TEXT,
+  verified_at TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX food_portion_options_food_idx ON food_portion_options(food_id);
+
 CREATE TABLE allergies (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -94,6 +110,9 @@ CREATE TABLE meal_entry_items (
   id TEXT PRIMARY KEY,
   meal_entry_id TEXT NOT NULL REFERENCES meal_entries(id) ON DELETE CASCADE,
   food_id TEXT NOT NULL REFERENCES foods(id),
+  portion_option_id TEXT REFERENCES food_portion_options(id),
+  portion_quantity REAL,
+  portion_label TEXT,
   grams REAL NOT NULL CHECK (grams > 0),
   energy_kcal REAL NOT NULL CHECK (energy_kcal >= 0),
   protein_g REAL NOT NULL CHECK (protein_g >= 0),
