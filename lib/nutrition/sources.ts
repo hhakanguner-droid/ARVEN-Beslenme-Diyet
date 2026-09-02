@@ -7,19 +7,29 @@ const ALLOWED_PROVIDERS = new Set<NutritionSource["provider"]>([
   "manual-verified",
 ]);
 
-export function assertVerifiedNutritionSource(food: Food): void {
-  const source = food.source;
+function assertSource(source: NutritionSource, subject: string): void {
   if (!source || !ALLOWED_PROVIDERS.has(source.provider)) {
-    throw new Error(`Food ${food.id} does not have an allowed nutrition source`);
+    throw new Error(`${subject} does not have an allowed nutrition source`);
   }
 
   const verifiedAt = Date.parse(source.verifiedAt);
   if (!Number.isFinite(verifiedAt)) {
-    throw new Error(`Food ${food.id} has an invalid verifiedAt timestamp`);
+    throw new Error(`${subject} has an invalid verifiedAt timestamp`);
   }
 
   if (source.provider !== "manual-verified" && !source.externalId) {
-    throw new Error(`Food ${food.id} is missing its external source id`);
+    throw new Error(`${subject} is missing its external source id`);
+  }
+}
+
+export function assertVerifiedNutritionSource(food: Food): void {
+  assertSource(food.source, `Food ${food.id}`);
+
+  for (const option of food.portionOptions ?? []) {
+    if (!Number.isFinite(option.gramsPerUnit) || option.gramsPerUnit <= 0) {
+      throw new Error(`Portion option ${option.id} has an invalid gramsPerUnit`);
+    }
+    assertSource(option.source, `Portion option ${option.id}`);
   }
 }
 
