@@ -83,3 +83,15 @@ test("versioned goal calculator rejects input combinations that derive invalid t
     referenceIds: ["mifflin-1990"],
   }), /derived energyKcal is outside supported range/);
 });
+
+test("versioned goal calculator rejects individually valid but internally inconsistent macro inputs", () => {
+  assert.throws(() => deriveCalculatedGoal({
+    method: "mifflin-st-jeor",
+    version: "v1",
+    inputs: {
+      weightKg: 80, heightCm: 180, ageYears: 40, sexAtBirth: "male", activityFactor: 1,
+      energyAdjustmentKcal: -1500, proteinGPerKg: 4, fatEnergyPct: 0.5, waterMlPerKg: 30,
+    },
+    referenceIds: ["mifflin-1990"],
+  }), /internally inconsistent|exceed the derived energy target/);
+});
