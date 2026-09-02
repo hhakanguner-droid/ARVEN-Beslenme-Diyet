@@ -31,5 +31,7 @@ jobs:
         run: npm test
       - name: Validate database migration contracts
         run: python3 scripts/validate_migration.py
+      - name: Validate review 8 database contracts
+        run: python3 scripts/validate_review8.py
       - name: Production build
         run: npm run build
