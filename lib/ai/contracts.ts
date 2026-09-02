@@ -21,19 +21,115 @@ const PortionMeasure = z.enum([
 const PortionSize = z.enum(["small", "medium", "large"]);
 const NUMERIC_NUTRITION_CLAIM = /\p{N}+(?:[.,]\p{N}+)?\s*(?:kcal|kj|kalori|gram|gr|g|mg|mcg|ml|kg)\b/iu;
 const ANY_DIGIT = /\p{N}/u;
-const SPELLED_NUMBER_WORD = /\b(?:sıfır|iki|üç|dört|beş|altı|yedi|sekiz|dokuz|on|yirmi|otuz|kırk|elli|altmış|yetmiş|seksen|doksan|yüz|bin|milyon|milyar|trilyon|yarım|buçuk|çeyrek|zero|two|three|four|five|six|seven|eight|nine|ten|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|billion|half|quarter)\b/iu;
-const AMBIGUOUS_ONE_NUMERIC_CONTEXT = /\b(?:yüzde\s+bir|bir\s+(?:kcal|kj|kalori|gram|gr|g|mg|mcg|ml|kg|yüz|bin|milyon|milyar|trilyon|percent|puan))\b/iu;
-const SPELLED_NUMERIC_NUTRITION_CLAIM = /\b(?:sıfır|bir|iki|üç|dört|beş|altı|yedi|sekiz|dokuz|on|yirmi|otuz|kırk|elli|altmış|yetmiş|seksen|doksan|yüz|bin|milyon|milyar|trilyon|yarım|buçuk|çeyrek)(?:\s+(?:sıfır|bir|iki|üç|dört|beş|altı|yedi|sekiz|dokuz|on|yirmi|otuz|kırk|elli|altmış|yetmiş|seksen|doksan|yüz|bin|milyon|milyar|trilyon|yarım|buçuk|çeyrek))*\s*(?:kcal|kj|kalori|gram|gr|g|mg|mcg|ml|kg)\b/iu;
+const NUTRITION_UNIT_WORD = /\b(?:kcal|kj|kalori|gram|gr|g|mg|mcg|ml|kg)\b/iu;
+const NUMBER_WORDS = new Set([
+  "sifir",
+  "iki",
+  "uc",
+  "dort",
+  "bes",
+  "alti",
+  "yedi",
+  "sekiz",
+  "dokuz",
+  "on",
+  "yirmi",
+  "otuz",
+  "kirk",
+  "elli",
+  "altmis",
+  "yetmis",
+  "seksen",
+  "doksan",
+  "yuz",
+  "bin",
+  "milyon",
+  "milyar",
+  "trilyon",
+  "yarim",
+  "bucuk",
+  "ceyrek",
+  "yuzde",
+  "zero",
+  "two",
+  "three",
+  "four",
+  "five",
+  "six",
+  "seven",
+  "eight",
+  "nine",
+  "ten",
+  "twenty",
+  "thirty",
+  "forty",
+  "fifty",
+  "sixty",
+  "seventy",
+  "eighty",
+  "ninety",
+  "hundred",
+  "thousand",
+  "million",
+  "billion",
+  "half",
+  "quarter",
+  "percent",
+]);
+const TURKISH_NUMBER_SUFFIXES = new Set([
+  "i", "u", "a", "e",
+  "si", "su",
+  "in", "un", "nin", "nun",
+  "ini", "unu", "sini", "sunu",
+  "ina", "ine", "una", "une", "sina", "sine", "suna", "sune",
+  "dan", "den", "tan", "ten",
+  "da", "de", "ta", "te",
+  "ya", "ye",
+  "lar", "ler", "lari", "leri", "larin", "lerin", "lara", "lere",
+  "lik", "luk", "inci", "uncu",
+]);
+
+function normalizeNumberText(value: string): string {
+  return value
+    .toLocaleLowerCase("tr-TR")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/ı/g, "i")
+    .replace(/ş/g, "s")
+    .replace(/ğ/g, "g")
+    .replace(/ç/g, "c")
+    .replace(/ö/g, "o")
+    .replace(/ü/g, "u");
+}
+
+function isWrittenNumberToken(token: string): boolean {
+  if (NUMBER_WORDS.has(token)) return true;
+  for (const base of NUMBER_WORDS) {
+    if (!token.startsWith(base) || token.length <= base.length) continue;
+    const suffix = token.slice(base.length);
+    if (TURKISH_NUMBER_SUFFIXES.has(suffix)) return true;
+  }
+  return false;
+}
+
+function containsSpelledNumberWord(value: string): boolean {
+  const tokens = normalizeNumberText(value)
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+  return tokens.some(isWrittenNumberToken);
+}
 
 function containsWeeklyNumericClaim(value: string): boolean {
-  return ANY_DIGIT.test(value)
-    || SPELLED_NUMBER_WORD.test(value)
-    || AMBIGUOUS_ONE_NUMERIC_CONTEXT.test(value);
+  return ANY_DIGIT.test(value) || containsSpelledNumberWord(value);
+}
+
+function containsSpelledNutritionClaim(value: string): boolean {
+  return NUTRITION_UNIT_WORD.test(value) && containsSpelledNumberWord(value);
 }
 
 function mealNarrative(max: number) {
   return z.string().min(1).max(max).refine(
-    (value) => !NUMERIC_NUTRITION_CLAIM.test(value) && !SPELLED_NUMERIC_NUTRITION_CLAIM.test(value),
+    (value) => !NUMERIC_NUTRITION_CLAIM.test(value) && !containsSpelledNutritionClaim(value),
     "AI meal text must not contain numeric nutrition/weight claims",
   );
 }
@@ -46,7 +142,7 @@ function weeklyNarrative(max: number) {
 }
 
 const NaturalPortionLabel = z.string().min(1).max(120).refine(
-  (value) => !NUMERIC_NUTRITION_CLAIM.test(value) && !SPELLED_NUMERIC_NUTRITION_CLAIM.test(value),
+  (value) => !NUMERIC_NUTRITION_CLAIM.test(value) && !containsSpelledNutritionClaim(value),
   "Natural portion labels must not smuggle gram/ml nutrition quantities",
 );
 
@@ -99,7 +195,8 @@ export function parseMealSuggestion(input: unknown): MealSuggestion {
 /**
  * Weekly numeric metrics (adherence, averages, trends) are computed before the
  * model call and rendered separately. The model output is number-free narrative
- * including spelled-out quantities such as "yüzde doksan" or "iki bin".
+ * including Turkish inflections such as "seksenine" as well as plain written
+ * quantities such as "yüzde doksan" or "iki bin".
  */
 export function parseWeeklyInsight(input: unknown): WeeklyInsight {
   return WeeklyInsightV1.parse(input);
