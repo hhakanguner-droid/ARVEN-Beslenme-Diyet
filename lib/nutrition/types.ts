@@ -59,7 +59,8 @@ export type FoodPortionOption = {
   source: NutritionSource;
 };
 
-export type AllergenDataStatus = "verified" | "unknown" | "not-applicable";
+export type SafetyDataStatus = "verified" | "unknown" | "not-applicable";
+export type AllergenDataStatus = SafetyDataStatus;
 
 export type Food = {
   id: string;
@@ -74,6 +75,9 @@ export type Food = {
   /** Stable allergen identifiers resolved from verified source data. */
   allergenIds?: string[];
   allergenDataStatus?: AllergenDataStatus;
+  /** Stable dietary-rule ids that this food conflicts with, e.g. vegetarian/vegan. */
+  dietaryConflictRuleIds?: string[];
+  dietarySafetyDataStatus?: SafetyDataStatus;
 };
 
 /**

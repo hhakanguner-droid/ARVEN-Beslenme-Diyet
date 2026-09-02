@@ -44,6 +44,24 @@ test("AI meal contract rejects AI-authored calorie totals", () => {
   assert.throws(() => parseMealSuggestion(invalid));
 });
 
+test("AI meal text cannot smuggle numeric gram or calorie claims", () => {
+  assert.throws(() => parseMealSuggestion({
+    ...validSuggestion,
+    rationale: "Bu öğün 430 kcal içerir.",
+  }), /numeric nutrition/);
+
+  assert.throws(() => parseMealSuggestion({
+    ...validSuggestion,
+    ingredients: [{
+      ...validSuggestion.ingredients[0],
+      portionHint: {
+        ...validSuggestion.ingredients[0].portionHint,
+        naturalLabel: "120 g tavuk",
+      },
+    }],
+  }), /Natural portion labels/);
+});
+
 test("weekly insight contract accepts narrative interpretation", () => {
   const parsed = parseWeeklyInsight({
     schemaVersion: "WeeklyInsightV1",
@@ -56,7 +74,7 @@ test("weekly insight contract accepts narrative interpretation", () => {
   assert.equal(parsed.positives.length, 1);
 });
 
-test("weekly AI insight cannot author adherence or calorie scores", () => {
+test("weekly AI insight cannot author adherence or calorie fields", () => {
   assert.throws(() => parseWeeklyInsight({
     schemaVersion: "WeeklyInsightV1",
     summary: "Özet",
@@ -67,4 +85,15 @@ test("weekly AI insight cannot author adherence or calorie scores", () => {
     adherenceScore: 82,
     averageCalories: 1940,
   }));
+});
+
+test("weekly AI insight cannot hide invented numeric truth inside narrative strings", () => {
+  assert.throws(() => parseWeeklyInsight({
+    schemaVersion: "WeeklyInsightV1",
+    summary: "Uyum puanın %97 ve ortalaman 1900 kcal.",
+    positives: [],
+    areasForImprovement: [],
+    suggestions: [],
+    uncertainty: [],
+  }), /must not contain numeric claims/);
 });

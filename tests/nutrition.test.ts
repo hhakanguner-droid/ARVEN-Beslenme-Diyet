@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { remainingTargets, scaleNutrition, sumNutrition } from "../lib/nutrition/calculations";
-import { sumNutrientValues } from "../lib/nutrition/nutrients";
+import { scaleNutrientValue, sumNutrientValues } from "../lib/nutrition/nutrients";
 import { approximateGramLabel, resolvePortionSelection } from "../lib/nutrition/portions";
 import { assertVerifiedNutritionSource } from "../lib/nutrition/sources";
 import type { Food } from "../lib/nutrition/types";
@@ -89,6 +89,18 @@ test("extended nutrient sums remain partial when any contributing source is inco
     { amount: null, unit: "mg", completeness: "unknown" },
     { amount: null, unit: "mg", completeness: "unknown" },
   ], "mg"), { amount: null, unit: "mg", completeness: "unknown" });
+});
+
+test("null nutrient amounts can never remain complete", () => {
+  assert.deepEqual(
+    scaleNutrientValue({ amount: null, unit: "mg", completeness: "complete" }, 0.5),
+    { amount: null, unit: "mg", completeness: "unknown" },
+  );
+
+  assert.deepEqual(sumNutrientValues([
+    { amount: 100, unit: "mg", completeness: "complete" },
+    { amount: null, unit: "mg", completeness: "complete" },
+  ], "mg"), { amount: 100, unit: "mg", completeness: "partial" });
 });
 
 test("remaining targets never go below zero and subtract logged water", () => {

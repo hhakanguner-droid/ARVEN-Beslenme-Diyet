@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { assertNoAllergyConflict, assertNoMedicalOverreach } from "../lib/health-safety/policy";
+import {
+  assertNoAllergyConflict,
+  assertNoDietaryExclusionConflict,
+  assertNoMedicalOverreach,
+} from "../lib/health-safety/policy";
 
 test("allergy conflicts use verified allergen identifiers rather than food names", () => {
   assert.throws(
@@ -68,4 +72,45 @@ test("Turkish medication-changing language across common inflections is rejected
   }
 
   assert.doesNotThrow(() => assertNoMedicalOverreach("Bu sonuçları doktorunla değerlendirmen uygun olur."));
+});
+
+test("direct medication names are blocked when the authenticated medication context is supplied", () => {
+  assert.throws(
+    () => assertNoMedicalOverreach("Metformini bırak.", { medicationNames: ["Metformin"] }),
+    /non-diagnostic/,
+  );
+  assert.throws(
+    () => assertNoMedicalOverreach("Euthyrox dozunu azalt.", { medicationNames: ["Euthyrox"] }),
+    /non-diagnostic/,
+  );
+});
+
+test("explicit dietary exclusions are hard blocks and unresolved exclusions fail closed", () => {
+  const candidate = [{
+    foodId: "beef-1",
+    foodName: "Dana eti",
+    dietarySafetyDataStatus: "verified" as const,
+    dietaryConflictRuleIds: ["vegetarian"],
+  }];
+
+  assert.throws(() => assertNoDietaryExclusionConflict(candidate, [{
+    kind: "food",
+    id: "beef-1",
+    label: "Dana eti",
+    resolutionStatus: "resolved",
+  }]), /Dietary safety conflict/);
+
+  assert.throws(() => assertNoDietaryExclusionConflict(candidate, [{
+    kind: "rule",
+    id: "vegetarian",
+    label: "Vejetaryen",
+    resolutionStatus: "resolved",
+  }]), /Dietary safety conflict/);
+
+  assert.throws(() => assertNoDietaryExclusionConflict(candidate, [{
+    kind: "food",
+    id: null,
+    label: "Kullanıcının kaçındığı besin",
+    resolutionStatus: "unresolved",
+  }]), /unresolved/);
 });

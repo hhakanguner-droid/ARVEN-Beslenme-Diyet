@@ -89,9 +89,12 @@ function finiteNonNegativeOrNull(value: number | null, field: string): number | 
 export function scaleNutrientValue(value: NutrientValue, ratio: number): NutrientValue {
   if (!Number.isFinite(ratio) || ratio < 0) throw new Error("ratio must be a finite non-negative number");
   const amount = finiteNonNegativeOrNull(value.amount, "nutrient amount");
+  if (amount == null) {
+    return { ...value, amount: null, completeness: "unknown" };
+  }
   return {
     ...value,
-    amount: amount == null ? null : Math.round((amount * ratio + Number.EPSILON) * 1000) / 1000,
+    amount: Math.round((amount * ratio + Number.EPSILON) * 1000) / 1000,
   };
 }
 
@@ -101,18 +104,25 @@ export function sumNutrientValues(values: NutrientValue[], unit: NutrientUnit): 
     if (value.unit !== unit) throw new Error(`Cannot sum nutrient units ${value.unit} and ${unit}`);
   }
 
-  const knownAmounts = values
-    .map((value) => finiteNonNegativeOrNull(value.amount, "nutrient amount"))
+  const normalized = values.map((value) => ({
+    ...value,
+    amount: finiteNonNegativeOrNull(value.amount, "nutrient amount"),
+  }));
+  const knownAmounts = normalized
+    .map((value) => value.amount)
     .filter((value): value is number => value != null);
 
   const amount = knownAmounts.length === 0
     ? null
     : Math.round((knownAmounts.reduce((sum, value) => sum + value, 0) + Number.EPSILON) * 1000) / 1000;
 
-  const completeness: NutrientCompleteness = values.every((value) => value.completeness === "complete")
-    ? "complete"
-    : amount == null
-      ? "unknown"
+  const allComplete = normalized.every(
+    (value) => value.amount != null && value.completeness === "complete",
+  );
+  const completeness: NutrientCompleteness = amount == null
+    ? "unknown"
+    : allComplete
+      ? "complete"
       : "partial";
 
   return { amount, unit, completeness };

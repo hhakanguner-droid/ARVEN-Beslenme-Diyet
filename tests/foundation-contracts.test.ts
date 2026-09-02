@@ -37,3 +37,25 @@ test("invalid export record counts are rejected", () => {
     recordCounts: { "meal-log": -1 },
   }), /Invalid record count/);
 });
+
+test("unknown export section identifiers are rejected at runtime", () => {
+  assert.throws(() => validateExportManifest({
+    format: ARVEN_EXPORT_FORMAT,
+    exportedAt: "2026-09-02T10:00:00.000Z",
+    locale: "tr-TR",
+    timezone: "Europe/Istanbul",
+    sections: ["profile", "future-or-typo"],
+    recordCounts: { profile: 1 },
+  }), /Unsupported export section/);
+});
+
+test("record counts cannot reference undeclared or unknown sections", () => {
+  assert.throws(() => validateExportManifest({
+    format: ARVEN_EXPORT_FORMAT,
+    exportedAt: "2026-09-02T10:00:00.000Z",
+    locale: "tr-TR",
+    timezone: "Europe/Istanbul",
+    sections: ["profile"],
+    recordCounts: { goals: 1 },
+  }), /undeclared section/);
+});

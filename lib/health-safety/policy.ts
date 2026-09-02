@@ -5,6 +5,27 @@ export type ResolvedFoodAllergens = {
   allergenIds: string[];
 };
 
+export type MedicalSafetyContext = {
+  /** Active medication names/brands resolved from the authenticated user's records. */
+  medicationNames?: readonly string[];
+};
+
+export type DietarySafetyExclusion = {
+  kind: "food" | "rule";
+  /** Resolved food id or dietary-rule id. Null means the exclusion still needs resolution. */
+  id: string | null;
+  label: string;
+  resolutionStatus: "resolved" | "unresolved";
+};
+
+export type ResolvedFoodDietarySafety = {
+  foodId: string;
+  foodName: string;
+  dietarySafetyDataStatus: "verified" | "unknown" | "not-applicable";
+  /** Stable dietary-rule ids that this candidate conflicts with. */
+  dietaryConflictRuleIds: string[];
+};
+
 function normalizeTurkishText(value: string): string {
   return value
     .trim()
@@ -40,13 +61,26 @@ const DIRECT_MEDICAL_PATTERNS = [
   /\brecete\b/,
 ];
 
-export function assertNoMedicalOverreach(text: string): void {
+function mentionsKnownMedication(normalizedText: string, medicationNames: readonly string[]): boolean {
+  return medicationNames.some((name) => {
+    const normalizedName = normalizeTurkishText(name);
+    return normalizedName.length >= 3 && normalizedText.includes(normalizedName);
+  });
+}
+
+/**
+ * Medication-changing language must be evaluated with the authenticated user's
+ * active medication names whenever that context exists. This catches directives
+ * such as "Metformini bırak" in addition to generic phrases such as "ilacı bırak".
+ */
+export function assertNoMedicalOverreach(text: string, context: MedicalSafetyContext = {}): void {
   const normalized = normalizeTurkishText(text);
-  const medicationContext = MEDICATION_CONTEXT.some((term) => normalized.includes(term));
+  const genericMedicationContext = MEDICATION_CONTEXT.some((term) => normalized.includes(term));
+  const namedMedicationContext = mentionsKnownMedication(normalized, context.medicationNames ?? []);
   const medicationChange = MEDICATION_CHANGE_ACTIONS.some((term) => normalized.includes(term));
   const directOverreach = DIRECT_MEDICAL_PATTERNS.some((pattern) => pattern.test(normalized));
 
-  if ((medicationContext && medicationChange) || directOverreach) {
+  if (((genericMedicationContext || namedMedicationContext) && medicationChange) || directOverreach) {
     throw new Error("AI output violates ARVEN non-diagnostic health policy");
   }
 }
@@ -84,5 +118,55 @@ export function assertNoAllergyConflict(
   const conflicts = findAllergyConflicts(candidates, activeAllergenIds);
   if (conflicts.length > 0) {
     throw new Error(`Allergy conflict detected: ${conflicts.join(", ")}`);
+  }
+}
+
+/**
+ * Explicit avoid rules and dietary rules are recommendation hard-blocks.
+ * Unresolved exclusions fail closed instead of silently disappearing from context.
+ */
+export function findDietaryExclusionConflicts(
+  candidates: ResolvedFoodDietarySafety[],
+  exclusions: DietarySafetyExclusion[],
+): string[] {
+  if (exclusions.length === 0) return [];
+
+  const conflicts = new Set<string>();
+  const foodIds = new Set<string>();
+  const ruleIds = new Set<string>();
+
+  for (const exclusion of exclusions) {
+    if (exclusion.resolutionStatus !== "resolved" || !exclusion.id) {
+      conflicts.add(`${exclusion.label} (dietary exclusion unresolved)`);
+      continue;
+    }
+    if (exclusion.kind === "food") foodIds.add(exclusion.id);
+    else ruleIds.add(exclusion.id);
+  }
+
+  for (const candidate of candidates) {
+    if (foodIds.has(candidate.foodId)) conflicts.add(candidate.foodName);
+
+    if (ruleIds.size > 0) {
+      if (candidate.dietarySafetyDataStatus === "unknown") {
+        conflicts.add(`${candidate.foodName} (dietary safety data unresolved)`);
+        continue;
+      }
+      if (candidate.dietaryConflictRuleIds.some((ruleId) => ruleIds.has(ruleId))) {
+        conflicts.add(candidate.foodName);
+      }
+    }
+  }
+
+  return [...conflicts];
+}
+
+export function assertNoDietaryExclusionConflict(
+  candidates: ResolvedFoodDietarySafety[],
+  exclusions: DietarySafetyExclusion[],
+): void {
+  const conflicts = findDietaryExclusionConflicts(candidates, exclusions);
+  if (conflicts.length > 0) {
+    throw new Error(`Dietary safety conflict detected: ${conflicts.join(", ")}`);
   }
 }

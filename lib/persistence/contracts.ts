@@ -1,3 +1,4 @@
+import type { DietarySafetyExclusion } from "@/lib/health-safety/policy";
 import type { UserNutritionPreferences } from "@/lib/preferences/types";
 import type {
   Food,
@@ -57,8 +58,15 @@ export interface NutritionLogRepository {
   removeLatestWater(userId: UserId, localDate: string): Promise<boolean>;
 }
 
+/**
+ * Recommendation context is authenticated and includes every hard safety input.
+ * Callers must not build food recommendations from display preferences alone.
+ */
 export interface UserContextRepository {
   getActiveAllergenIds(userId: UserId): Promise<string[]>;
+  getActiveDietarySafetyExclusions(userId: UserId): Promise<DietarySafetyExclusion[]>;
+  /** Active medication names/brands used only to detect unsafe medication directives. */
+  getActiveMedicationNames(userId: UserId): Promise<string[]>;
   getActiveTargets(userId: UserId, localDate: string): Promise<NutritionTargets | null>;
   getNutritionPreferences(userId: UserId): Promise<UserNutritionPreferences>;
 }

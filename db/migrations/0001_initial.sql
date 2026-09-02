@@ -55,13 +55,26 @@ CREATE TABLE goals (
   calculation_version TEXT,
   calculation_inputs_json TEXT,
   reference_ids_json TEXT NOT NULL DEFAULT '[]',
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  CHECK (
+    source <> 'arven-calculated' OR (
+      calculation_method IS NOT NULL AND length(trim(calculation_method)) > 0
+      AND calculation_version IS NOT NULL AND length(trim(calculation_version)) > 0
+      AND calculation_inputs_json IS NOT NULL
+      AND json_valid(calculation_inputs_json) = 1
+      AND json_type(calculation_inputs_json) = 'object'
+      AND calculation_inputs_json <> '{}'
+      AND json_valid(reference_ids_json) = 1
+      AND json_type(reference_ids_json) = 'array'
+      AND json_array_length(reference_ids_json) > 0
+    )
+  )
 );
 CREATE INDEX goals_user_effective_idx ON goals(user_id, effective_from, effective_to);
 
 CREATE TABLE goal_meal_allocations (
   goal_id TEXT NOT NULL REFERENCES goals(id) ON DELETE CASCADE,
-  meal_type TEXT NOT NULL,
+  meal_type TEXT NOT NULL CHECK (meal_type IN ('breakfast','morning-snack','lunch','afternoon-snack','dinner','snack','custom')),
   energy_share_bps INTEGER NOT NULL CHECK (energy_share_bps BETWEEN 0 AND 10000),
   PRIMARY KEY (goal_id, meal_type)
 );
@@ -75,6 +88,7 @@ CREATE TABLE foods (
   barcode TEXT,
   is_liquid INTEGER NOT NULL DEFAULT 0 CHECK (is_liquid IN (0,1)),
   allergen_data_status TEXT NOT NULL DEFAULT 'unknown' CHECK (allergen_data_status IN ('verified','unknown','not-applicable')),
+  dietary_safety_data_status TEXT NOT NULL DEFAULT 'unknown' CHECK (dietary_safety_data_status IN ('verified','unknown','not-applicable')),
   energy_kcal_100g REAL NOT NULL CHECK (energy_kcal_100g >= 0),
   protein_g_100g REAL NOT NULL CHECK (protein_g_100g >= 0),
   carbs_g_100g REAL NOT NULL CHECK (carbs_g_100g >= 0),
@@ -99,6 +113,7 @@ CREATE TABLE food_nutrients (
   amount_per_100g REAL,
   unit TEXT NOT NULL CHECK (unit IN ('g','mg','mcg')),
   completeness TEXT NOT NULL CHECK (completeness IN ('complete','partial','unknown')),
+  CHECK (amount_per_100g IS NOT NULL OR completeness <> 'complete'),
   PRIMARY KEY (food_id, nutrient_key)
 );
 
@@ -144,6 +159,22 @@ CREATE TABLE food_allergens (
   PRIMARY KEY (food_id, allergen_id)
 );
 
+CREATE TABLE dietary_rule_catalog (
+  id TEXT PRIMARY KEY,
+  canonical_name TEXT NOT NULL,
+  description TEXT,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE food_dietary_rule_conflicts (
+  food_id TEXT NOT NULL REFERENCES foods(id) ON DELETE CASCADE,
+  dietary_rule_id TEXT NOT NULL REFERENCES dietary_rule_catalog(id),
+  source_provider TEXT NOT NULL CHECK (source_provider IN ('open-food-facts','usda','turkomp','bls','swiss-fcd','manual-verified')),
+  source_external_id TEXT,
+  verified_at TEXT NOT NULL,
+  PRIMARY KEY (food_id, dietary_rule_id)
+);
+
 CREATE TABLE food_source_preferences (
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   provider TEXT NOT NULL CHECK (provider IN ('open-food-facts','usda','turkomp','bls','swiss-fcd','manual-verified')),
@@ -157,13 +188,35 @@ CREATE TABLE food_preferences (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   food_term TEXT NOT NULL,
+  food_id TEXT REFERENCES foods(id),
+  dietary_rule_id TEXT REFERENCES dietary_rule_catalog(id),
+  resolution_status TEXT NOT NULL DEFAULT 'unresolved' CHECK (resolution_status IN ('resolved','unresolved')),
   preference TEXT NOT NULL CHECK (preference IN ('like','dislike','avoid','dietary-rule')),
   strength INTEGER NOT NULL DEFAULT 1 CHECK (strength BETWEEN 1 AND 5),
   provenance TEXT NOT NULL,
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  CHECK (
+    resolution_status = 'unresolved'
+    OR preference NOT IN ('avoid','dietary-rule')
+    OR (preference = 'avoid' AND food_id IS NOT NULL)
+    OR (preference = 'dietary-rule' AND dietary_rule_id IS NOT NULL)
+  )
 );
 CREATE INDEX food_preferences_user_idx ON food_preferences(user_id);
+CREATE INDEX food_preferences_safety_idx ON food_preferences(user_id, preference, resolution_status);
+
+CREATE TABLE user_medications (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  display_name TEXT NOT NULL,
+  normalized_name TEXT NOT NULL,
+  active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)),
+  provenance TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX user_medications_active_idx ON user_medications(user_id, active);
 
 CREATE TABLE assessment_snapshots (
   id TEXT PRIMARY KEY,
@@ -179,7 +232,7 @@ CREATE TABLE meal_entries (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   local_date TEXT NOT NULL,
-  meal_type TEXT NOT NULL,
+  meal_type TEXT NOT NULL CHECK (meal_type IN ('breakfast','morning-snack','lunch','afternoon-snack','dinner','snack','custom')),
   occurred_at TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'confirmed' CHECK (status IN ('draft','confirmed','deleted')),
   created_at TEXT NOT NULL,
@@ -211,6 +264,7 @@ CREATE TABLE meal_entry_item_nutrients (
   amount REAL,
   unit TEXT NOT NULL CHECK (unit IN ('g','mg','mcg')),
   completeness TEXT NOT NULL CHECK (completeness IN ('complete','partial','unknown')),
+  CHECK (amount IS NOT NULL OR completeness <> 'complete'),
   PRIMARY KEY (meal_entry_item_id, nutrient_key)
 );
 
