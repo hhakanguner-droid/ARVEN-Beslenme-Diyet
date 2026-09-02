@@ -9,13 +9,28 @@ const ALLOWED_PROVIDERS = new Set<NutritionSourceProvider>([
   "manual-verified",
 ]);
 
+function isCanonicalUtcInstant(value: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{3}))?Z$/.exec(value);
+  if (!match) return false;
+  const [, y, mo, d, h, mi, s, ms = "000"] = match;
+  const parts = [y, mo, d, h, mi, s, ms].map(Number);
+  if (parts[3] > 23 || parts[4] > 59 || parts[5] > 59) return false;
+  const date = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2], parts[3], parts[4], parts[5], parts[6]));
+  return date.getUTCFullYear() === parts[0]
+    && date.getUTCMonth() + 1 === parts[1]
+    && date.getUTCDate() === parts[2]
+    && date.getUTCHours() === parts[3]
+    && date.getUTCMinutes() === parts[4]
+    && date.getUTCSeconds() === parts[5]
+    && date.getUTCMilliseconds() === parts[6];
+}
+
 function assertSource(source: NutritionSource, subject: string): void {
   if (!source || !ALLOWED_PROVIDERS.has(source.provider)) {
     throw new Error(`${subject} does not have an allowed nutrition source`);
   }
 
-  const verifiedAt = Date.parse(source.verifiedAt);
-  if (!Number.isFinite(verifiedAt)) {
+  if (!isCanonicalUtcInstant(source.verifiedAt)) {
     throw new Error(`${subject} has an invalid verifiedAt timestamp`);
   }
 
