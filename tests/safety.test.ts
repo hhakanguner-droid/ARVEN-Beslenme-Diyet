@@ -47,6 +47,8 @@ test("AI medication or treatment management is blocked without storing a medicat
     "Euthyrox kullanımını sürdür.",
     "Aspirin kullanmalısın.",
     "Metformini almalısın.",
+    "Aspirin'i bırak.",
+    "Metformin'e başla.",
     "Bunu kullanmamalısın.",
     "Bunu kullanman gerekiyor.",
   ];
@@ -58,9 +60,10 @@ test("AI medication or treatment management is blocked without storing a medicat
   assert.doesNotThrow(() => assertNoMedicalOverreach("Bu sonuçları bir sağlık profesyoneliyle değerlendirmen uygun olur."));
 });
 
-test("direct diagnosis assertions are rejected", () => {
+test("direct diagnosis assertions are rejected without blocking ordinary coaching predicates", () => {
   const unsafe = [
     "Sende diyabet var.",
+    "Diyabetin var.",
     "Bu belirtiler çölyak olduğunu gösteriyor.",
     "Bu değerlere göre teşhisin kesin.",
     "Diyabet hastasısın.",
@@ -71,9 +74,13 @@ test("direct diagnosis assertions are rejected", () => {
   for (const message of unsafe) {
     assert.throws(() => assertNoMedicalOverreach(message), /non-diagnostic/, message);
   }
+
+  for (const message of ["Sen kararlısın.", "Bu dengelidir.", "Bu doğrudur."]) {
+    assert.doesNotThrow(() => assertNoMedicalOverreach(message), message);
+  }
 });
 
-test("explicit dietary exclusions are hard blocks and unresolved exclusions fail closed", () => {
+test("explicit dietary exclusions are hard blocks and malformed exclusions fail closed", () => {
   const candidate = [{
     foodId: "beef-1",
     foodName: "Dana eti",
@@ -89,7 +96,10 @@ test("explicit dietary exclusions are hard blocks and unresolved exclusions fail
     kind: "rule", id: "vegetarian", label: "Vejetaryen", resolutionStatus: "resolved",
   }]), /Dietary safety conflict/);
 
-  assert.throws(() => assertNoDietaryExclusionConflict(candidate, [{
-    kind: "food", id: null, label: "Kullanıcının kaçındığı besin", resolutionStatus: "unresolved",
-  }]), /unresolved/);
+  for (const exclusion of [
+    { kind: "food" as const, id: null, label: "Kullanıcının kaçındığı besin", resolutionStatus: "unresolved" as const },
+    { kind: "food" as const, id: "   ", label: "Bozuk dışlama", resolutionStatus: "resolved" as const },
+  ]) {
+    assert.throws(() => assertNoDietaryExclusionConflict(candidate, [exclusion]), /unresolved/);
+  }
 });
