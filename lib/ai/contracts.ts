@@ -34,7 +34,7 @@ const TURKISH_NUMBER_SUFFIXES = new Set([
   "da", "de", "ta", "te", "ya", "ye", "lar", "ler", "lari", "leri", "larin", "lerin", "lara", "lere",
   "lik", "luk", "inci", "uncu",
 ]);
-const NUTRITION_UNIT_PATTERN = "(?:kcal|kj|kalori[a-z]*|gram[a-z]*|miligram[a-z]*|mikrogram[a-z]*|milligram[a-z]*|microgram[a-z]*|gr|g|mg|mcg|ml|kg)";
+const NUTRITION_UNIT_PATTERN = "(?:kcal|kilokalori[a-z]*|kj|kilojul[a-z]*|kalori[a-z]*|gram[a-z]*|miligram[a-z]*|mikrogram[a-z]*|mililitre[a-z]*|millilitre[a-z]*|litre[a-z]*|milligram[a-z]*|microgram[a-z]*|milliliter[a-z]*|liter[a-z]*|gr|g|mg|mcg|ml|kg|l)";
 
 function normalizeNumberText(value: string): string {
   return value
@@ -67,8 +67,10 @@ function containsSpelledNumberWord(value: string): boolean {
 
 function containsContextualOneClaim(value: string): boolean {
   const normalized = normalizeNumberText(value);
-  const unitOrMetric = `${NUTRITION_UNIT_PATTERN}|puan|adim|saat|gun|hafta|ogun|porsiyon|kilo|kilogram|kez|defa|kere`;
-  return new RegExp(`\\b(?:yuzde\\s+bir|percent\\s+one|bir\\s+(?:${unitOrMetric})|one\\s+(?:kcal|kj|calorie[a-z]*|gram[a-z]*|milligram[a-z]*|microgram[a-z]*|mg|mcg|ml|kg|point|step|hour|day|week|time|times))\\b`, "i").test(normalized);
+  const unitOrMetric = `${NUTRITION_UNIT_PATTERN}|puan|adim|saat|gun|hafta|ogun|porsiyon|kilo|kilogram`;
+  const directOne = new RegExp(`\\b(?:yuzde\\s+bir|percent\\s+one|bir\\s+(?:${unitOrMetric})|one\\s+(?:kcal|kilocalorie[a-z]*|kj|kilojoule[a-z]*|calorie[a-z]*|gram[a-z]*|milligram[a-z]*|microgram[a-z]*|milliliter[a-z]*|liter[a-z]*|mg|mcg|ml|kg|point|step|hour|day|week))\\b`, "i");
+  const frequencyOne = /\bbir(?:er)?\s+(?:kez|defa|kere)(?:den|dan|ten|tan|de|da|ye|ya)?\b/i;
+  return directOne.test(normalized) || frequencyOne.test(normalized);
 }
 
 function containsDigitNutritionClaim(value: string): boolean {
