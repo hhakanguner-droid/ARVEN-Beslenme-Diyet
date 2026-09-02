@@ -7,6 +7,7 @@ import sqlite3
 ROOT = Path(__file__).resolve().parents[1]
 MIGRATIONS = ROOT / "db" / "migrations"
 NOW = "2026-09-02T15:30:00.000Z"
+ACTION_OCCURRED_AT = "2026-09-02T15:30:00Z"
 
 
 def expect_rejected(conn: sqlite3.Connection, label: str, sql: str, params: tuple = ()) -> None:
@@ -107,7 +108,7 @@ def main() -> None:
     """)
 
     valid_meal_payload = (
-        '{"localDate":"2026-09-02","occurredAt":"2026-09-02T15:30:00Z",'
+        '{"localDate":"2026-09-02","occurredAt":"' + ACTION_OCCURRED_AT + '",'
         '"mealType":"lunch","items":[{"foodId":"food-global","grams":50,"calculationVersion":"v1"}]}'
     )
     expect_rejected(conn, "direct rejected AI action insert", """
@@ -133,7 +134,7 @@ def main() -> None:
         """, (f"ai-time-{bad_time}", "user-1", "meal-log", "MealLogActionV1", f"hash-{bad_time}", bad_payload, f"idem-{bad_time}", NOW))
 
     duplicate_payload = (
-        '{"localDate":"2026-09-02","occurredAt":"2026-09-02T15:30:00Z",'
+        '{"localDate":"2026-09-02","occurredAt":"' + ACTION_OCCURRED_AT + '",'
         '"mealType":"lunch","items":[{"foodId":"food-global","foodId":"food-private",'
         '"grams":50,"grams":1e999,"calculationVersion":"v1"}]}'
     )
@@ -154,7 +155,7 @@ def main() -> None:
     conn.execute("""
       INSERT INTO meal_entries(id,user_id,local_date,meal_type,occurred_at,created_at,updated_at,ai_action_id)
       VALUES('meal-action-r8','user-1','2026-09-02','lunch',?,?,?,'ai-active')
-    """, (NOW, NOW, NOW))
+    """, (ACTION_OCCURRED_AT, NOW, NOW))
     conn.execute("""
       INSERT INTO meal_entry_items(id,meal_entry_id,food_id,grams,energy_kcal,protein_g,carbs_g,fat_g,calculation_version,created_at,ai_action_item_index)
       VALUES('meal-action-item-r8','meal-action-r8','food-global',50,50,5,5,1,'v1',?,0)
