@@ -21,6 +21,22 @@ test("weekly deterministic metrics accept signed weight change but non-negative 
   assert.doesNotThrow(() => assertWeeklyInsightMetrics({ ...validMetrics, weightChangeKg: -1.2 }));
 });
 
+test("weekly deterministic metrics require a real seven-date local interval", () => {
+  const invalidIntervals = [
+    { localWeekStart: "2026-02-31", localWeekEnd: "2026-03-08" },
+    { localWeekStart: "2026-09-06", localWeekEnd: "2026-08-31" },
+    { localWeekStart: "2026-08-31", localWeekEnd: "2026-09-05" },
+    { localWeekStart: "2026-08-31", localWeekEnd: "2026-09-07" },
+  ];
+
+  for (const interval of invalidIntervals) {
+    assert.throws(
+      () => assertWeeklyInsightMetrics({ ...validMetrics, ...interval }),
+      /canonical local date|exactly seven local dates/,
+    );
+  }
+});
+
 test("negative weekly consumption metrics are rejected before AI narrative", () => {
   const fields = [
     "averageEnergyKcal",
