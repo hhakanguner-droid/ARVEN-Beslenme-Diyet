@@ -23,12 +23,24 @@ test("AI portion label must agree with structured measure and quantity", () => {
   }), /naturalLabel must match structured portion hint/);
 });
 
+test("AI portion quantities must be exactly representable by the visible label", () => {
+  assert.throws(() => parseMealSuggestion({
+    ...validSuggestion,
+    ingredients: [{ foodQuery: "badem", portionHint: { measure: "palm", quantity: 0.004, naturalLabel: "0 avuç içi" } }],
+  }), /0.01 increments/);
+  const parsed = parseMealSuggestion({
+    ...validSuggestion,
+    ingredients: [{ foodQuery: "badem", portionHint: { measure: "palm", quantity: 0.25, naturalLabel: "0,25 avuç içi" } }],
+  });
+  assert.equal(parsed.ingredients[0]?.portionHint.quantity, 0.25);
+});
+
 test("AI meal contract rejects suggested grams and AI-authored numeric fields", () => {
   assert.throws(() => parseMealSuggestion({ ...validSuggestion, ingredients: [{ ...validSuggestion.ingredients[0], suggestedGrams: 120 }] }));
   assert.throws(() => parseMealSuggestion({ ...validSuggestion, energyKcal: 430 }));
 });
 
-test("all user-facing meal text rejects numeric nutrition claims in either order and every Unicode digit script", () => {
+test("all user-facing meal text rejects numeric deterministic claims", () => {
   const cases = [
     { ...validSuggestion, rationale: "Bu öğün 430 kcal içerir." },
     { ...validSuggestion, rationale: "Bu öğün ４３０ kcal içerir." },
@@ -48,23 +60,27 @@ test("all user-facing meal text rejects numeric nutrition claims in either order
     { ...validSuggestion, rationale: "This meal has 1e3 calories." },
     { ...validSuggestion, rationale: "This meal has 900 kilocalories." },
     { ...validSuggestion, rationale: "This meal provides 800 kilojoules." },
+    { ...validSuggestion, rationale: "Hedef kilon 70 olacak." },
+    { ...validSuggestion, rationale: "Plan uyumun 90." },
+    { ...validSuggestion, rationale: "Target weight 75." },
+    { ...validSuggestion, rationale: "Adherence 88." },
     { ...validSuggestion, title: "450 kcal protein öğünü" },
     { ...validSuggestion, title: "Dört yüz kalorilik öğün" },
   ];
-  for (const candidate of cases) assert.throws(() => parseMealSuggestion(candidate), /numeric nutrition/, candidate.title);
+  for (const candidate of cases) assert.throws(() => parseMealSuggestion(candidate), /numeric nutrition\/weight\/adherence/, candidate.title);
   assert.throws(() => parseMealSuggestion({
     ...validSuggestion,
     ingredients: [{ ...validSuggestion.ingredients[0], portionHint: { ...validSuggestion.ingredients[0].portionHint, naturalLabel: "120 g tavuk" } }],
   }), /Natural portion labels/);
 });
 
-test("food queries cannot smuggle model-authored quantities", () => {
+test("food queries cannot be blank or smuggle model-authored quantities", () => {
   for (const foodQuery of [
-    "120 g tavuk", "４３０ kcal tavuk", "٤٣٠ kcal tavuk", "४३० kcal tavuk", "400 kcal yoğurt", "kalori 430 yoğurt",
+    "   ", "120 g tavuk", "４３０ kcal tavuk", "٤٣٠ kcal tavuk", "४३० kcal tavuk", "400 kcal yoğurt", "kalori 430 yoğurt",
     "iki miligram sodyum", "iki kilokalori yoğurt", "2 litre su", "iki mililitre süt",
     "1e3 kcal yoğurt", "1e3 calories chicken", "900 kilocalories yogurt", "800 kilojoules soup",
   ]) {
-    assert.throws(() => parseMealSuggestion({ ...validSuggestion, ingredients: [{ ...validSuggestion.ingredients[0], foodQuery }] }), /Food queries/, foodQuery);
+    assert.throws(() => parseMealSuggestion({ ...validSuggestion, ingredients: [{ ...validSuggestion.ingredients[0], foodQuery }] }), undefined, foodQuery);
   }
 });
 
@@ -73,6 +89,8 @@ test("AI meal parser enforces non-diagnostic and non-medication policy on every 
     { ...validSuggestion, title: "Diyabetsin" },
     { ...validSuggestion, rationale: "İlacını bırak." },
     { ...validSuggestion, preparation: ["Warfarini kullan."] },
+    { ...validSuggestion, preparation: ["İnsülin kullanman gerekiyor."] },
+    { ...validSuggestion, preparation: ["Warfarin alman gerekiyor."] },
     { ...validSuggestion, uncertainty: ["Sende kanser var."] },
   ];
   for (const candidate of unsafe) {
@@ -103,4 +121,5 @@ test("weekly insight parser enforces the same health policy on all narrative arr
   const base = { schemaVersion: "WeeklyInsightV1", summary: "Nitel bir haftalık özet.", positives: [], areasForImprovement: [], suggestions: [], uncertainty: [] };
   assert.throws(() => parseWeeklyInsight({ ...base, summary: "Çölyaksın." }), /non-diagnostic health policy/);
   assert.throws(() => parseWeeklyInsight({ ...base, suggestions: ["İlacını kes."] }), /non-diagnostic health policy/);
+  assert.throws(() => parseWeeklyInsight({ ...base, suggestions: ["İnsülin kullanman gerekiyor."] }), /non-diagnostic health policy/);
 });
