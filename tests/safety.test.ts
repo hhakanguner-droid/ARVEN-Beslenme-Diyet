@@ -50,6 +50,7 @@ test("direct diagnosis assertions are rejected without blocking ordinary coachin
     "Sende diyabet var.", "Diyabetin var.", "Bu belirtiler çölyak olduğunu gösteriyor.", "Bu değerlere göre teşhisin kesin.",
     "Diyabet hastasısın.", "Sen çölyaksın.", "Bu diyabettir.", "Diyabetsin.", "Çölyaksın.",
     "Kanserlisin.", "Depresyondasın.", "Astımlısın.", "Parkinsonlusun.", "Endometriozisin.",
+    "Sende kanser var.", "Sende lösemi var.", "Bu sonuçlar melanom olduğunu gösteriyor.", "Bu kanserdir.",
   ];
   for (const message of unsafe) assert.throws(() => assertNoMedicalOverreach(message), /non-diagnostic/, message);
   for (const message of ["Sen kararlısın.", "Bu dengelidir.", "Bu doğrudur.", "Yeni tatlarla tanışmalısın.", "Bu iş için diplomalısın."]) {
