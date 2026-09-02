@@ -6,14 +6,21 @@ const validSuggestion = {
   schemaVersion: "MealSuggestionV1",
   title: "Dengeli öğün",
   rationale: "Protein ve sebze ağırlıklı bir alternatif.",
-  ingredients: [{ foodQuery: "ızgara tavuk göğsü", portionHint: { measure: "palm", quantity: 1, naturalLabel: "1 avuç içi kadar" } }],
+  ingredients: [{ foodQuery: "ızgara tavuk göğsü", portionHint: { measure: "palm", quantity: 1, naturalLabel: "1 avuç içi" } }],
   preparation: ["Izgarada pişir."],
   uncertainty: [],
 };
 
-test("AI meal contract accepts natural portion language", () => {
+test("AI meal contract accepts canonical natural portion language", () => {
   const parsed = parseMealSuggestion(validSuggestion);
   assert.equal(parsed.ingredients[0]?.portionHint.measure, "palm");
+});
+
+test("AI portion label must agree with structured measure and quantity", () => {
+  assert.throws(() => parseMealSuggestion({
+    ...validSuggestion,
+    ingredients: [{ foodQuery: "çorba", portionHint: { measure: "slice", quantity: 1, naturalLabel: "2 bardak" } }],
+  }), /naturalLabel must match structured portion hint/);
 });
 
 test("AI meal contract rejects suggested grams and AI-authored numeric fields", () => {
@@ -28,6 +35,8 @@ test("all user-facing meal text rejects numeric nutrition claims in either order
     { ...validSuggestion, rationale: "Bu öğün ٤٣٠ kcal içerir." },
     { ...validSuggestion, rationale: "Bu öğün ४३० kcal içerir." },
     { ...validSuggestion, rationale: "Bu öğünde kalori 430, protein 30." },
+    { ...validSuggestion, rationale: "Kalori: bir." },
+    { ...validSuggestion, rationale: "Calories: one." },
     { ...validSuggestion, rationale: "Bu öğün dört yüz kalori içerir." },
     { ...validSuggestion, rationale: "Bu öğün bir gram protein içerir." },
     { ...validSuggestion, rationale: "Bu öğün iki miligram sodyum içerir." },
