@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { assertNoMedicalOverreach } from "@/lib/health-safety/policy";
 
 const PortionMeasure = z.enum([
   "piece", "slice", "teaspoon", "tablespoon", "tea-glass", "water-glass", "cup", "bowl",
@@ -62,15 +63,21 @@ function containsSpelledNutritionClaim(value: string): boolean {
 function containsWeeklyNumericClaim(value: string): boolean {
   return ANY_DIGIT.test(value) || containsSpelledNumberWord(value) || containsContextualOneClaim(value);
 }
+function assertSafeNarrative(value: string): boolean {
+  try { assertNoMedicalOverreach(value); return true; }
+  catch { return false; }
+}
 function mealNarrative(max: number) {
-  return z.string().min(1).max(max).refine(
-    (value) => !containsDigitNutritionClaim(value) && !containsSpelledNutritionClaim(value),
-    "AI meal text must not contain numeric nutrition/weight claims",
-  );
+  return z.string().min(1).max(max)
+    .refine((value) => !containsDigitNutritionClaim(value) && !containsSpelledNutritionClaim(value),
+      "AI meal text must not contain numeric nutrition/weight claims")
+    .refine(assertSafeNarrative, "AI output violates ARVEN non-diagnostic health policy");
 }
 function weeklyNarrative(max: number) {
-  return z.string().min(1).max(max).refine((value) => !containsWeeklyNumericClaim(value),
-    "Weekly narrative must not contain numeric claims; render deterministic metrics separately");
+  return z.string().min(1).max(max)
+    .refine((value) => !containsWeeklyNumericClaim(value),
+      "Weekly narrative must not contain numeric claims; render deterministic metrics separately")
+    .refine(assertSafeNarrative, "AI output violates ARVEN non-diagnostic health policy");
 }
 const NaturalPortionLabel = z.string().min(1).max(120).refine(
   (value) => !containsDigitNutritionClaim(value) && !containsSpelledNutritionClaim(value),
