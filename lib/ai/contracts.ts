@@ -19,23 +19,12 @@ const TURKISH_NUMBER_SUFFIXES = new Set([
   "ye", "lar", "ler", "lari", "leri", "larin", "lerin", "lara", "lere", "lik", "luk", "inci", "uncu",
 ]);
 const NUTRITION_UNIT_PATTERN = "(?:kcal|kilokalori[a-z]*|kilocalorie[a-z]*|calorie[a-z]*|calories|kj|kilojul[a-z]*|kilojoule[a-z]*|kalori[a-z]*|gram[a-z]*|miligram[a-z]*|mikrogram[a-z]*|mililitre[a-z]*|millilitre[a-z]*|litre[a-z]*|milligram[a-z]*|microgram[a-z]*|milliliter[a-z]*|liter[a-z]*|gr|g|mg|mcg|ml|kg|l)";
-
-function asciiDigit(codePoint: number): string | null {
-  const ranges = [0x30, 0x660, 0x6f0, 0xff10];
-  for (const zero of ranges) {
-    if (codePoint >= zero && codePoint <= zero + 9) return String(codePoint - zero);
-  }
-  return null;
-}
-
-function normalizeUnicodeDigits(value: string): string {
-  return Array.from(value, (char) => asciiDigit(char.codePointAt(0) ?? -1) ?? char).join("");
-}
+const NUTRITION_METRIC_PATTERN = "(?:kalori|kcal|enerji|protein|karbonhidrat|karb|yag|lif|fiber|sodyum|tuz|seker|calorie|calories|energy|carb|carbs|fat|sodium|sugar)";
 
 function normalizeNumberText(value: string): string {
-  return normalizeUnicodeDigits(value).toLocaleLowerCase("tr-TR").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+  return value.toLocaleLowerCase("tr-TR").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
     .replace(/ı/g, "i").replace(/ş/g, "s").replace(/ğ/g, "g").replace(/ç/g, "c")
-    .replace(/ö/g, "o").replace(/ü/g, "u").replace(/[^a-z0-9\s.,+\-]/g, " ").replace(/\s+/g, " ");
+    .replace(/ö/g, "o").replace(/ü/g, "u").replace(/[^a-z0-9\p{N}\s.,+\-]/gu, " ").replace(/\s+/g, " ");
 }
 function isWrittenNumberToken(token: string): boolean {
   if (NUMBER_WORDS.has(token)) return true;
@@ -56,13 +45,13 @@ function containsContextualOneClaim(value: string): boolean {
   return directOne.test(normalized) || frequencyOne.test(normalized);
 }
 function containsDigitNutritionClaim(value: string): boolean {
+  if (!ANY_DIGIT.test(value)) return false;
   const normalized = normalizeNumberText(value);
-  const numericLiteral = "\\d+(?:[.,]\\d+)?(?:e[+\\-]?\\d+)?";
-  return new RegExp(`\\b${numericLiteral}\\s*${NUTRITION_UNIT_PATTERN}\\b`, "i").test(normalized);
+  return new RegExp(`\\b(?:${NUTRITION_UNIT_PATTERN}|${NUTRITION_METRIC_PATTERN})\\b`, "i").test(normalized);
 }
 function containsSpelledNutritionClaim(value: string): boolean {
   const normalized = normalizeNumberText(value);
-  return new RegExp(`\\b${NUTRITION_UNIT_PATTERN}\\b`, "i").test(normalized)
+  return new RegExp(`\\b(?:${NUTRITION_UNIT_PATTERN}|${NUTRITION_METRIC_PATTERN})\\b`, "i").test(normalized)
     && (containsSpelledNumberWord(normalized) || containsContextualOneClaim(normalized));
 }
 function containsWeeklyNumericClaim(value: string): boolean {
