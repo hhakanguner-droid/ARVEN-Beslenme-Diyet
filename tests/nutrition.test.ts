@@ -125,16 +125,19 @@ test("extended nutrient sums remain partial when any contributing source is inco
   ], "mg"), { amount: null, unit: "mg", completeness: "unknown" });
 });
 
-test("null nutrient amounts can never remain complete", () => {
+test("null nutrient amounts must always be unknown", () => {
+  for (const completeness of ["complete", "partial"] as const) {
+    assert.throws(() => scaleNutrientValue({ amount: null, unit: "mg", completeness }, 0.5), /must use unknown completeness/);
+    assert.throws(() => sumNutrientValues([
+      { amount: 100, unit: "mg", completeness: "complete" },
+      { amount: null, unit: "mg", completeness },
+    ], "mg"), /must use unknown completeness/);
+  }
+
   assert.deepEqual(
-    scaleNutrientValue({ amount: null, unit: "mg", completeness: "complete" }, 0.5),
+    scaleNutrientValue({ amount: null, unit: "mg", completeness: "unknown" }, 0.5),
     { amount: null, unit: "mg", completeness: "unknown" },
   );
-
-  assert.deepEqual(sumNutrientValues([
-    { amount: 100, unit: "mg", completeness: "complete" },
-    { amount: null, unit: "mg", completeness: "complete" },
-  ], "mg"), { amount: 100, unit: "mg", completeness: "partial" });
 });
 
 test("canonical nutrient key and unit pairs are enforced at runtime", () => {
@@ -145,6 +148,10 @@ test("canonical nutrient key and unit pairs are enforced at runtime", () => {
   assert.throws(() => assertExtendedNutritionFacts({
     typo: { amount: 1, unit: "mg", completeness: "complete" },
   } as never), /Unsupported nutrient key/);
+
+  assert.throws(() => assertExtendedNutritionFacts({
+    sodium: { amount: null, unit: "mg", completeness: "partial" },
+  }), /must use unknown completeness/);
 });
 
 test("remaining targets never go below zero and subtract logged water", () => {
