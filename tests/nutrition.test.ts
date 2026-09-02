@@ -68,7 +68,7 @@ test("fractional natural portions are supported", () => {
   assert.equal(portion.display?.label, "0,5 küçük kase");
 });
 
-test("household portions that round below 0.1 g are rejected", () => {
+test("resolved portions below 0.1 g precision are rejected", () => {
   const tinyOptionFood: Food = {
     ...verifiedFood,
     id: "tiny-option-food",
@@ -86,10 +86,15 @@ test("household portions that round below 0.1 g are rejected", () => {
     portionOptionId: "tiny-option",
     quantity: 0.001,
   }), /below ARVEN's 0.1 g precision/);
+
+  assert.throws(() => resolvePortionSelection(verifiedFood, {
+    kind: "custom-grams",
+    grams: 0.001,
+  }), /below ARVEN's 0.1 g precision/);
 });
 
-test("custom grams remain available as an advanced fallback", () => {
-  const portion = resolvePortionSelection(verifiedFood, { kind: "custom-grams", grams: 135 });
+test("custom grams remain available as an advanced fallback at supported precision", () => {
+  const portion = resolvePortionSelection(verifiedFood, { kind: "custom-grams", grams: 135.04 });
   assert.equal(portion.grams, 135);
   assert.equal(portion.display?.label, "135 g");
 });
