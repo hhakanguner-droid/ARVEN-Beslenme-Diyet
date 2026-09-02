@@ -4,6 +4,7 @@ import {
   calculatePortions,
   remainingTargets,
   scaleNutrition,
+  scaleNutritionForStorage,
   sumNutrition,
 } from "../lib/nutrition/calculations";
 import {
@@ -232,6 +233,28 @@ test("meal totals accumulate exact portion values before final rounding", () => 
 
   assert.equal(scaleNutrition(portions[0]!).energyKcal, 0);
   assert.equal(calculatePortions(portions).energyKcal, 49);
+});
+
+test("historical snapshot scaling keeps precision until aggregate rounding", () => {
+  const tinyFood: Food = {
+    ...verifiedFood,
+    id: "snapshot-energy",
+    nutrition: {
+      energyKcal: 49,
+      proteinG: 1.234567,
+      carbsG: 0,
+      fatG: 0,
+      extended: { sodium: { amount: 1, unit: "mg", completeness: "complete" } },
+    },
+  };
+  const snapshot = scaleNutritionForStorage({ food: tinyFood, grams: 33.333 });
+  assert.equal(snapshot.energyKcal, 16.33317);
+  assert.equal(snapshot.proteinG, 0.411518);
+  assert.equal(snapshot.extended?.sodium?.amount, 0.33333);
+
+  const oneGram = scaleNutritionForStorage({ food: tinyFood, grams: 1 });
+  assert.equal(oneGram.energyKcal, 0.49);
+  assert.equal(sumNutrition(Array.from({ length: 100 }, () => oneGram)).energyKcal, 49);
 });
 
 test("negative optional targets are rejected before remaining calculations", () => {
