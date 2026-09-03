@@ -59,6 +59,9 @@ const DIRECT_DIAGNOSIS_PATTERNS = [
   new RegExp(`\\b(?:belirti|belirtiler|bulgu|bulgular|sonuc|sonuclar|deger|degerler|durum)\\w*\\b.{0,100}\\b${INFLECTED_MEDICAL_ASSERTION_TERM}\\b.{0,50}\\b(?:oldugunu|gosteriyor|kanitliyor|dogruluyor|isaret\\s+ediyor|dusunduruyor|akla\\s+getiriyor)\\b`),
   new RegExp(`\\b${MEDICAL_LEXEME}(?:li|lu|da|de|i)?(?:sin|siniz|sun|sunuz|in)\\b`),
   new RegExp(`\\b(?:you have|youve got|you are|youre)\\s+(?:an?\\s+)?${ENGLISH_DIAGNOSIS_TERM}\\b`),
+  new RegExp(`\\b(?:you|they|he|she)\\s+(?:seem|seems|appear|appears|look|looks)\\s+(?:to\\s+be\\s+)?(?:an?\\s+)?${ENGLISH_DIAGNOSIS_TERM}\\b`),
+  new RegExp(`\\b(?:this|that|it)\\s+(?:is|looks\\s+like|seems\\s+like|appears\\s+to\\s+be)\\s+(?:an?\\s+)?${ENGLISH_DIAGNOSIS_TERM}\\b`),
+  new RegExp(`\\b(?:sounds|looks|seems|appears)\\s+like\\s+(?:an?\\s+)?${ENGLISH_DIAGNOSIS_TERM}\\b`),
   new RegExp(`\\b(?:your|these|this)\\s+(?:symptoms?|results?|findings?|condition)\\b.{0,100}\\b(?:indicate|indicates|suggest|suggests|confirm|confirms|show|shows|mean|means)\\b.{0,50}\\b${ENGLISH_DIAGNOSIS_TERM}\\b`),
   new RegExp(`\\b(?:diagnosis|diagnosed|diagnostic)\\b.{0,50}\\b${ENGLISH_DIAGNOSIS_TERM}\\b`),
 ];
