@@ -5,6 +5,12 @@ export type ResolvedFoodAllergens = {
   allergenIds: string[];
 };
 
+export type AllergenSafetyExclusion = {
+  id: string | null;
+  label: string;
+  resolutionStatus: "resolved" | "unresolved";
+};
+
 export type DietarySafetyExclusion = {
   kind: "food" | "rule";
   id: string | null;
@@ -26,7 +32,10 @@ function normalizeTurkishText(value: string): string {
     .replace(/['’ʼ]/g, "").replace(/[^a-z0-9\s,;.!?]/g, " ").replace(/\s+/g, " ");
 }
 
-const MEDICAL_MANAGEMENT_CONTEXT = ["ilac", "ilaclar", "ilac kullanimi", "medikasyon", "recete", "doz", "tedavi", "insulin", "antibiyotik", "antibiyoti", "warfarin", "metformin", "aspirin", "euthyrox"];
+const MEDICAL_MANAGEMENT_CONTEXT = [
+  "ilac", "ilaclar", "ilac kullanimi", "medikasyon", "recete", "doz", "tedavi", "insulin", "antibiyotik", "antibiyoti", "warfarin", "metformin", "aspirin", "euthyrox",
+  "medication", "medications", "medicine", "medicines", "prescription", "prescriptions", "dose", "dosage", "treatment", "antibiotic", "antibiotics",
+];
 const NUTRITION_TARGET = "(?:besin|gida|yemek|ogun|porsiyon|meyve|sebze|ekmek|ekmegi|tuz|tuzu|seker|sekeri|zeytinyagi|yag|yagi|protein|karbonhidrat|lif|kalori|kahvalti|corba|salata|et|tavuk|balik|yumurta|sut|yogurt|peynir|bakliyat|kuruyemis|su|suyu)";
 const PREPARATION_CONTEXT = "(?:ocak|firin|tava|tencere|karisim|hamur|sos|pisir|kaynat|kavur|dinlen|beklet|servis|tabak|kap|kase|malzeme)";
 const TREATMENT_ACTION = "(?:al|alma|alman|almani|almaniz|almanizi|kullan|kullanma|kullanman|kullanmani|kullanmaniz|kullanmanizi|birak|birakma|birakman|birakmani|birakmaniz|birakmanizi|kes|kesme|kesmen|kesmeni|kesmeniz|kesmenizi|durdur|durdurma|durdurman|durdurmani|durdurmaniz|durdurmanizi|basla|baslama|baslaman|baslamani|baslamaniz|baslamanizi|atla|atlama|atlaman|atlamani|atlamaniz|atlamanizi|degistir|degistirme|degistirmen|degistirmeni|degistirmeniz|degistirmenizi|artir|artirma|artirman|artirmani|artirmaniz|artirmanizi|azalt|azaltma|azaltman|azaltmani|azaltmaniz|azaltmanizi|yukselt|dusur|surdur|devam|almali(?:sin|siniz)?|kullanmali(?:sin|siniz)?|birakmali(?:sin|siniz)?|kesmeli(?:sin|siniz)?|durdurmali(?:sin|siniz)?|baslamali(?:sin|siniz)?|atlamali(?:sin|siniz)?|degistirmeli(?:sin|siniz)?)";
@@ -104,28 +113,41 @@ export function assertNoMedicalOverreach(text: string): void {
   }
 }
 
-export function findAllergyConflicts(candidates: ResolvedFoodAllergens[], activeAllergenIds: string[]): string[] {
-  if (activeAllergenIds.length === 0) return [];
-  const ids = activeAllergenIds.map((id) => id.trim());
-  if (ids.some((id) => id.length === 0)) return ["Active allergen identifier unresolved"];
-  const blocked = new Set(ids);
-  const conflicts: string[] = [];
-  for (const candidate of candidates) {
-    if (candidate.allergenDataStatus !== "verified") {
-      conflicts.push(`${candidate.foodName} (allergen data unresolved)`);
-      continue;
-    }
-    if (candidate.allergenIds.some((id) => id.trim().length === 0)) {
-      conflicts.push(`${candidate.foodName} (allergen identifier unresolved)`);
-      continue;
-    }
-    if (candidate.allergenIds.some((id) => blocked.has(id.trim()))) conflicts.push(candidate.foodName);
-  }
-  return conflicts;
+function normalizeAllergenExclusions(active: Array<string | AllergenSafetyExclusion>): AllergenSafetyExclusion[] {
+  return active.map((entry) => typeof entry === "string"
+    ? { id: entry, label: entry, resolutionStatus: entry.trim() ? "resolved" : "unresolved" }
+    : entry);
 }
 
-export function assertNoAllergyConflict(candidates: ResolvedFoodAllergens[], activeAllergenIds: string[]): void {
-  const conflicts = findAllergyConflicts(candidates, activeAllergenIds);
+export function findAllergyConflicts(candidates: ResolvedFoodAllergens[], activeAllergens: Array<string | AllergenSafetyExclusion>): string[] {
+  if (activeAllergens.length === 0) return [];
+  const conflicts = new Set<string>();
+  const blocked = new Set<string>();
+  for (const exclusion of normalizeAllergenExclusions(activeAllergens)) {
+    const id = exclusion.id?.trim() ?? "";
+    if (exclusion.resolutionStatus !== "resolved" || id.length === 0) {
+      conflicts.add(`${exclusion.label} (active allergen unresolved)`);
+      continue;
+    }
+    blocked.add(id);
+  }
+  for (const candidate of candidates) {
+    if (candidate.allergenDataStatus !== "verified") {
+      conflicts.add(`${candidate.foodName} (allergen data unresolved)`);
+      continue;
+    }
+    const ids = candidate.allergenIds.map((id) => id.trim());
+    if (ids.some((id) => id.length === 0)) {
+      conflicts.add(`${candidate.foodName} (allergen identifier unresolved)`);
+      continue;
+    }
+    if (ids.some((id) => blocked.has(id))) conflicts.add(candidate.foodName);
+  }
+  return [...conflicts];
+}
+
+export function assertNoAllergyConflict(candidates: ResolvedFoodAllergens[], activeAllergens: Array<string | AllergenSafetyExclusion>): void {
+  const conflicts = findAllergyConflicts(candidates, activeAllergens);
   if (conflicts.length > 0) throw new Error(`Allergy conflict detected: ${conflicts.join(", ")}`);
 }
 
