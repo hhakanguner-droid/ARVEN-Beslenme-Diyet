@@ -123,6 +123,7 @@ test("weekly AI insight cannot author numeric truth", () => {
     "Uyum puanın %97 ve ortalaman 1900 kcal.", "Uyumun yüzde doksan yedi.", "Ortalaman iki bin kalori civarında.",
     "Hedefin yüzde seksenine yaklaştın.", "Hedefin yüzde bir altında kaldın.", "Ortalaman bir gram protein arttı.",
     "Bu hafta hedefi bir kez aştın.", "Planı bir defa kaçırdın.", "Bu hafta hedefi birer kez aştın.", "Planı bir kereden fazla kaçırdın.",
+    "One day was incomplete.", "One meal was missing.",
   ];
   for (const summary of invalidSummaries) assert.throws(() => parseWeeklyInsight({ schemaVersion: "WeeklyInsightV1", summary, positives: [], areasForImprovement: [], suggestions: [], uncertainty: [] }), /must not contain numeric claims/, summary);
 });
