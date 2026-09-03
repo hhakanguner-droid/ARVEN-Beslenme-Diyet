@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 export type GoalCalculationScalar = number | string | boolean | null;
 
 export type GoalCalculationProvenance = {
@@ -27,6 +29,19 @@ export type MealEnergyAllocation = {
   /** Basis points: 2500 = 25.00%. All allocations for a goal must total 10,000. */
   energyShareBps: number;
 };
+
+const MealEnergyAllocationSchema = z.object({
+  mealType: z.enum(MEAL_TYPES),
+  energyShareBps: z.number().int().min(0).max(10000),
+}).strict();
+
+const MealEnergyAllocationsSchema = z.array(MealEnergyAllocationSchema).min(1);
+
+export function parseMealEnergyAllocations(value: unknown): MealEnergyAllocation[] {
+  const allocations = MealEnergyAllocationsSchema.parse(value);
+  assertMealEnergyAllocations(allocations);
+  return allocations;
+}
 
 export function assertGoalCalculationProvenance(provenance: GoalCalculationProvenance): void {
   if (!provenance.method?.trim()) throw new Error("Goal calculation method is required");
