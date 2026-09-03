@@ -83,6 +83,10 @@ export function assertMealEnergyAllocations(allocations: MealEnergyAllocation[])
   let total = 0;
 
   for (const allocation of allocations) {
+    const keys = Object.keys(allocation as Record<string, unknown>);
+    if (keys.length !== 2 || !keys.includes("mealType") || !keys.includes("energyShareBps")) {
+      throw new Error("Meal allocation contains undeclared fields");
+    }
     const rawMealType = allocation.mealType as string;
     if (rawMealType !== rawMealType.trim() || !MEAL_TYPE_SET.has(rawMealType)) {
       throw new Error(`Invalid mealType: ${rawMealType}`);
