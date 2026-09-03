@@ -16,11 +16,20 @@ test("AI meal contract accepts canonical natural portion language", () => {
   assert.equal(parsed.ingredients[0]?.portionHint.measure, "palm");
 });
 
-test("AI portion label must agree with structured measure and quantity", () => {
+test("AI portion label must agree with structured measure, size, and quantity", () => {
   assert.throws(() => parseMealSuggestion({
     ...validSuggestion,
     ingredients: [{ foodQuery: "çorba", portionHint: { measure: "slice", quantity: 1, naturalLabel: "2 bardak" } }],
   }), /naturalLabel must match structured portion hint/);
+  assert.throws(() => parseMealSuggestion({
+    ...validSuggestion,
+    ingredients: [{ foodQuery: "çorba", portionHint: { measure: "bowl", size: "small", quantity: 1, naturalLabel: "1 kase" } }],
+  }), /1 küçük kase/);
+  const parsed = parseMealSuggestion({
+    ...validSuggestion,
+    ingredients: [{ foodQuery: "çorba", portionHint: { measure: "bowl", size: "large", quantity: 1, naturalLabel: "1 büyük kase" } }],
+  });
+  assert.equal(parsed.ingredients[0]?.portionHint.size, "large");
 });
 
 test("AI portion quantities must be exactly representable by the visible label", () => {
@@ -74,11 +83,12 @@ test("all user-facing meal text rejects numeric deterministic claims", () => {
   }), /Natural portion labels/);
 });
 
-test("food queries cannot be blank or smuggle model-authored quantities", () => {
+test("food queries cannot be blank, smuggle quantities, or name medication", () => {
   for (const foodQuery of [
     "   ", "120 g tavuk", "４３０ kcal tavuk", "٤٣٠ kcal tavuk", "४३० kcal tavuk", "400 kcal yoğurt", "kalori 430 yoğurt",
     "iki miligram sodyum", "iki kilokalori yoğurt", "2 litre su", "iki mililitre süt",
     "1e3 kcal yoğurt", "1e3 calories chicken", "900 kilocalories yogurt", "800 kilojoules soup",
+    "Metformin", "insülin", "Warfarin",
   ]) {
     assert.throws(() => parseMealSuggestion({ ...validSuggestion, ingredients: [{ ...validSuggestion.ingredients[0], foodQuery }] }));
   }
