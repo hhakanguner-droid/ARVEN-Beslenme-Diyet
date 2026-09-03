@@ -47,7 +47,7 @@ const DIAGNOSIS_TERM = "(?:diyabet|prediyabet|colyak|hipertansiyon|hipotansiyon|
 const MEDICAL_LEXEME = "(?:kanser|depresyon|anksiyete|astim|migren|epilepsi|bipolar|psikoz|siroz|hepatit|artrit|dermatit|fibroz|skleroz|nefrit|gastrit|kolit|pnomoni|tromboz|losemi|lenfoma|melanom|karsinom|sarkom|parkinson|endometriozis)";
 const MEDICAL_ASSERTION_TERM = `(?:${DIAGNOSIS_TERM}|${MEDICAL_LEXEME})`;
 const INFLECTED_MEDICAL_ASSERTION_TERM = `${MEDICAL_ASSERTION_TERM}(?:e|a|i|u|yi|yu|ni|nu|in|un|nin|nun)?`;
-const ENGLISH_DIAGNOSIS_TERM = "(?:diabetes|prediabetes|celiac(?: disease)?|hypertension|hypotension|obesity|anemia|hypothyroidism|hyperthyroidism|thyroid disease|insulin resistance|metabolic syndrome|allergy|intolerance|cancer|depression|anxiety|asthma|migraine|epilepsy|bipolar disorder|psychosis|cirrhosis|hepatitis|arthritis|dermatitis|fibrosis|sclerosis|nephritis|gastritis|colitis|pneumonia|thrombosis|leukemia|lymphoma|melanoma|carcinoma|sarcoma|parkinsons disease|endometriosis)";
+const ENGLISH_DIAGNOSIS_TERM = "(?:diabetes|diabetic|prediabetes|prediabetic|celiac(?: disease)?|hypertension|hypotension|obesity|anemia|hypothyroidism|hyperthyroidism|thyroid disease|insulin resistance|metabolic syndrome|allergy|intolerance|cancer|depression|anxiety|asthma|migraine|epilepsy|bipolar disorder|psychosis|cirrhosis|hepatitis|arthritis|dermatitis|fibrosis|sclerosis|nephritis|gastritis|colitis|pneumonia|thrombosis|leukemia|lymphoma|melanoma|carcinoma|sarcoma|parkinsons disease|endometriosis)";
 const DIRECT_DIAGNOSIS_PATTERNS = [
   /\b(?:tani|tanisi|taninin|taniya|tanidan|teshis|teshisi|teshisin|teshise|teshisten)\b/,
   new RegExp(`\\b(?:sende|sizde)\\b.{0,60}\\b${MEDICAL_ASSERTION_TERM}\\b.{0,30}\\b(?:var|oldugun|oldugunu)\\b`),
