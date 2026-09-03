@@ -1,0 +1,71 @@
+import { assertVerifiedPortionOptionSource } from "./sources";
+import type { Food, Portion, PortionSelection } from "./types";
+
+const PORTION_GRAM_PRECISION = 0.1;
+
+function finitePositive(value: number, field: string): number {
+  if (!Number.isFinite(value) || value <= 0) throw new Error(`${field} must be a finite positive number`);
+  return value;
+}
+
+function roundResolvedGrams(value: number): number {
+  return Math.round((value + Number.EPSILON) * 10) / 10;
+}
+
+function assertResolvedGramPrecision(value: number, kind: string): number {
+  const rawGrams = finitePositive(value, "grams");
+  if (rawGrams < PORTION_GRAM_PRECISION) {
+    throw new Error(`Resolved ${kind} portion is below ARVEN's 0.1 g precision; choose a larger amount`);
+  }
+  const grams = roundResolvedGrams(rawGrams);
+  if (grams < PORTION_GRAM_PRECISION) {
+    throw new Error(`Resolved ${kind} portion is below ARVEN's 0.1 g precision; choose a larger amount`);
+  }
+  return grams;
+}
+
+export function formatPortionQuantity(quantity: number): string {
+  if (Number.isInteger(quantity)) return String(quantity);
+  return String(Math.round(quantity * 100) / 100).replace(".", ",");
+}
+
+export function canonicalHouseholdPortionLabel(quantity: number, optionLabel: string): string {
+  const normalizedOption = optionLabel.trim().replace(/^1(?:[.,]0+)?\s+/u, "");
+  return `${formatPortionQuantity(quantity)} ${normalizedOption}`.trim();
+}
+
+export function resolvePortionSelection(food: Food, selection: PortionSelection): Portion {
+  if (selection.kind === "custom-grams") {
+    const grams = assertResolvedGramPrecision(selection.grams, "custom");
+    return {
+      food,
+      grams,
+      display: { label: `${formatPortionQuantity(grams)} g` },
+    };
+  }
+
+  const quantity = finitePositive(selection.quantity, "quantity");
+  const option = food.portionOptions?.find((candidate) => candidate.id === selection.portionOptionId);
+  if (!option) throw new Error(`Unknown portion option ${selection.portionOptionId} for food ${food.id}`);
+
+  assertVerifiedPortionOptionSource(option);
+  const grams = assertResolvedGramPrecision(option.gramsPerUnit * quantity, "household");
+
+  return {
+    food,
+    grams,
+    display: {
+      portionOptionId: option.id,
+      quantity,
+      label: canonicalHouseholdPortionLabel(quantity, option.label),
+    },
+  };
+}
+
+export function approximateGramLabel(portion: Portion): string {
+  const roundedWhole = Math.round(portion.grams);
+  const displayGrams = roundedWhole === 0 && portion.grams > 0
+    ? roundResolvedGrams(portion.grams)
+    : roundedWhole;
+  return `≈ ${formatPortionQuantity(displayGrams)} g`;
+}

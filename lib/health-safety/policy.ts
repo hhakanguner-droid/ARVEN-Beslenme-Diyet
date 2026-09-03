@@ -1,0 +1,277 @@
+export type ResolvedFoodAllergens = {
+  foodId: string;
+  foodName: string;
+  allergenDataStatus: "verified" | "unknown" | "not-applicable";
+  allergenIds: string[];
+};
+
+export type AllergenSafetyExclusion = {
+  id: string | null;
+  label: string;
+  resolutionStatus: "resolved" | "unresolved";
+};
+
+export type DietarySafetyExclusion = {
+  kind: "food" | "dietary-rule";
+  id: string | null;
+  label: string;
+  resolutionStatus: "resolved" | "unresolved";
+};
+
+export type ResolvedFoodDietarySafety = {
+  foodId: string;
+  foodName: string;
+  dietarySafetyDataStatus: "verified" | "unknown" | "not-applicable";
+  dietaryConflictRuleIds: string[];
+};
+
+function normalizeTurkishText(value: string): string {
+  return value.trim().toLocaleLowerCase("tr-TR").normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "").replace(/ı/g, "i").replace(/ş/g, "s")
+    .replace(/ğ/g, "g").replace(/ç/g, "c").replace(/ö/g, "o").replace(/ü/g, "u")
+    .replace(/['’ʼ]/g, "").replace(/[^a-z0-9\s,;.!?]/g, " ").replace(/\s+/g, " ");
+}
+
+// ARVEN has no medication feature or medication registry. The deterministic boundary therefore
+// must not depend on recognizing drug names. Generic medical-management nouns fail closed, while
+// directive grammar is judged only by whether its complete target is an explicit nutrition or
+// meal-preparation target.
+const MEDICAL_MANAGEMENT_CONTEXT = [
+  "ilac", "ilaclar", "ilac kullanimi", "medikasyon", "recete", "doz", "tedavi",
+  "medication", "medications", "medicine", "medicines", "prescription", "prescriptions", "dose", "dosage", "treatment",
+];
+const NUTRITION_TARGET = "(?:besin|gida|yemek|ogun|porsiyon|meyve|sebze|ekmek|ekmegi|tuz|tuzu|seker|sekeri|zeytinyagi|yag|yagi|protein|karbonhidrat|lif|kalori|kahvalti|corba|salata|et|tavuk|balik|yumurta|sut|yogurt|peynir|bakliyat|kuruyemis|su|suyu)";
+const PREPARATION_CONTEXT = "(?:ocak|firin|tava|tencere|karisim|hamur|sos|pisir|kaynat|kavur|dinlen|beklet|servis|tabak|kap|kase|malzeme)";
+const TREATMENT_ACTION = "(?:al|alma|alman|almani|almaniz|almanizi|kullan|kullanma|kullanman|kullanmani|kullanmaniz|kullanmanizi|birak|birakma|birakman|birakmani|birakmaniz|birakmanizi|kes|kesme|kesmen|kesmeni|kesmeniz|kesmenizi|durdur|durdurma|durdurman|durdurmani|durdurmaniz|durdurmanizi|basla|baslama|baslaman|baslamani|baslamaniz|baslamanizi|atla|atlama|atlaman|atlamani|atlamaniz|atlamanizi|degistir|degistirme|degistirmen|degistirmeni|degistirmeniz|degistirmenizi|artir|artirma|artirman|artirmani|artirmaniz|artirmanizi|azalt|azaltma|azaltman|azaltmani|azaltmaniz|azaltmanizi|yukselt|dusur|surdur|devam|almali(?:sin|siniz)?|kullanmali(?:sin|siniz)?|birakmali(?:sin|siniz)?|kesmeli(?:sin|siniz)?|durdurmali(?:sin|siniz)?|baslamali(?:sin|siniz)?|atlamali(?:sin|siniz)?|degistirmeli(?:sin|siniz)?)";
+const TREATMENT_ACTION_GLOBAL = new RegExp(String.raw`\b${TREATMENT_ACTION}\b`, "g");
+const NUTRITION_TARGET_TOKEN = new RegExp(`^${NUTRITION_TARGET}(?:yi|i|u|yu|e|a|den|dan)?$`);
+const PREPARATION_CONTEXT_TOKEN = new RegExp(String.raw`^${PREPARATION_CONTEXT}\w*$`);
+const TURKISH_TARGET_NEUTRAL_TOKEN = /^(?:bir|iki|uc|dort|bes|alti|yedi|sekiz|dokuz|on|az|cok|daha|biraz|her|gun|gunde|ogunde|bardak|adet|gram|ml|ile|yerine)$/;
+
+const SAFE_ENGLISH_ACTION_TARGET = /^(?:an?\s+)?(?:(?:more|less|some|the|your)\s+)?(?:food|meals?|breakfast|lunch|dinner|snacks?|water|salt|sugar|oil|olive oil|butter|vegetables?|fruit|bread|protein|carbs?|fiber|fibre|portions?|recipes?|ingredients?|heat|oven|pan|pot|mixture|batter|sauce)(?:\s+(?:daily|each day|every day|with meals?|with breakfast|with lunch|with dinner))?\s*$/;
+const ENGLISH_MANAGEMENT_VERB = "(?:take|use|stop|start|begin|continue|resume|skip|avoid|discontinue|quit|cease|switch|swap|replace|substitute|change|adjust|reduce|increase|decrease|raise|lower|hold|taper|double|halve|administer)";
+const ENGLISH_MANAGEMENT_DIRECTIVE = new RegExp(String.raw`\b${ENGLISH_MANAGEMENT_VERB}\b\s+(.+)$`);
+
+const DIAGNOSIS_TERM = "(?:diyabet|prediyabet|colyak|hipertansiyon|hipotansiyon|obezite|anemi|hipotiroidi|hipertiroidi|tiroid|insulin direnci|metabolik sendrom|alerji|intolerans|hastalik|sendrom)";
+const MEDICAL_LEXEME = "(?:kanser|depresyon|anksiyete|astim|migren|epilepsi|bipolar|psikoz|siroz|hepatit|artrit|dermatit|fibroz|skleroz|nefrit|gastrit|kolit|pnomoni|tromboz|losemi|lenfoma|melanom|karsinom|sarkom|parkinson|endometriozis)";
+const MEDICAL_ASSERTION_TERM = `(?:${DIAGNOSIS_TERM}|${MEDICAL_LEXEME})`;
+const INFLECTED_MEDICAL_ASSERTION_TERM = `${MEDICAL_ASSERTION_TERM}(?:e|a|i|u|yi|yu|ni|nu|in|un|nin|nun)?`;
+const ENGLISH_DIAGNOSIS_TERM = "(?:diabetes|diabetic|prediabetes|prediabetic|celiac(?: disease)?|hypertension|hypotension|obesity|anemia|hypothyroidism|hyperthyroidism|thyroid disease|insulin resistance|metabolic syndrome|allergy|intolerance|cancer|depression|anxiety|asthma|migraine|epilepsy|bipolar disorder|psychosis|cirrhosis|hepatitis|arthritis|dermatitis|fibrosis|sclerosis|nephritis|gastritis|colitis|pneumonia|thrombosis|leukemia|lymphoma|melanoma|carcinoma|sarcoma|parkinsons disease|endometriosis)";
+const SAFE_ENGLISH_PREDICATE = /^(?:an?\s+)?(?:(?:very|quite|more|less|well|good|great|solid|clear|simple|balanced|healthy|helpful|realistic|practical|flexible)\s+)*(?:meal|meal plan|plan|goal|option|choice|recipe|ingredient|portion|breakfast|lunch|dinner|snack|routine|schedule|strategy|approach|idea|habit|preference|target)(?:\s+(?:plan|goal|option|choice|recipe|ingredient|portion|routine|schedule|strategy|approach|idea|habit|preference|target))?\s*[.!?]*$/;
+const GENERIC_ENGLISH_DIAGNOSIS_GRAMMARS = [
+  /\b(?:you|they|he|she)\s+(?:(?:probably|possibly|likely)\s+)?(?:(?:may|might|could)\s+)?(?:have|has)\s+(.+)/,
+  /\b(?:you|they|he|she)\s+(?:(?:probably|possibly|likely)\s+)?(?:may|might|could)\s+be\s+(.+)/,
+  /\b(?:you|they|he|she)\s+(?:seem|seems|appear|appears|look|looks)\s+(?:to\s+be\s+)?(.+)/,
+  /\b(?:you|they|he|she)\s+(?:suffer|suffers|suffering)\s+from\s+(.+)/,
+  /\b(?:you|they|he|she)\s+(?:exhibit|exhibits|show|shows|display|displays)\s+(?:the\s+)?(?:signs?|symptoms?|features?|evidence)\s+(?:of|for)\s+(.+)/,
+  /\b(?:this|that|it)\s+(?:(?:probably|possibly|likely)\s+)?(?:(?:may|might|could|can)\s+)?(?:is|be)\s+(.+)/,
+  /\b(?:this|that|it)\s+(?:looks|seems|appears|sounds)\s+like\s+(.+)/,
+  /\b(?:looks|seems|appears|sounds)\s+like\s+(.+)/,
+  /\b(?:your|their|his|her)\s+(?:condition|diagnosis|disease|disorder|illness|results?|findings?|symptoms?)\s+(?:(?:probably|possibly|likely)\s+)?(?:(?:may|might|could)\s+)?(?:is|are|be)\s+(.+)/,
+];
+const DIRECT_DIAGNOSIS_PATTERNS = [
+  /\b(?:tani|tanisi|taninin|taniya|tanidan|teshis|teshisi|teshisin|teshise|teshisten)\b/,
+  new RegExp(String.raw`\b(?:sende|sizde)\b.{0,60}\b${MEDICAL_ASSERTION_TERM}\b.{0,30}\b(?:var|oldugun|oldugunu)\b`),
+  new RegExp(String.raw`\b${MEDICAL_ASSERTION_TERM}(?:in|un|nin|nun)?\s+var\b`),
+  new RegExp(String.raw`\b${MEDICAL_ASSERTION_TERM}\s+hastasi(?:sin|siniz|dir)?\b`),
+  new RegExp(String.raw`\b(?:sen|siz)\s+${MEDICAL_ASSERTION_TERM}(?:sin|siniz|sun|sunuz)?\b`),
+  new RegExp(String.raw`\b${DIAGNOSIS_TERM}(?:sin|siniz|sun|sunuz)\b`),
+  new RegExp(String.raw`\bbu\s+${MEDICAL_ASSERTION_TERM}(?:tir|dir|tur|dur)?\b`),
+  new RegExp(String.raw`\b(?:belirti|belirtiler|bulgu|bulgular|sonuc|sonuclar|deger|degerler|durum)\w*\b.{0,100}\b${INFLECTED_MEDICAL_ASSERTION_TERM}\b.{0,50}\b(?:oldugunu|gosteriyor|kanitliyor|dogruluyor|isaret\s+ediyor|dusunduruyor|akla\s+getiriyor)\b`),
+  new RegExp(String.raw`\b${MEDICAL_LEXEME}(?:li|lu|da|de|i)?(?:sin|siniz|sun|sunuz|in)\b`),
+  new RegExp(String.raw`\b(?:you have|youve got|you are|youre)\s+(?:an?\s+)?${ENGLISH_DIAGNOSIS_TERM}\b`),
+  new RegExp(String.raw`\b(?:your|these|this)\s+(?:symptoms?|results?|findings?|condition)\b.{0,100}\b(?:indicate|indicates|suggest|suggests|confirm|confirms|show|shows|mean|means)\b.{0,50}\b${ENGLISH_DIAGNOSIS_TERM}\b`),
+  /\b(?:diagnosis|diagnosed|diagnostic)\b/,
+];
+
+function splitDirectiveClauses(normalized: string): string[] {
+  return normalized
+    .split(/(?:[;,!.?]+|\s+ve\s+|\s+ama\s+|\s+fakat\s+|\s+ancak\s+)/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function nearestTokenBefore(value: string): string | null {
+  const tokens = value.trim().split(/\s+/).filter(Boolean);
+  return tokens.at(-1) ?? null;
+}
+function nearestTokenAfter(value: string): string | null {
+  return value.trim().split(/\s+/).filter(Boolean)[0] ?? null;
+}
+
+function turkishCompoundTargetIsExplicitNutrition(value: string): boolean {
+  const tokens = value.trim().split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return false;
+  let hasExplicitNutritionOrPreparation = false;
+  for (const token of tokens) {
+    if (NUTRITION_TARGET_TOKEN.test(token) || PREPARATION_CONTEXT_TOKEN.test(token)) {
+      hasExplicitNutritionOrPreparation = true;
+      continue;
+    }
+    if (TURKISH_TARGET_NEUTRAL_TOKEN.test(token)) continue;
+    return false;
+  }
+  return hasExplicitNutritionOrPreparation;
+}
+
+function actionOccurrenceTargetsNutrition(clause: string, actionIndex: number, actionLength: number): boolean {
+  const before = clause.slice(0, actionIndex).trim();
+  const after = clause.slice(actionIndex + actionLength);
+  const previous = nearestTokenBefore(before);
+  if (previous !== null) {
+    if (!NUTRITION_TARGET_TOKEN.test(previous)) return false;
+    // Turkish comitative/replacement connectors bind multiple targets to one action. In that
+    // case the complete target phrase must be explicit nutrition/preparation context; a nearby
+    // safe token cannot mask an unknown treatment target (for example "ibuprofen ile suyu al").
+    if (/\b(?:ile|yerine)\b/.test(before)) return turkishCompoundTargetIsExplicitNutrition(before);
+    return true;
+  }
+  const next = nearestTokenAfter(after);
+  return next !== null && NUTRITION_TARGET_TOKEN.test(next);
+}
+
+function actionOccurrenceIsPreparation(clause: string, actionIndex: number, actionLength: number): boolean {
+  const before = clause.slice(0, actionIndex);
+  const after = clause.slice(actionIndex + actionLength);
+  const nearby = [...before.trim().split(/\s+/).slice(-3), ...after.trim().split(/\s+/).slice(0, 3)].filter(Boolean);
+  return nearby.some((token) => PREPARATION_CONTEXT_TOKEN.test(token));
+}
+
+function clauseContainsUnsafeTreatmentDirective(clause: string): boolean {
+  TREATMENT_ACTION_GLOBAL.lastIndex = 0;
+  for (const match of clause.matchAll(TREATMENT_ACTION_GLOBAL)) {
+    const index = match.index ?? 0;
+    if (actionOccurrenceTargetsNutrition(clause, index, match[0].length)) continue;
+    if (actionOccurrenceIsPreparation(clause, index, match[0].length)) continue;
+    return true;
+  }
+  return false;
+}
+
+function targetIsSafeEnglishAction(target: string): boolean {
+  const normalized = target.trim()
+    .replace(/^(?:(?:taking|using)\s+)+/, "")
+    .replace(/^(?:from|to)\s+/, "")
+    .replace(/^your\s+/, "");
+  if (!normalized) return false;
+  const parts = normalized.split(/\s+(?:and|with|for|to|from)\s+/).map((part) => part.trim()).filter(Boolean);
+  return parts.length > 0 && parts.every((part) => SAFE_ENGLISH_ACTION_TARGET.test(part));
+}
+
+function clauseContainsUnsafeEnglishTreatmentDirective(clause: string): boolean {
+  const match = ENGLISH_MANAGEMENT_DIRECTIVE.exec(clause);
+  if (!match) return false;
+  return !targetIsSafeEnglishAction(match[1] ?? "");
+}
+
+function clauseContainsUnsafeEnglishDiagnosis(clause: string): boolean {
+  for (const grammar of GENERIC_ENGLISH_DIAGNOSIS_GRAMMARS) {
+    const overlappingGrammar = new RegExp(`(?=${grammar.source})`, grammar.flags.includes("g") ? grammar.flags : `${grammar.flags}g`);
+    for (const match of clause.matchAll(overlappingGrammar)) {
+      const predicate = (match[1] ?? "").trim();
+      if (!predicate || SAFE_ENGLISH_PREDICATE.test(predicate)) continue;
+      return true;
+    }
+  }
+  return false;
+}
+
+export function assertNoMedicalOverreach(text: string): void {
+  const normalized = normalizeTurkishText(text);
+  const clauses = splitDirectiveClauses(normalized);
+  const managementContext = MEDICAL_MANAGEMENT_CONTEXT.some((term) => normalized.includes(term));
+  const treatmentDirective = clauses.some((clause) => clauseContainsUnsafeTreatmentDirective(clause) || clauseContainsUnsafeEnglishTreatmentDirective(clause));
+  const diagnosisAssertion = DIRECT_DIAGNOSIS_PATTERNS.some((pattern) => pattern.test(normalized)) || clauses.some(clauseContainsUnsafeEnglishDiagnosis);
+  if (managementContext || treatmentDirective || diagnosisAssertion) {
+    throw new Error("AI output violates ARVEN non-diagnostic health policy");
+  }
+}
+
+function normalizeAllergenExclusions(active: Array<string | AllergenSafetyExclusion>): AllergenSafetyExclusion[] {
+  return active.map((entry) => typeof entry === "string"
+    ? { id: entry, label: entry, resolutionStatus: entry.trim() ? "resolved" : "unresolved" }
+    : entry);
+}
+
+type ResolvableExclusion = { id: string | null; label: string; resolutionStatus: "resolved" | "unresolved" };
+
+/** Splits exclusions into resolved, verified ids (blocked) and unresolved/blank ones (conflicts). */
+function resolveBlockedIds(exclusions: ResolvableExclusion[], unresolvedLabel: string): { conflicts: string[]; blocked: Set<string> } {
+  const conflicts: string[] = [];
+  const blocked = new Set<string>();
+  for (const exclusion of exclusions) {
+    const id = exclusion.id?.trim() ?? "";
+    if (exclusion.resolutionStatus !== "resolved" || id.length === 0) {
+      conflicts.push(`${exclusion.label} (${unresolvedLabel})`);
+      continue;
+    }
+    blocked.add(id);
+  }
+  return { conflicts, blocked };
+}
+
+export function findAllergyConflicts(candidates: ResolvedFoodAllergens[], activeAllergens: Array<string | AllergenSafetyExclusion>): string[] {
+  if (activeAllergens.length === 0) return [];
+  const conflicts = new Set<string>();
+  const { conflicts: unresolved, blocked } = resolveBlockedIds(normalizeAllergenExclusions(activeAllergens), "active allergen unresolved");
+  unresolved.forEach((message) => conflicts.add(message));
+  for (const candidate of candidates) {
+    if (candidate.allergenDataStatus !== "verified") {
+      conflicts.add(`${candidate.foodName} (allergen data unresolved)`);
+      continue;
+    }
+    const ids = candidate.allergenIds.map((id) => id.trim());
+    if (ids.some((id) => id.length === 0)) {
+      conflicts.add(`${candidate.foodName} (allergen identifier unresolved)`);
+      continue;
+    }
+    if (ids.some((id) => blocked.has(id))) conflicts.add(candidate.foodName);
+  }
+  return [...conflicts];
+}
+
+export function assertNoAllergyConflict(candidates: ResolvedFoodAllergens[], activeAllergens: Array<string | AllergenSafetyExclusion>): void {
+  const conflicts = findAllergyConflicts(candidates, activeAllergens);
+  if (conflicts.length) throw new Error(`Allergy conflict: ${conflicts.join(", ")}`);
+}
+
+export function findDietaryExclusionConflicts(candidates: ResolvedFoodDietarySafety[], exclusions: DietarySafetyExclusion[]): string[] {
+  if (exclusions.length === 0) return [];
+  const conflicts = new Set<string>();
+  const foodExclusions: DietarySafetyExclusion[] = [];
+  const ruleExclusions: DietarySafetyExclusion[] = [];
+  for (const exclusion of exclusions) {
+    if (exclusion.kind === "food") foodExclusions.push(exclusion);
+    else if (exclusion.kind === "dietary-rule") ruleExclusions.push(exclusion);
+    else throw new Error(`Unknown dietary exclusion kind: ${exclusion.kind}`);
+  }
+  const { conflicts: unresolvedFoods, blocked: blockedFoods } = resolveBlockedIds(foodExclusions, "active dietary exclusion unresolved");
+  const { conflicts: unresolvedRules, blocked: blockedRules } = resolveBlockedIds(ruleExclusions, "active dietary exclusion unresolved");
+  unresolvedFoods.forEach((message) => conflicts.add(message));
+  unresolvedRules.forEach((message) => conflicts.add(message));
+  for (const candidate of candidates) {
+    const canonicalFoodId = candidate.foodId.trim();
+    if (canonicalFoodId.length === 0) {
+      conflicts.add(`${candidate.foodName} (food identifier unresolved)`);
+    } else if (blockedFoods.has(canonicalFoodId)) {
+      conflicts.add(candidate.foodName);
+    }
+    if (blockedRules.size === 0) continue;
+    if (candidate.dietarySafetyDataStatus !== "verified") {
+      conflicts.add(`${candidate.foodName} (dietary safety data unresolved)`);
+      continue;
+    }
+    const ruleIds = candidate.dietaryConflictRuleIds.map((id) => id.trim());
+    if (ruleIds.some((id) => id.length === 0)) {
+      conflicts.add(`${candidate.foodName} (dietary rule identifier unresolved)`);
+      continue;
+    }
+    if (ruleIds.some((id) => blockedRules.has(id))) conflicts.add(candidate.foodName);
+  }
+  return [...conflicts];
+}
+
+export function assertNoDietaryExclusionConflict(candidates: ResolvedFoodDietarySafety[], exclusions: DietarySafetyExclusion[]): void {
+  const conflicts = findDietaryExclusionConflicts(candidates, exclusions);
+  if (conflicts.length) throw new Error(`Dietary safety conflict: ${conflicts.join(", ")}`);
+}
