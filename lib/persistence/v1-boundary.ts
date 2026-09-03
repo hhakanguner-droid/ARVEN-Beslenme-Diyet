@@ -5,7 +5,7 @@ import { assertNoAllergyConflict, assertNoDietaryExclusionConflict, type Allerge
 import { scaleNutritionForStorage } from "@/lib/nutrition/calculations";
 import { resolvePortionSelection } from "@/lib/nutrition/portions";
 import type { Food, NutritionFacts, PortionSelection } from "@/lib/nutrition/types";
-import { assertCanonicalUtcInstant } from "@/lib/time/canonical";
+import { assertCanonicalUtcInstant, previousLocalDate } from "@/lib/time/canonical";
 
 export const NUTRITION_CALCULATION_VERSION = "nutrition-v1" as const;
 const Id = z.string().trim().min(1).max(200);
@@ -92,24 +92,24 @@ function canonicalJson(value:unknown):string{
 async function sha256(value:string):Promise<string>{const d=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(value));return[...new Uint8Array(d)].map(b=>b.toString(16).padStart(2,"0")).join("");}
 async function assertProposalIntegrity(proposal:StoredProposal):Promise<void>{const actual=await sha256(proposal.payloadJson);if(actual!==proposal.payloadSha256)throw new ApplicationRejectedError("proposal-integrity-failed","Stored proposal payload no longer matches its immutable hash");}
 function instant(date:Date):string{if(!Number.isFinite(date.getTime()))throw new Error("Invalid service clock instant");return date.toISOString();}
-function previousDate(localDate:string):string{const[y,m,d]=localDate.split("-").map(Number);return new Date(Date.UTC(y,m-1,d-1)).toISOString().slice(0,10);}
-export function deriveNutritionLocalDate(occurredAt:string,timezone:string,dayStart:number):string{assertCanonicalUtcInstant(occurredAt,"occurredAt");if(!Number.isInteger(dayStart)||dayStart<0||dayStart>1439)throw new Error("nutritionDayStartMinutes must be 0..1439");let f:Intl.DateTimeFormat;try{f=new Intl.DateTimeFormat("en-CA",{timeZone:timezone,year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hourCycle:"h23"});}catch{throw new Error("Authenticated profile contains an invalid IANA timezone");}const p=Object.fromEntries(f.formatToParts(new Date(occurredAt)).filter(x=>x.type!=="literal").map(x=>[x.type,x.value]));const date=`${p.year}-${p.month}-${p.day}`;const mins=Number(p.hour)*60+Number(p.minute);if(!Number.isInteger(mins))throw new Error("Unable to derive local nutrition time");return mins<dayStart?previousDate(date):date;}
+export function deriveNutritionLocalDate(occurredAt:string,timezone:string,dayStart:number):string{assertCanonicalUtcInstant(occurredAt,"occurredAt");if(!Number.isInteger(dayStart)||dayStart<0||dayStart>1439)throw new Error("nutritionDayStartMinutes must be 0..1439");let f:Intl.DateTimeFormat;try{f=new Intl.DateTimeFormat("en-CA",{timeZone:timezone,year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hourCycle:"h23"});}catch{throw new Error("Authenticated profile contains an invalid IANA timezone");}const p=Object.fromEntries(f.formatToParts(new Date(occurredAt)).filter(x=>x.type!=="literal").map(x=>[x.type,x.value]));const date=`${p.year}-${p.month}-${p.day}`;const mins=Number(p.hour)*60+Number(p.minute);if(!Number.isInteger(mins))throw new Error("Unable to derive local nutrition time");return mins<dayStart?previousLocalDate(date):date;}
 function safety(food:VersionedFood){return{allergens:[{foodId:food.foodKey,foodName:food.name,allergenDataStatus:food.allergenDataStatus??"unknown" as const,allergenIds:food.allergenIds??[]}],dietary:[{foodId:food.foodKey,foodName:food.name,dietarySafetyDataStatus:food.dietarySafetyDataStatus??"unknown" as const,dietaryConflictRuleIds:food.dietaryConflictRuleIds??[]}]};}
 async function mealPayload(tx:V1Transaction,subject:string,mealType:z.infer<typeof MealType>,items:Array<z.infer<typeof ManualMealItem>>):Promise<Record<string,unknown>>{
-  const snapshots:Array<Record<string,unknown>>=[];
-  const resolvedFoods:VersionedFood[]=[];
-  for(const item of items){
+  const resolvedFoods:VersionedFood[]=await Promise.all(items.map(async(item)=>{
     const food=await tx.getFoodVersion(subject,item.foodVersionId);
     if(!food)throw new ApplicationRejectedError("food-version-unavailable",`Verified food version ${item.foodVersionId} is unavailable to this user`);
-    resolvedFoods.push(food);
+    return food;
+  }));
+  const snapshots:Array<Record<string,unknown>>=[];
+  for(const [index,item] of items.entries()){
+    const food=resolvedFoods[index];
     let portion;
     try{const selection:PortionSelection=item.selection.kind==="household"?{kind:"household",portionOptionId:item.selection.portionVersionId,quantity:item.selection.quantity}:{kind:"custom-grams",grams:item.selection.grams};portion=resolvePortionSelection(food,selection);}catch(error){rejectApplication("portion-resolution-failed",error);}
     let nutrition:NutritionFacts;
     try{nutrition=scaleNutritionForStorage(portion);}catch(error){rejectApplication("nutrition-calculation-failed",error);}
     snapshots.push({foodVersionId:food.id,foodKey:food.foodKey,foodName:food.name,calculationVersion:item.calculationVersion,grams:portion.grams,portion:portion.display??null,nutrition});
   }
-  const allergens=await tx.getActiveAllergenExclusions(subject);
-  const exclusions=await tx.getActiveDietaryExclusions(subject);
+  const [allergens,exclusions]=await Promise.all([tx.getActiveAllergenExclusions(subject),tx.getActiveDietaryExclusions(subject)]);
   const allergenCandidates=resolvedFoods.flatMap((food)=>safety(food).allergens);
   const dietaryCandidates=resolvedFoods.flatMap((food)=>safety(food).dietary);
   try{assertNoAllergyConflict(allergenCandidates,allergens);assertNoDietaryExclusionConflict(dietaryCandidates,exclusions);}catch(error){rejectApplication("safety-conflict",error);}
@@ -134,10 +134,26 @@ async function readAppliedOutcomeEvent(tx:V1Transaction,subject:string,actionId:
 
 export class V1MutationService{
   constructor(private readonly subject:string,private readonly runner:V1TransactionRunner,private readonly idFactory:IdFactory=()=>crypto.randomUUID(),private readonly clock:ServiceClock={now:()=>new Date()}){if(!subject.trim())throw new Error("Authenticated subject is required");}
+  /**
+   * Runs `primary` and, only if it throws (e.g. a unique-constraint race from a concurrent
+   * caller), re-queries under `requery` for the row the race actually produced. If that row is
+   * found it wins (after any consistency check `requery` itself performs); otherwise the
+   * original error is rethrown. Centralizes the idempotent-race-retry shape shared by
+   * decideAiAction, applyConfirmedAiAction, and recordConfirmedFailure.
+   */
+  private async withRaceRetry<T>(primary:()=>Promise<T>,requery:(tx:V1Transaction)=>Promise<T|null>):Promise<T>{
+    try{
+      return await primary();
+    }catch(error){
+      const winner=await this.runner.transaction(requery);
+      if(winner!==null)return winner;
+      throw error;
+    }
+  }
   async createAiProposal(type:AiActionType,input:unknown,idempotencyKey:string):Promise<StoredProposal>{const key=idempotencyKey.trim();if(!key)throw new Error("idempotencyKey is required");const parsed=type==="meal-log"?MealLogActionV1.parse(input):WaterLogActionV1.parse(input);const payloadJson=canonicalJson(parsed);const hash=await sha256(payloadJson);const candidate:StoredProposal={id:this.idFactory(),userSubject:this.subject,actionType:type,schemaVersion:parsed.schemaVersion,payloadJson,payloadSha256:hash,idempotencyKey:key,createdAt:instant(this.clock.now())};return this.runner.transaction(async tx=>assertSameImmutableProposal(await tx.insertProposalIfAbsent(candidate),candidate));}
   async decideAiAction(actionId:string,decision:AiDecision):Promise<StoredDecision>{
-    try{
-      return await this.runner.transaction(async tx=>{
+    return this.withRaceRetry(
+      ()=>this.runner.transaction(async tx=>{
         const p=await tx.getProposal(this.subject,actionId);
         if(!p)throw new Error("AI proposal not found in authenticated scope");
         const old=await tx.getDecision(this.subject,actionId);
@@ -145,20 +161,17 @@ export class V1MutationService{
         const d={actionId,userSubject:this.subject,decision,decidedAt:instant(this.clock.now())};
         await tx.insertDecision(d);
         return d;
-      });
-    }catch(error){
-      const winner=await this.runner.transaction(async tx=>tx.getDecision(this.subject,actionId));
-      if(winner){
-        if(winner.decision!==decision)throw new Error("AI decision is immutable once recorded");
+      }),
+      async tx=>{
+        const winner=await tx.getDecision(this.subject,actionId);
+        if(winner&&winner.decision!==decision)throw new Error("AI decision is immutable once recorded");
         return winner;
-      }
-      throw error;
-    }
+      },
+    );
   }
   async applyConfirmedAiAction(actionId:string):Promise<StoredNutritionEvent>{
-    let result:{kind:"applied";event:StoredNutritionEvent}|{kind:"failed";outcome:StoredOutcome;message:string};
-    try{
-      result=await this.runner.transaction(async tx=>{
+    const result=await this.withRaceRetry(
+      ()=>this.runner.transaction(async tx=>{
         const oldEvent=await readAppliedOutcomeEvent(tx,this.subject,actionId);
         if(oldEvent)return{kind:"applied" as const,event:oldEvent};
         const p=await tx.getProposal(this.subject,actionId);const d=await tx.getDecision(this.subject,actionId);if(!p||!d||d.decision!=="confirmed")throw new Error("Explicit confirmation is required before application");
@@ -188,31 +201,32 @@ export class V1MutationService{
           await tx.insertOutcome(outcome);
           return{kind:"failed" as const,outcome,message:error.message};
         }
-      });
-    }catch(error){
-      const winner=await this.runner.transaction(async tx=>readAppliedOutcomeEvent(tx,this.subject,actionId));
-      if(winner)return winner;
-      throw error;
-    }
+      }),
+      async tx=>{
+        const winner=await readAppliedOutcomeEvent(tx,this.subject,actionId);
+        return winner?{kind:"applied" as const,event:winner}:null;
+      },
+    );
     if(result.kind==="failed")throw new Error(`AI action application failed permanently (${result.outcome.failureCode}): ${result.message}`);
     return result.event;
   }
   async recordConfirmedFailure(actionId:string,failureCode:string):Promise<StoredOutcome>{
     const code=failureCode.trim();if(!code)throw new Error("failureCode is required");
-    try{
-      return await this.runner.transaction(async tx=>{
+    return this.withRaceRetry(
+      ()=>this.runner.transaction(async tx=>{
         const old=await tx.getOutcome(this.subject,actionId);if(old){if(old.outcome==="applied")throw new Error("Applied AI action cannot be reclassified as failed");return old;}
         const p=await tx.getProposal(this.subject,actionId);const d=await tx.getDecision(this.subject,actionId);if(!p||!d||d.decision!=="confirmed")throw new Error("Only a confirmed proposal may record application failure");
         const o:StoredOutcome={actionId,userSubject:this.subject,actionType:p.actionType,confirmationMarker:"confirmed",outcome:"failed",resultEventId:null,failureCode:code,recordedAt:instant(this.clock.now())};await tx.insertOutcome(o);return o;
-      });
-    }catch(error){
-      const winner=await this.runner.transaction(async tx=>tx.getOutcome(this.subject,actionId));
-      if(winner){if(winner.outcome==="applied")throw new Error("Applied AI action cannot be reclassified as failed");return winner;}
-      throw error;
-    }
+      }),
+      async tx=>{
+        const winner=await tx.getOutcome(this.subject,actionId);
+        if(winner&&winner.outcome==="applied")throw new Error("Applied AI action cannot be reclassified as failed");
+        return winner;
+      },
+    );
   }
-  async appendManualWater(occurredAt:string,milliliters:number):Promise<StoredNutritionEvent>{const x=WaterLogActionV1.omit({schemaVersion:true}).parse({occurredAt,milliliters});return this.runner.transaction(async tx=>{const c=await tx.getUserContext(this.subject);const e={id:this.idFactory(),userSubject:this.subject,eventType:"water-log" as const,occurredAt:x.occurredAt,localDate:deriveNutritionLocalDate(x.occurredAt,c.timezone,c.nutritionDayStartMinutes),payloadJson:canonicalJson({schemaVersion:"WaterEventV1",milliliters:x.milliliters}),createdAt:instant(this.clock.now())};await tx.insertNutritionEvent(e);return e;});}
-  async appendManualMeal(input:{occurredAt:string;mealType:z.infer<typeof MealType>;items:unknown[]}):Promise<StoredNutritionEvent>{const x=z.object({occurredAt:CanonicalInstant,mealType:MealType,items:z.array(ManualMealItem).min(1).max(40)}).strict().parse(input);return this.runner.transaction(async tx=>{const c=await tx.getUserContext(this.subject);const localDate=deriveNutritionLocalDate(x.occurredAt,c.timezone,c.nutritionDayStartMinutes);const payload=await mealPayload(tx,this.subject,x.mealType,x.items);const e={id:this.idFactory(),userSubject:this.subject,eventType:"meal-log" as const,occurredAt:x.occurredAt,localDate,payloadJson:canonicalJson(payload),createdAt:instant(this.clock.now())};await tx.insertNutritionEvent(e);return e;});}
+  async appendManualWater(occurredAt:string,milliliters:number):Promise<StoredNutritionEvent>{const x=WaterLogActionV1.omit({schemaVersion:true}).parse({occurredAt,milliliters});return this.runner.transaction(async tx=>{const c=await tx.getUserContext(this.subject);let localDate:string;try{localDate=deriveNutritionLocalDate(x.occurredAt,c.timezone,c.nutritionDayStartMinutes);}catch(error){rejectApplication("local-date-derivation-failed",error);}const e={id:this.idFactory(),userSubject:this.subject,eventType:"water-log" as const,occurredAt:x.occurredAt,localDate,payloadJson:canonicalJson({schemaVersion:"WaterEventV1",milliliters:x.milliliters}),createdAt:instant(this.clock.now())};await tx.insertNutritionEvent(e);return e;});}
+  async appendManualMeal(input:{occurredAt:string;mealType:z.infer<typeof MealType>;items:unknown[]}):Promise<StoredNutritionEvent>{const x=z.object({occurredAt:CanonicalInstant,mealType:MealType,items:z.array(ManualMealItem).min(1).max(40)}).strict().parse(input);return this.runner.transaction(async tx=>{const c=await tx.getUserContext(this.subject);let localDate:string;try{localDate=deriveNutritionLocalDate(x.occurredAt,c.timezone,c.nutritionDayStartMinutes);}catch(error){rejectApplication("local-date-derivation-failed",error);}const payload=await mealPayload(tx,this.subject,x.mealType,x.items);const e={id:this.idFactory(),userSubject:this.subject,eventType:"meal-log" as const,occurredAt:x.occurredAt,localDate,payloadJson:canonicalJson(payload),createdAt:instant(this.clock.now())};await tx.insertNutritionEvent(e);return e;});}
   async createCalculatedGoalVersion(inputs:MifflinStJeorV1Inputs,referenceIds:string[],allocations:MealEnergyAllocation[]):Promise<StoredGoalVersion>{const inputSnapshot={...inputs};const allocationSnapshot=allocations.map((allocation)=>({...allocation}));assertMealEnergyAllocations(allocationSnapshot);const ids=canonicalReferenceIds(referenceIds);const targets=deriveCalculatedGoal({method:"mifflin-st-jeor",version:"v1",inputs:inputSnapshot,referenceIds:ids});return this.runner.transaction(async tx=>{const refs=await tx.getScientificReferenceSnapshots(ids);const byId=new Map(refs.map(ref=>[ref.id,ref]));if(byId.size!==ids.length||ids.some(id=>!byId.has(id)))throw new Error("Every scientific reference must resolve to a versioned snapshot");const ordered=ids.map(id=>byId.get(id)!);const now=instant(this.clock.now());const goal:StoredGoalVersion={id:this.idFactory(),userSubject:this.subject,source:"arven-calculated",calculatorId:"mifflin-st-jeor@v1",calculatorInputsJson:canonicalJson(inputSnapshot),referenceSnapshotsJson:canonicalJson(ordered),energyKcal:targets.energyKcal,proteinG:targets.proteinG,carbsG:targets.carbsG,fatG:targets.fatG,fiberG:targets.fiberG,waterMl:targets.waterMl,mealAllocationsJson:canonicalJson(allocationSnapshot),createdAt:now};await tx.insertGoalVersion(goal);await tx.setCurrentGoal(this.subject,goal.id,now);return goal;});}
   async deleteAccount():Promise<void>{await this.runner.transaction(async tx=>{await tx.purgeAuthenticatedUser(this.subject);});}
 }

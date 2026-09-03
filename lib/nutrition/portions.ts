@@ -1,3 +1,4 @@
+import { assertVerifiedPortionOptionSource } from "./sources";
 import type { Food, Portion, PortionSelection } from "./types";
 
 const PORTION_GRAM_PRECISION = 0.1;
@@ -47,8 +48,8 @@ export function resolvePortionSelection(food: Food, selection: PortionSelection)
   const option = food.portionOptions?.find((candidate) => candidate.id === selection.portionOptionId);
   if (!option) throw new Error(`Unknown portion option ${selection.portionOptionId} for food ${food.id}`);
 
-  const gramsPerUnit = finitePositive(option.gramsPerUnit, "gramsPerUnit");
-  const grams = assertResolvedGramPrecision(gramsPerUnit * quantity, "household");
+  assertVerifiedPortionOptionSource(option);
+  const grams = assertResolvedGramPrecision(option.gramsPerUnit * quantity, "household");
 
   return {
     food,

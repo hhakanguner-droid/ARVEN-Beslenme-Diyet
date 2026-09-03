@@ -12,7 +12,7 @@ export type AllergenSafetyExclusion = {
 };
 
 export type DietarySafetyExclusion = {
-  kind: "food" | "rule";
+  kind: "food" | "dietary-rule";
   id: string | null;
   label: string;
   resolutionStatus: "resolved" | "unresolved";
@@ -193,18 +193,28 @@ function normalizeAllergenExclusions(active: Array<string | AllergenSafetyExclus
     : entry);
 }
 
-export function findAllergyConflicts(candidates: ResolvedFoodAllergens[], activeAllergens: Array<string | AllergenSafetyExclusion>): string[] {
-  if (activeAllergens.length === 0) return [];
-  const conflicts = new Set<string>();
+type ResolvableExclusion = { id: string | null; label: string; resolutionStatus: "resolved" | "unresolved" };
+
+/** Splits exclusions into resolved, verified ids (blocked) and unresolved/blank ones (conflicts). */
+function resolveBlockedIds(exclusions: ResolvableExclusion[], unresolvedLabel: string): { conflicts: string[]; blocked: Set<string> } {
+  const conflicts: string[] = [];
   const blocked = new Set<string>();
-  for (const exclusion of normalizeAllergenExclusions(activeAllergens)) {
+  for (const exclusion of exclusions) {
     const id = exclusion.id?.trim() ?? "";
     if (exclusion.resolutionStatus !== "resolved" || id.length === 0) {
-      conflicts.add(`${exclusion.label} (active allergen unresolved)`);
+      conflicts.push(`${exclusion.label} (${unresolvedLabel})`);
       continue;
     }
     blocked.add(id);
   }
+  return { conflicts, blocked };
+}
+
+export function findAllergyConflicts(candidates: ResolvedFoodAllergens[], activeAllergens: Array<string | AllergenSafetyExclusion>): string[] {
+  if (activeAllergens.length === 0) return [];
+  const conflicts = new Set<string>();
+  const { conflicts: unresolved, blocked } = resolveBlockedIds(normalizeAllergenExclusions(activeAllergens), "active allergen unresolved");
+  unresolved.forEach((message) => conflicts.add(message));
   for (const candidate of candidates) {
     if (candidate.allergenDataStatus !== "verified") {
       conflicts.add(`${candidate.foodName} (allergen data unresolved)`);
@@ -228,17 +238,17 @@ export function assertNoAllergyConflict(candidates: ResolvedFoodAllergens[], act
 export function findDietaryExclusionConflicts(candidates: ResolvedFoodDietarySafety[], exclusions: DietarySafetyExclusion[]): string[] {
   if (exclusions.length === 0) return [];
   const conflicts = new Set<string>();
-  const blockedFoods = new Set<string>();
-  const blockedRules = new Set<string>();
+  const foodExclusions: DietarySafetyExclusion[] = [];
+  const ruleExclusions: DietarySafetyExclusion[] = [];
   for (const exclusion of exclusions) {
-    const id = exclusion.id?.trim() ?? "";
-    if (exclusion.resolutionStatus !== "resolved" || id.length === 0) {
-      conflicts.add(`${exclusion.label} (active dietary exclusion unresolved)`);
-      continue;
-    }
-    if (exclusion.kind === "food") blockedFoods.add(id);
-    else blockedRules.add(id);
+    if (exclusion.kind === "food") foodExclusions.push(exclusion);
+    else if (exclusion.kind === "dietary-rule") ruleExclusions.push(exclusion);
+    else throw new Error(`Unknown dietary exclusion kind: ${exclusion.kind}`);
   }
+  const { conflicts: unresolvedFoods, blocked: blockedFoods } = resolveBlockedIds(foodExclusions, "active dietary exclusion unresolved");
+  const { conflicts: unresolvedRules, blocked: blockedRules } = resolveBlockedIds(ruleExclusions, "active dietary exclusion unresolved");
+  unresolvedFoods.forEach((message) => conflicts.add(message));
+  unresolvedRules.forEach((message) => conflicts.add(message));
   for (const candidate of candidates) {
     const canonicalFoodId = candidate.foodId.trim();
     if (canonicalFoodId.length === 0) {

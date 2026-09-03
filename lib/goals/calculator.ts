@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { round } from "../nutrition/calculations";
 import { assertGoalCalculationProvenance, type GoalCalculationProvenance } from "./types";
 
 export type CalculatedGoalTargets = {
@@ -41,11 +42,6 @@ export function parseMifflinStJeorV1Inputs(value: unknown): MifflinStJeorV1Input
 function finiteInRange(value: number, min: number, max: number, field: string): number {
   if (!Number.isFinite(value) || value < min || value > max) throw new Error(`${field} is outside supported range`);
   return value;
-}
-
-function round(value: number, decimals: number): number {
-  const factor = 10 ** decimals;
-  return Math.round((value + Number.EPSILON) * factor) / factor;
 }
 
 function assertDerivedTargets(targets: CalculatedGoalTargets): void {

@@ -1,5 +1,5 @@
 import { isCanonicalUtcInstant } from "../time/canonical";
-import type { Food, NutritionSource, NutritionSourceProvider } from "./types";
+import type { Food, FoodPortionOption, NutritionSource, NutritionSourceProvider } from "./types";
 
 const ALLOWED_PROVIDERS = new Set<NutritionSourceProvider>([
   "open-food-facts",
@@ -26,13 +26,14 @@ function assertSource(source: NutritionSource, subject: string): void {
 
 export function assertVerifiedNutritionSource(food: Food): void {
   assertSource(food.source, `Food ${food.id}`);
+}
 
-  for (const option of food.portionOptions ?? []) {
-    if (!Number.isFinite(option.gramsPerUnit) || option.gramsPerUnit <= 0) {
-      throw new Error(`Portion option ${option.id} has an invalid gramsPerUnit`);
-    }
-    assertSource(option.source, `Portion option ${option.id}`);
+/** Validates only the portion option actually selected for a log, not every option a food happens to carry. */
+export function assertVerifiedPortionOptionSource(option: FoodPortionOption): void {
+  if (!Number.isFinite(option.gramsPerUnit) || option.gramsPerUnit <= 0) {
+    throw new Error(`Portion option ${option.id} has an invalid gramsPerUnit`);
   }
+  assertSource(option.source, `Portion option ${option.id}`);
 }
 
 export function assertFoodsVerified(foods: Food[]): void {

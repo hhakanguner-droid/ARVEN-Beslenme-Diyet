@@ -48,6 +48,12 @@ export function localDateDayNumber(value: string, field = "date"): number {
   return Math.floor(Date.UTC(year, month - 1, day) / DAY_MS);
 }
 
+export function previousLocalDate(value: string, field = "date"): string {
+  assertCanonicalLocalDate(value, field);
+  const [year, month, day] = value.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day - 1)).toISOString().slice(0, 10);
+}
+
 export function assertSevenDayLocalInterval(start: string, end: string, field = "week"): void {
   const startDay = localDateDayNumber(start, `${field} start`);
   const endDay = localDateDayNumber(end, `${field} end`);

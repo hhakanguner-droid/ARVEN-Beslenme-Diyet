@@ -108,7 +108,7 @@ test("English diagnostic assertions fail closed at the same AI health boundary",
 test("explicit dietary exclusions are hard blocks and malformed exclusions fail closed", () => {
   const candidate = [{ foodId: "beef-1", foodName: "Dana eti", dietarySafetyDataStatus: "verified" as const, dietaryConflictRuleIds: ["vegetarian"] }];
   assert.throws(() => assertNoDietaryExclusionConflict(candidate, [{ kind: "food", id: "beef-1", label: "Dana eti", resolutionStatus: "resolved" }]), /Dietary safety conflict/);
-  assert.throws(() => assertNoDietaryExclusionConflict(candidate, [{ kind: "rule", id: "vegetarian", label: "Vejetaryen", resolutionStatus: "resolved" }]), /Dietary safety conflict/);
+  assert.throws(() => assertNoDietaryExclusionConflict(candidate, [{ kind: "dietary-rule", id: "vegetarian", label: "Vejetaryen", resolutionStatus: "resolved" }]), /Dietary safety conflict/);
   for (const exclusion of [
     { kind: "food" as const, id: null, label: "Kullanıcının kaçındığı besin", resolutionStatus: "unresolved" as const },
     { kind: "food" as const, id: "   ", label: "Bozuk dışlama", resolutionStatus: "resolved" as const },
@@ -116,7 +116,7 @@ test("explicit dietary exclusions are hard blocks and malformed exclusions fail 
 });
 
 test("dietary-rule candidates require verified safety data and canonical identifiers", () => {
-  const exclusion = [{ kind: "rule" as const, id: "vegetarian", label: "Vejetaryen", resolutionStatus: "resolved" as const }];
+  const exclusion = [{ kind: "dietary-rule" as const, id: "vegetarian", label: "Vejetaryen", resolutionStatus: "resolved" as const }];
   for (const dietarySafetyDataStatus of ["unknown", "not-applicable"] as const) {
     assert.throws(() => assertNoDietaryExclusionConflict([{ foodId: "mystery", foodName: "Belirsiz ürün", dietarySafetyDataStatus, dietaryConflictRuleIds: [] }], exclusion), /unresolved/);
   }
