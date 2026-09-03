@@ -94,6 +94,12 @@ test("resolved portions below 0.1 g precision are rejected", () => {
   }), /below ARVEN's 0.1 g precision/);
 });
 
+test("approximate gram labels preserve supported nonzero sub-gram precision", () => {
+  assert.equal(approximateGramLabel({ food: verifiedFood, grams: 0.1 }), "≈ 0,1 g");
+  assert.equal(approximateGramLabel({ food: verifiedFood, grams: 0.4 }), "≈ 0,4 g");
+  assert.equal(approximateGramLabel({ food: verifiedFood, grams: 0.5 }), "≈ 1 g");
+});
+
 test("custom grams remain available as an advanced fallback at supported precision", () => {
   const portion = resolvePortionSelection(verifiedFood, { kind: "custom-grams", grams: 135.04 });
   assert.equal(portion.grams, 135);
@@ -220,6 +226,14 @@ test("core nutrition facts are validated before any portion scaling", () => {
 
   for (const food of invalidFoods) {
     assert.throws(() => scaleNutrition({ food, grams: 100 }), /finite non-negative/);
+  }
+});
+
+test("nutrition scaling rejects non-canonical runtime basis values", () => {
+  for (const basisGrams of [0, 1, 50, 101]) {
+    const food = { ...verifiedFood, basisGrams } as unknown as Food;
+    assert.throws(() => scaleNutrition({ food, grams: 100 }), /canonical 100 g nutrition basis/);
+    assert.throws(() => scaleNutritionForStorage({ food, grams: 100 }), /canonical 100 g nutrition basis/);
   }
 });
 
