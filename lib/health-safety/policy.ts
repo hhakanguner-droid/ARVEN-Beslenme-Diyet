@@ -48,7 +48,7 @@ const MEDICAL_LEXEME = "(?:kanser|depresyon|anksiyete|astim|migren|epilepsi|bipo
 const MEDICAL_ASSERTION_TERM = `(?:${DIAGNOSIS_TERM}|${MEDICAL_LEXEME})`;
 const INFLECTED_MEDICAL_ASSERTION_TERM = `${MEDICAL_ASSERTION_TERM}(?:e|a|i|u|yi|yu|ni|nu|in|un|nin|nun)?`;
 const ENGLISH_DIAGNOSIS_TERM = "(?:diabetes|diabetic|prediabetes|prediabetic|celiac(?: disease)?|hypertension|hypotension|obesity|anemia|hypothyroidism|hyperthyroidism|thyroid disease|insulin resistance|metabolic syndrome|allergy|intolerance|cancer|depression|anxiety|asthma|migraine|epilepsy|bipolar disorder|psychosis|cirrhosis|hepatitis|arthritis|dermatitis|fibrosis|sclerosis|nephritis|gastritis|colitis|pneumonia|thrombosis|leukemia|lymphoma|melanoma|carcinoma|sarcoma|parkinsons disease|endometriosis)";
-const SAFE_ENGLISH_PREDICATE = /^(?:an?\s+)?(?:(?:very|quite|more|less|well|good|great|solid|clear|simple|balanced|healthy|helpful|realistic|practical|flexible)\s+)*(?:meal|meal plan|plan|goal|option|choice|recipe|ingredient|portion|breakfast|lunch|dinner|snack|routine|schedule|strategy|approach|idea|habit|preference|target)\b/;
+const SAFE_ENGLISH_PREDICATE = /^(?:an?\s+)?(?:(?:very|quite|more|less|well|good|great|solid|clear|simple|balanced|healthy|helpful|realistic|practical|flexible)\s+)*(?:meal|meal plan|plan|goal|option|choice|recipe|ingredient|portion|breakfast|lunch|dinner|snack|routine|schedule|strategy|approach|idea|habit|preference|target)(?:\s+(?:plan|goal|option|choice|recipe|ingredient|portion|routine|schedule|strategy|approach|idea|habit|preference|target))?\s*[.!?]*$/;
 const GENERIC_ENGLISH_DIAGNOSIS_GRAMMARS = [
   /\b(?:you|they|he|she)\s+(?:(?:probably|possibly|likely)\s+)?(?:(?:may|might|could)\s+)?(?:have|has)\s+(.+)/,
   /\b(?:you|they|he|she)\s+(?:(?:probably|possibly|likely)\s+)?(?:may|might|could)\s+be\s+(.+)/,
@@ -175,46 +175,41 @@ export function findAllergyConflicts(candidates: ResolvedFoodAllergens[], active
 
 export function assertNoAllergyConflict(candidates: ResolvedFoodAllergens[], activeAllergens: Array<string | AllergenSafetyExclusion>): void {
   const conflicts = findAllergyConflicts(candidates, activeAllergens);
-  if (conflicts.length > 0) throw new Error(`Allergy conflict detected: ${conflicts.join(", ")}`);
+  if (conflicts.length) throw new Error(`Allergy conflict: ${conflicts.join(", ")}`);
 }
 
 export function findDietaryExclusionConflicts(candidates: ResolvedFoodDietarySafety[], exclusions: DietarySafetyExclusion[]): string[] {
   if (exclusions.length === 0) return [];
   const conflicts = new Set<string>();
-  const foodIds = new Set<string>();
-  const ruleIds = new Set<string>();
+  const blockedFoods = new Set<string>();
+  const blockedRules = new Set<string>();
   for (const exclusion of exclusions) {
     const id = exclusion.id?.trim() ?? "";
     if (exclusion.resolutionStatus !== "resolved" || id.length === 0) {
-      conflicts.add(`${exclusion.label} (dietary exclusion unresolved)`);
+      conflicts.add(`${exclusion.label} (active dietary exclusion unresolved)`);
       continue;
     }
-    if (exclusion.kind === "food") foodIds.add(id); else ruleIds.add(id);
+    if (exclusion.kind === "food") blockedFoods.add(id);
+    else blockedRules.add(id);
   }
   for (const candidate of candidates) {
-    const foodId = candidate.foodId.trim();
-    if (foodIds.size > 0 && foodId.length === 0) {
-      conflicts.add(`${candidate.foodName} (food identifier unresolved)`);
+    if (blockedFoods.has(candidate.foodId)) conflicts.add(candidate.foodName);
+    if (blockedRules.size === 0) continue;
+    if (candidate.dietarySafetyDataStatus !== "verified") {
+      conflicts.add(`${candidate.foodName} (dietary safety data unresolved)`);
       continue;
     }
-    if (foodIds.has(foodId)) conflicts.add(candidate.foodName);
-    if (ruleIds.size > 0) {
-      if (candidate.dietarySafetyDataStatus !== "verified") {
-        conflicts.add(`${candidate.foodName} (dietary safety data unresolved)`);
-        continue;
-      }
-      const ids = candidate.dietaryConflictRuleIds.map((id) => id.trim());
-      if (ids.some((id) => id.length === 0)) {
-        conflicts.add(`${candidate.foodName} (dietary rule identifier unresolved)`);
-        continue;
-      }
-      if (ids.some((id) => ruleIds.has(id))) conflicts.add(candidate.foodName);
+    const ruleIds = candidate.dietaryConflictRuleIds.map((id) => id.trim());
+    if (ruleIds.some((id) => id.length === 0)) {
+      conflicts.add(`${candidate.foodName} (dietary rule identifier unresolved)`);
+      continue;
     }
+    if (ruleIds.some((id) => blockedRules.has(id))) conflicts.add(candidate.foodName);
   }
   return [...conflicts];
 }
 
 export function assertNoDietaryExclusionConflict(candidates: ResolvedFoodDietarySafety[], exclusions: DietarySafetyExclusion[]): void {
   const conflicts = findDietaryExclusionConflicts(candidates, exclusions);
-  if (conflicts.length > 0) throw new Error(`Dietary safety conflict detected: ${conflicts.join(", ")}`);
+  if (conflicts.length) throw new Error(`Dietary safety conflict: ${conflicts.join(", ")}`);
 }
