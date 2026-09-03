@@ -26,7 +26,7 @@ test("verified non-conflicting food is allowed", () => {
   assert.doesNotThrow(() => assertNoAllergyConflict([{ foodId: "zucchini-1", foodName: "Izgara kabak", allergenDataStatus: "verified", allergenIds: [] }], ["milk"]));
 });
 
-test("AI medication or treatment management is blocked without a medication registry", () => {
+test("AI treatment-management directives fail closed without a medication registry", () => {
   const unsafe = [
     "Bu durumda ilacı bırak.", "Dozu azalt.", "Medikasyonu değiştir.", "Tedaviyi durdur.",
     "Metformini artık alma.", "Metformin dozunu atla.", "Euthyrox kullanımını sürdür.",
@@ -41,6 +41,7 @@ test("AI medication or treatment management is blocked without a medication regi
     "Stop using olive oil and ibuprofen.", "Take water and ibuprofen every day.",
     "Switch from ibuprofen to naproxen.", "Switch to atorvastatin.", "Replace ibuprofen with naproxen.",
     "Substitute ibuprofen for naproxen.", "Avoid ibuprofen.", "Discontinue ibuprofen.", "Quit taking naproxen.",
+    "Stop ibuprofen.", "Cease naproxen.", "Administer atorvastatin.", "Taper prednisone.",
   ];
   for (const message of unsafe) assert.throws(() => assertNoMedicalOverreach(message), /non-diagnostic/, message);
   assert.doesNotThrow(() => assertNoMedicalOverreach("Bu sonuçları bir sağlık profesyoneliyle değerlendirmen uygun olur."));
@@ -49,9 +50,10 @@ test("AI medication or treatment management is blocked without a medication regi
   assert.doesNotThrow(() => assertNoMedicalOverreach("Switch from sugar to fruit."));
   assert.doesNotThrow(() => assertNoMedicalOverreach("Replace sugar with fruit."));
   assert.doesNotThrow(() => assertNoMedicalOverreach("Avoid sugar."));
+  assert.doesNotThrow(() => assertNoMedicalOverreach("Reduce heat."));
 });
 
-test("ordinary nutrition commands are not mistaken for medication management", () => {
+test("ordinary nutrition commands are not mistaken for treatment management", () => {
   for (const message of ["Meyve al.", "Zeytinyağı kullan.", "Ekmeği kes.", "Tuzu azalt.", "Porsiyonu azalt.", "Suyu artır."]) {
     assert.doesNotThrow(() => assertNoMedicalOverreach(message), message);
   }
