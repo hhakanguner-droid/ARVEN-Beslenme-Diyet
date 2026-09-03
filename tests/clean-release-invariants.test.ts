@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { assertNoMedicalOverreach, type DietarySafetyExclusion } from "../lib/health-safety/policy";
+import { assertNoMedicalOverreach, type AllergenSafetyExclusion, type DietarySafetyExclusion } from "../lib/health-safety/policy";
 import { remainingTargets } from "../lib/nutrition/calculations";
 import { resolvePortionSelection } from "../lib/nutrition/portions";
 import type { Food } from "../lib/nutrition/types";
@@ -64,7 +64,7 @@ test("empty-day coverage cannot accompany logged food consumption", () => {
 
 class SafetyRaceTx implements V1Transaction {
   context: AuthenticatedUserContext = { timezone: "Europe/Istanbul", nutritionDayStartMinutes: 0 };
-  allergens: string[] = [];
+  allergens: AllergenSafetyExclusion[] = [];
   events = new Map<string, StoredNutritionEvent>();
   food: VersionedFood = {
     id: "milk-v1",
@@ -80,8 +80,8 @@ class SafetyRaceTx implements V1Transaction {
     dietaryConflictRuleIds: [],
   };
   async getUserContext(){ return this.context; }
-  async getFoodVersion(){ this.allergens = ["milk"]; return this.food; }
-  async getActiveAllergenIds(){ return this.allergens; }
+  async getFoodVersion(){ this.allergens = [{ id: "milk", label: "Süt", resolutionStatus: "resolved" }]; return this.food; }
+  async getActiveAllergenExclusions(){ return this.allergens; }
   async getActiveDietaryExclusions(): Promise<DietarySafetyExclusion[]>{ return []; }
   async insertNutritionEvent(event: StoredNutritionEvent){ this.events.set(event.id,event); }
   async getProposal(): Promise<StoredProposal|null>{ return null; }
