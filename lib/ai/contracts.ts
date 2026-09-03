@@ -26,6 +26,7 @@ const MEASURE_LABELS: Record<z.infer<typeof PortionMeasure>, string> = {
   "water-glass": "su bardağı", cup: "fincan", bowl: "kase", handful: "avuç", palm: "avuç içi", serving: "porsiyon",
   package: "paket", bottle: "şişe", can: "kutu", ladle: "kepçe",
 };
+const SIZE_LABELS: Record<z.infer<typeof PortionSize>, string> = { small: "küçük", medium: "orta", large: "büyük" };
 
 function normalizeNumberText(value: string): string {
   return value.toLocaleLowerCase("tr-TR").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
@@ -83,18 +84,21 @@ const NaturalPortionLabel = z.string().trim().min(1).max(120).refine(
   (value) => !containsDigitNutritionClaim(value) && !containsSpelledNutritionClaim(value),
   "Natural portion labels must not smuggle gram/ml nutrition quantities",
 );
-const FoodQuery = z.string().trim().min(1).max(120).refine(
-  (value) => !containsDigitNutritionClaim(value) && !containsSpelledNutritionClaim(value),
-  "Food queries must not contain model-authored gram or nutrition quantities",
-);
+const FoodQuery = z.string().trim().min(1).max(120)
+  .refine(
+    (value) => !containsDigitNutritionClaim(value) && !containsSpelledNutritionClaim(value),
+    "Food queries must not contain model-authored gram or nutrition quantities",
+  )
+  .refine(assertSafeNarrative, "Food query violates ARVEN medication/health safety boundary");
 function formatQuantity(value: number): string {
   return Number.isInteger(value) ? String(value) : String(Math.round(value * 100) / 100).replace(".", ",");
 }
 function isRepresentablePortionQuantity(value: number): boolean {
   return Number.isFinite(value) && value >= 0.01 && value <= 20 && Math.abs(value * 100 - Math.round(value * 100)) < 1e-9;
 }
-function canonicalHintLabel(measure: z.infer<typeof PortionMeasure>, quantity: number): string {
-  return `${formatQuantity(quantity)} ${MEASURE_LABELS[measure]}`;
+function canonicalHintLabel(measure: z.infer<typeof PortionMeasure>, quantity: number, size?: z.infer<typeof PortionSize>): string {
+  const sizeLabel = size ? `${SIZE_LABELS[size]} ` : "";
+  return `${formatQuantity(quantity)} ${sizeLabel}${MEASURE_LABELS[measure]}`;
 }
 const PortionHint = z.object({
   measure: PortionMeasure,
@@ -102,7 +106,7 @@ const PortionHint = z.object({
   size: PortionSize.optional(),
   naturalLabel: NaturalPortionLabel,
 }).strict().superRefine((value, ctx) => {
-  const expected = canonicalHintLabel(value.measure, value.quantity).toLocaleLowerCase("tr-TR");
+  const expected = canonicalHintLabel(value.measure, value.quantity, value.size).toLocaleLowerCase("tr-TR");
   if (value.naturalLabel.trim().toLocaleLowerCase("tr-TR") !== expected) {
     ctx.addIssue({ code: "custom", path: ["naturalLabel"], message: `naturalLabel must match structured portion hint (${expected})` });
   }
