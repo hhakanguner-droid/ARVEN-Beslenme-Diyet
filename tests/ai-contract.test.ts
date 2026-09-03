@@ -125,6 +125,8 @@ test("weekly AI insight cannot author numeric truth", () => {
     "Bu hafta hedefi bir kez aştın.", "Planı bir defa kaçırdın.", "Bu hafta hedefi birer kez aştın.", "Planı bir kereden fazla kaçırdın.",
     "One day was incomplete.", "One meal was missing.", "I skipped breakfast once.", "Dinner was missed twice.",
     "Eleven meals were incomplete.", "Nineteen meals were incomplete.",
+    "The eleventh meal was incomplete.", "The third meal was incomplete.", "The twentieth meal was incomplete.",
+    "The twenty-first meal was incomplete.",
   ];
   for (const summary of invalidSummaries) assert.throws(() => parseWeeklyInsight({ schemaVersion: "WeeklyInsightV1", summary, positives: [], areasForImprovement: [], suggestions: [], uncertainty: [] }), /must not contain numeric claims/, summary);
 });
