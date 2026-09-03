@@ -10,7 +10,7 @@ const ANY_DIGIT = /\p{N}/u;
 const NUMBER_WORDS = new Set([
   "sifir", "iki", "uc", "dort", "bes", "alti", "yedi", "sekiz", "dokuz", "on", "yirmi", "otuz",
   "kirk", "elli", "altmis", "yetmis", "seksen", "doksan", "yuz", "bin", "milyon", "milyar", "trilyon",
-  "yarim", "bucuk", "ceyrek", "yuzde", "zero", "two", "three", "four", "five", "six", "seven", "eight",
+  "yarim", "bucuk", "ceyrek", "yuzde", "zero", "one", "two", "three", "four", "five", "six", "seven", "eight",
   "nine", "ten", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety", "hundred",
   "thousand", "million", "billion", "half", "quarter", "percent",
 ]);
