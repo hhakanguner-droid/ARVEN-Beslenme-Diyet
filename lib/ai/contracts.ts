@@ -41,6 +41,7 @@ function normalizeNumberText(value: string): string {
 }
 function isWrittenNumberToken(token: string): boolean {
   if (NUMBER_WORDS.has(token)) return true;
+  if (token.endsWith("fold") && NUMBER_WORDS.has(token.slice(0, -4))) return true;
   for (const base of NUMBER_WORDS) {
     if (!token.startsWith(base) || token.length <= base.length) continue;
     if (TURKISH_NUMBER_SUFFIXES.has(token.slice(base.length))) return true;
