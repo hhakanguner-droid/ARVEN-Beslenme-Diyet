@@ -48,6 +48,13 @@ const MEDICAL_LEXEME = "(?:kanser|depresyon|anksiyete|astim|migren|epilepsi|bipo
 const MEDICAL_ASSERTION_TERM = `(?:${DIAGNOSIS_TERM}|${MEDICAL_LEXEME})`;
 const INFLECTED_MEDICAL_ASSERTION_TERM = `${MEDICAL_ASSERTION_TERM}(?:e|a|i|u|yi|yu|ni|nu|in|un|nin|nun)?`;
 const ENGLISH_DIAGNOSIS_TERM = "(?:diabetes|diabetic|prediabetes|prediabetic|celiac(?: disease)?|hypertension|hypotension|obesity|anemia|hypothyroidism|hyperthyroidism|thyroid disease|insulin resistance|metabolic syndrome|allergy|intolerance|cancer|depression|anxiety|asthma|migraine|epilepsy|bipolar disorder|psychosis|cirrhosis|hepatitis|arthritis|dermatitis|fibrosis|sclerosis|nephritis|gastritis|colitis|pneumonia|thrombosis|leukemia|lymphoma|melanoma|carcinoma|sarcoma|parkinsons disease|endometriosis)";
+const SAFE_ENGLISH_PREDICATE = /^(?:an?\s+)?(?:(?:very|quite|more|less|well|good|great|solid|clear|simple|balanced|healthy|helpful|realistic|practical|flexible)\s+)*(?:meal|meal plan|plan|goal|option|choice|recipe|ingredient|portion|breakfast|lunch|dinner|snack|routine|schedule|strategy|approach|idea|habit|preference|target)\b/;
+const GENERIC_ENGLISH_DIAGNOSIS_GRAMMARS = [
+  /\b(?:you|they|he|she)\s+(?:(?:probably|possibly|likely)\s+)?(?:(?:may|might|could)\s+)?(?:have|has)\s+(.+)/,
+  /\b(?:you|they|he|she)\s+(?:seem|seems|appear|appears|look|looks)\s+(?:to\s+be\s+)?(.+)/,
+  /\b(?:this|that|it)\s+(?:(?:probably|possibly|likely)\s+)?(?:(?:may|might|could|can)\s+)?(?:is|be)\s+(.+)/,
+  /\b(?:this|that|it)\s+(?:looks|seems|appears|sounds)\s+like\s+(.+)/,
+];
 const DIRECT_DIAGNOSIS_PATTERNS = [
   /\b(?:tani|tanisi|taninin|taniya|tanidan|teshis|teshisi|teshisin|teshise|teshisten)\b/,
   new RegExp(String.raw`\b(?:sende|sizde)\b.{0,60}\b${MEDICAL_ASSERTION_TERM}\b.{0,30}\b(?:var|oldugun|oldugunu)\b`),
@@ -59,14 +66,8 @@ const DIRECT_DIAGNOSIS_PATTERNS = [
   new RegExp(String.raw`\b(?:belirti|belirtiler|bulgu|bulgular|sonuc|sonuclar|deger|degerler|durum)\w*\b.{0,100}\b${INFLECTED_MEDICAL_ASSERTION_TERM}\b.{0,50}\b(?:oldugunu|gosteriyor|kanitliyor|dogruluyor|isaret\s+ediyor|dusunduruyor|akla\s+getiriyor)\b`),
   new RegExp(String.raw`\b${MEDICAL_LEXEME}(?:li|lu|da|de|i)?(?:sin|siniz|sun|sunuz|in)\b`),
   new RegExp(String.raw`\b(?:you have|youve got|you are|youre)\s+(?:an?\s+)?${ENGLISH_DIAGNOSIS_TERM}\b`),
-  new RegExp(String.raw`\b(?:you|they|he|she)\s+(?:seem|seems|appear|appears|look|looks)\s+(?:to\s+be\s+)?(?:an?\s+)?${ENGLISH_DIAGNOSIS_TERM}\b`),
-  new RegExp(String.raw`\b(?:this|that|it)\s+(?:is|looks\s+like|seems\s+like|appears\s+to\s+be)\s+(?:an?\s+)?${ENGLISH_DIAGNOSIS_TERM}\b`),
-  new RegExp(String.raw`\b(?:sounds|looks|seems|appears)\s+like\s+(?:an?\s+)?${ENGLISH_DIAGNOSIS_TERM}\b`),
-  new RegExp(String.raw`\b(?:this|that|it)\s+(?:may|might|could|can)\s+be\s+(?:an?\s+)?${ENGLISH_DIAGNOSIS_TERM}\b`),
-  new RegExp(String.raw`\b(?:you|they|he|she)\s+(?:probably|possibly|likely)\s+(?:have|has|are|is)\s+(?:an?\s+)?${ENGLISH_DIAGNOSIS_TERM}\b`),
-  new RegExp(String.raw`\b(?:you|they|he|she)\s+(?:may|might|could)\s+(?:have|be)\s+(?:an?\s+)?${ENGLISH_DIAGNOSIS_TERM}\b`),
   new RegExp(String.raw`\b(?:your|these|this)\s+(?:symptoms?|results?|findings?|condition)\b.{0,100}\b(?:indicate|indicates|suggest|suggests|confirm|confirms|show|shows|mean|means)\b.{0,50}\b${ENGLISH_DIAGNOSIS_TERM}\b`),
-  new RegExp(String.raw`\b(?:diagnosis|diagnosed|diagnostic)\b.{0,50}\b${ENGLISH_DIAGNOSIS_TERM}\b`),
+  /\b(?:diagnosis|diagnosed|diagnostic)\b/,
 ];
 
 function splitDirectiveClauses(normalized: string): string[] {
@@ -112,11 +113,23 @@ function clauseContainsUnsafeTreatmentDirective(clause: string): boolean {
   return false;
 }
 
+function clauseContainsUnsafeEnglishDiagnosis(clause: string): boolean {
+  for (const grammar of GENERIC_ENGLISH_DIAGNOSIS_GRAMMARS) {
+    const match = grammar.exec(clause);
+    if (!match) continue;
+    const predicate = (match[1] ?? "").trim();
+    if (!predicate || SAFE_ENGLISH_PREDICATE.test(predicate)) continue;
+    return true;
+  }
+  return false;
+}
+
 export function assertNoMedicalOverreach(text: string): void {
   const normalized = normalizeTurkishText(text);
+  const clauses = splitDirectiveClauses(normalized);
   const managementContext = MEDICAL_MANAGEMENT_CONTEXT.some((term) => normalized.includes(term));
-  const treatmentDirective = splitDirectiveClauses(normalized).some(clauseContainsUnsafeTreatmentDirective);
-  const diagnosisAssertion = DIRECT_DIAGNOSIS_PATTERNS.some((pattern) => pattern.test(normalized));
+  const treatmentDirective = clauses.some(clauseContainsUnsafeTreatmentDirective);
+  const diagnosisAssertion = DIRECT_DIAGNOSIS_PATTERNS.some((pattern) => pattern.test(normalized)) || clauses.some(clauseContainsUnsafeEnglishDiagnosis);
   if (managementContext || treatmentDirective || diagnosisAssertion) {
     throw new Error("AI output violates ARVEN non-diagnostic health policy");
   }
