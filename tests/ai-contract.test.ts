@@ -101,6 +101,7 @@ test("AI meal parser enforces non-diagnostic and non-medication policy on every 
     { ...validSuggestion, preparation: ["Warfarini kullan."] },
     { ...validSuggestion, preparation: ["İnsülin kullanman gerekiyor."] },
     { ...validSuggestion, preparation: ["Warfarin alman gerekiyor."] },
+    { ...validSuggestion, preparation: ["Switch from ibuprofen to naproxen."] },
     { ...validSuggestion, uncertainty: ["Sende kanser var."] },
   ];
   for (const candidate of unsafe) {
@@ -127,6 +128,8 @@ test("weekly AI insight cannot author numeric truth", () => {
     "Eleven meals were incomplete.", "Nineteen meals were incomplete.",
     "The eleventh meal was incomplete.", "The third meal was incomplete.", "The twentieth meal was incomplete.",
     "The twenty-first meal was incomplete.",
+    "A dozen meals were incomplete.", "A pair of meals were incomplete.", "A couple of meals were incomplete.",
+    "Both meals were incomplete.", "A single meal was incomplete.", "A double serving was logged.",
   ];
   for (const summary of invalidSummaries) assert.throws(() => parseWeeklyInsight({ schemaVersion: "WeeklyInsightV1", summary, positives: [], areasForImprovement: [], suggestions: [], uncertainty: [] }), /must not contain numeric claims/, summary);
 });
