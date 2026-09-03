@@ -42,7 +42,7 @@ const TREATMENT_ACTION = "(?:al|alma|alman|almani|almaniz|almanizi|kullan|kullan
 const TREATMENT_ACTION_GLOBAL = new RegExp(String.raw`\b${TREATMENT_ACTION}\b`, "g");
 const NUTRITION_TARGET_TOKEN = new RegExp(`^${NUTRITION_TARGET}(?:yi|i|u|yu|e|a|den|dan)?$`);
 const PREPARATION_CONTEXT_TOKEN = new RegExp(String.raw`^${PREPARATION_CONTEXT}\w*$`);
-const SAFE_ENGLISH_TREATMENT_TARGET = /^(?:an?\s+)?(?:(?:more|less|some|the)\s+)?(?:food|meal|breakfast|lunch|dinner|snack|water|salt|sugar|oil|olive oil|vegetables?|fruit|bread|protein|carbs?|fiber|fibre|portion|recipe|ingredient)(?:\s+(?:daily|each day|every day|with meals?|with breakfast|with lunch|with dinner))?\s*$/;
+const SAFE_ENGLISH_TREATMENT_TARGET = /^(?:an?\s+)?(?:(?:more|less|some|the)\s+)?(?:food|meals?|breakfast|lunch|dinner|snacks?|water|salt|sugar|oil|olive oil|vegetables?|fruit|bread|protein|carbs?|fiber|fibre|portions?|recipes?|ingredients?)(?:\s+(?:daily|each day|every day|with meals?|with breakfast|with lunch|with dinner))?\s*$/;
 
 const DIAGNOSIS_TERM = "(?:diyabet|prediyabet|colyak|hipertansiyon|hipotansiyon|obezite|anemi|hipotiroidi|hipertiroidi|tiroid|insulin direnci|metabolik sendrom|alerji|intolerans|hastalik|sendrom)";
 const MEDICAL_LEXEME = "(?:kanser|depresyon|anksiyete|astim|migren|epilepsi|bipolar|psikoz|siroz|hepatit|artrit|dermatit|fibroz|skleroz|nefrit|gastrit|kolit|pnomoni|tromboz|losemi|lenfoma|melanom|karsinom|sarkom|parkinson|endometriozis)";
@@ -124,17 +124,40 @@ function targetIsSafeEnglishNutrition(target: string): boolean {
 }
 
 function clauseContainsUnsafeEnglishTreatmentDirective(clause: string): boolean {
-  const gerundDirective = /\b(?:stop|start|begin|continue|resume|skip)\s+(?:taking|using)\s+(.+)/g;
-  for (const match of clause.matchAll(gerundDirective)) {
+  const directTargetPatterns = [
+    /\b(?:stop|start|begin|continue|resume|skip)\s+(?:taking|using)\s+(.+)/g,
+    /\btake\s+(.+)/g,
+    /\bavoid\s+(.+)/g,
+    /\b(?:discontinue|quit)\s+(?:taking|using\s+)?(.+)/g,
+  ];
+  for (const pattern of directTargetPatterns) {
+    for (const match of clause.matchAll(pattern)) {
+      const target = (match[1] ?? "").trim();
+      if (targetIsSafeEnglishNutrition(target)) continue;
+      return true;
+    }
+  }
+
+  const switchFromTo = /\b(?:switch|swap)\s+from\s+(.+?)\s+to\s+(.+)$/g;
+  for (const match of clause.matchAll(switchFromTo)) {
+    const fromTarget = (match[1] ?? "").trim();
+    const toTarget = (match[2] ?? "").trim();
+    if (targetIsSafeEnglishNutrition(fromTarget) && targetIsSafeEnglishNutrition(toTarget)) continue;
+    return true;
+  }
+
+  const switchTo = /\b(?:switch|swap)\s+to\s+(.+)$/g;
+  for (const match of clause.matchAll(switchTo)) {
     const target = (match[1] ?? "").trim();
     if (targetIsSafeEnglishNutrition(target)) continue;
     return true;
   }
 
-  const plainTakeDirective = /\btake\s+(.+)/g;
-  for (const match of clause.matchAll(plainTakeDirective)) {
-    const target = (match[1] ?? "").trim();
-    if (targetIsSafeEnglishNutrition(target)) continue;
+  const replaceWith = /\b(?:replace|substitute)\s+(.+?)\s+(?:with|for)\s+(.+)$/g;
+  for (const match of clause.matchAll(replaceWith)) {
+    const oldTarget = (match[1] ?? "").trim();
+    const newTarget = (match[2] ?? "").trim();
+    if (targetIsSafeEnglishNutrition(oldTarget) && targetIsSafeEnglishNutrition(newTarget)) continue;
     return true;
   }
 
