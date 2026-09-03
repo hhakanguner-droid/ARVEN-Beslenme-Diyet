@@ -60,6 +60,19 @@ test("direct diagnosis assertions are rejected without blocking ordinary coachin
   }
 });
 
+test("English diagnostic assertions fail closed at the same AI health boundary", () => {
+  for (const message of [
+    "You have diabetes.",
+    "You're diabetic.",
+    "These symptoms indicate celiac disease.",
+    "Your results suggest cancer.",
+    "The diagnosis is Parkinson's disease.",
+  ]) {
+    assert.throws(() => assertNoMedicalOverreach(message), /non-diagnostic/, message);
+  }
+  assert.doesNotThrow(() => assertNoMedicalOverreach("Consider discussing these results with a qualified health professional."));
+});
+
 test("explicit dietary exclusions are hard blocks and malformed exclusions fail closed", () => {
   const candidate = [{ foodId: "beef-1", foodName: "Dana eti", dietarySafetyDataStatus: "verified" as const, dietaryConflictRuleIds: ["vegetarian"] }];
   assert.throws(() => assertNoDietaryExclusionConflict(candidate, [{ kind: "food", id: "beef-1", label: "Dana eti", resolutionStatus: "resolved" }]), /Dietary safety conflict/);
