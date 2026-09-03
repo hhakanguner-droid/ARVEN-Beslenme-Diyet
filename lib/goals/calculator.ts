@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { assertGoalCalculationProvenance, type GoalCalculationProvenance } from "./types";
 
 export type CalculatedGoalTargets = {
@@ -20,6 +21,22 @@ export type MifflinStJeorV1Inputs = {
   fatEnergyPct: number;
   waterMlPerKg: number;
 };
+
+const MifflinStJeorV1InputSchema = z.object({
+  weightKg: z.number().finite(),
+  heightCm: z.number().finite(),
+  ageYears: z.number().finite(),
+  sexAtBirth: z.enum(["male", "female"]),
+  activityFactor: z.number().finite(),
+  energyAdjustmentKcal: z.number().finite(),
+  proteinGPerKg: z.number().finite(),
+  fatEnergyPct: z.number().finite(),
+  waterMlPerKg: z.number().finite(),
+}).strict();
+
+export function parseMifflinStJeorV1Inputs(value: unknown): MifflinStJeorV1Inputs {
+  return MifflinStJeorV1InputSchema.parse(value);
+}
 
 function finiteInRange(value: number, min: number, max: number, field: string): number {
   if (!Number.isFinite(value) || value < min || value > max) throw new Error(`${field} is outside supported range`);
@@ -44,7 +61,8 @@ function assertDerivedTargets(targets: CalculatedGoalTargets): void {
   }
 }
 
-export function deriveMifflinStJeorV1(inputs: MifflinStJeorV1Inputs): CalculatedGoalTargets {
+export function deriveMifflinStJeorV1(rawInputs: MifflinStJeorV1Inputs): CalculatedGoalTargets {
+  const inputs = parseMifflinStJeorV1Inputs(rawInputs);
   const weightKg = finiteInRange(inputs.weightKg, 20, 400, "weightKg");
   const heightCm = finiteInRange(inputs.heightCm, 100, 260, "heightCm");
   const ageYears = finiteInRange(inputs.ageYears, 18, 120, "ageYears");
@@ -53,7 +71,6 @@ export function deriveMifflinStJeorV1(inputs: MifflinStJeorV1Inputs): Calculated
   const proteinGPerKg = finiteInRange(inputs.proteinGPerKg, 0.5, 4, "proteinGPerKg");
   const fatEnergyPct = finiteInRange(inputs.fatEnergyPct, 0.15, 0.5, "fatEnergyPct");
   const waterMlPerKg = finiteInRange(inputs.waterMlPerKg, 15, 60, "waterMlPerKg");
-  if (inputs.sexAtBirth !== "male" && inputs.sexAtBirth !== "female") throw new Error("sexAtBirth is unsupported");
 
   const sexOffset = inputs.sexAtBirth === "male" ? 5 : -161;
   const bmr = (10 * weightKg) + (6.25 * heightCm) - (5 * ageYears) + sexOffset;
