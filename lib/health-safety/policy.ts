@@ -53,6 +53,8 @@ const GENERIC_ENGLISH_DIAGNOSIS_GRAMMARS = [
   /\b(?:you|they|he|she)\s+(?:(?:probably|possibly|likely)\s+)?(?:(?:may|might|could)\s+)?(?:have|has)\s+(.+)/,
   /\b(?:you|they|he|she)\s+(?:(?:probably|possibly|likely)\s+)?(?:may|might|could)\s+be\s+(.+)/,
   /\b(?:you|they|he|she)\s+(?:seem|seems|appear|appears|look|looks)\s+(?:to\s+be\s+)?(.+)/,
+  /\b(?:you|they|he|she)\s+(?:suffer|suffers|suffering)\s+from\s+(.+)/,
+  /\b(?:you|they|he|she)\s+(?:exhibit|exhibits|show|shows|display|displays)\s+(?:the\s+)?(?:signs?|symptoms?|features?|evidence)\s+(?:of|for)\s+(.+)/,
   /\b(?:this|that|it)\s+(?:(?:probably|possibly|likely)\s+)?(?:(?:may|might|could|can)\s+)?(?:is|be)\s+(.+)/,
   /\b(?:this|that|it)\s+(?:looks|seems|appears|sounds)\s+like\s+(.+)/,
   /\b(?:looks|seems|appears|sounds)\s+like\s+(.+)/,
