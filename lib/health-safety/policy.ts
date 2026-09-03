@@ -39,9 +39,9 @@ const MEDICAL_MANAGEMENT_CONTEXT = [
 const NUTRITION_TARGET = "(?:besin|gida|yemek|ogun|porsiyon|meyve|sebze|ekmek|ekmegi|tuz|tuzu|seker|sekeri|zeytinyagi|yag|yagi|protein|karbonhidrat|lif|kalori|kahvalti|corba|salata|et|tavuk|balik|yumurta|sut|yogurt|peynir|bakliyat|kuruyemis|su|suyu)";
 const PREPARATION_CONTEXT = "(?:ocak|firin|tava|tencere|karisim|hamur|sos|pisir|kaynat|kavur|dinlen|beklet|servis|tabak|kap|kase|malzeme)";
 const TREATMENT_ACTION = "(?:al|alma|alman|almani|almaniz|almanizi|kullan|kullanma|kullanman|kullanmani|kullanmaniz|kullanmanizi|birak|birakma|birakman|birakmani|birakmaniz|birakmanizi|kes|kesme|kesmen|kesmeni|kesmeniz|kesmenizi|durdur|durdurma|durdurman|durdurmani|durdurmaniz|durdurmanizi|basla|baslama|baslaman|baslamani|baslamaniz|baslamanizi|atla|atlama|atlaman|atlamani|atlamaniz|atlamanizi|degistir|degistirme|degistirmen|degistirmeni|degistirmeniz|degistirmenizi|artir|artirma|artirman|artirmani|artirmaniz|artirmanizi|azalt|azaltma|azaltman|azaltmani|azaltmaniz|azaltmanizi|yukselt|dusur|surdur|devam|almali(?:sin|siniz)?|kullanmali(?:sin|siniz)?|birakmali(?:sin|siniz)?|kesmeli(?:sin|siniz)?|durdurmali(?:sin|siniz)?|baslamali(?:sin|siniz)?|atlamali(?:sin|siniz)?|degistirmeli(?:sin|siniz)?)";
-const TREATMENT_ACTION_GLOBAL = new RegExp(`\\b${TREATMENT_ACTION}\\b`, "g");
+const TREATMENT_ACTION_GLOBAL = new RegExp(`\b${TREATMENT_ACTION}\b`, "g");
 const NUTRITION_TARGET_TOKEN = new RegExp(`^${NUTRITION_TARGET}(?:yi|i|u|yu|e|a|den|dan)?$`);
-const PREPARATION_CONTEXT_TOKEN = new RegExp(`^${PREPARATION_CONTEXT}\\w*$`);
+const PREPARATION_CONTEXT_TOKEN = new RegExp(`^${PREPARATION_CONTEXT}\w*$`);
 
 const DIAGNOSIS_TERM = "(?:diyabet|prediyabet|colyak|hipertansiyon|hipotansiyon|obezite|anemi|hipotiroidi|hipertiroidi|tiroid|insulin direnci|metabolik sendrom|alerji|intolerans|hastalik|sendrom)";
 const MEDICAL_LEXEME = "(?:kanser|depresyon|anksiyete|astim|migren|epilepsi|bipolar|psikoz|siroz|hepatit|artrit|dermatit|fibroz|skleroz|nefrit|gastrit|kolit|pnomoni|tromboz|losemi|lenfoma|melanom|karsinom|sarkom|parkinson|endometriozis)";
@@ -50,20 +50,23 @@ const INFLECTED_MEDICAL_ASSERTION_TERM = `${MEDICAL_ASSERTION_TERM}(?:e|a|i|u|yi
 const ENGLISH_DIAGNOSIS_TERM = "(?:diabetes|diabetic|prediabetes|prediabetic|celiac(?: disease)?|hypertension|hypotension|obesity|anemia|hypothyroidism|hyperthyroidism|thyroid disease|insulin resistance|metabolic syndrome|allergy|intolerance|cancer|depression|anxiety|asthma|migraine|epilepsy|bipolar disorder|psychosis|cirrhosis|hepatitis|arthritis|dermatitis|fibrosis|sclerosis|nephritis|gastritis|colitis|pneumonia|thrombosis|leukemia|lymphoma|melanoma|carcinoma|sarcoma|parkinsons disease|endometriosis)";
 const DIRECT_DIAGNOSIS_PATTERNS = [
   /\b(?:tani|tanisi|taninin|taniya|tanidan|teshis|teshisi|teshisin|teshise|teshisten)\b/,
-  new RegExp(`\\b(?:sende|sizde)\\b.{0,60}\\b${MEDICAL_ASSERTION_TERM}\\b.{0,30}\\b(?:var|oldugun|oldugunu)\\b`),
-  new RegExp(`\\b${MEDICAL_ASSERTION_TERM}(?:in|un|nin|nun)?\\s+var\\b`),
-  new RegExp(`\\b${MEDICAL_ASSERTION_TERM}\\s+hastasi(?:sin|siniz|dir)?\\b`),
-  new RegExp(`\\b(?:sen|siz)\\s+${MEDICAL_ASSERTION_TERM}(?:sin|siniz|sun|sunuz)?\\b`),
-  new RegExp(`\\b${DIAGNOSIS_TERM}(?:sin|siniz|sun|sunuz)\\b`),
-  new RegExp(`\\bbu\\s+${MEDICAL_ASSERTION_TERM}(?:tir|dir|tur|dur)?\\b`),
-  new RegExp(`\\b(?:belirti|belirtiler|bulgu|bulgular|sonuc|sonuclar|deger|degerler|durum)\\w*\\b.{0,100}\\b${INFLECTED_MEDICAL_ASSERTION_TERM}\\b.{0,50}\\b(?:oldugunu|gosteriyor|kanitliyor|dogruluyor|isaret\\s+ediyor|dusunduruyor|akla\\s+getiriyor)\\b`),
-  new RegExp(`\\b${MEDICAL_LEXEME}(?:li|lu|da|de|i)?(?:sin|siniz|sun|sunuz|in)\\b`),
-  new RegExp(`\\b(?:you have|youve got|you are|youre)\\s+(?:an?\\s+)?${ENGLISH_DIAGNOSIS_TERM}\\b`),
-  new RegExp(`\\b(?:you|they|he|she)\\s+(?:seem|seems|appear|appears|look|looks)\\s+(?:to\\s+be\\s+)?(?:an?\\s+)?${ENGLISH_DIAGNOSIS_TERM}\\b`),
-  new RegExp(`\\b(?:this|that|it)\\s+(?:is|looks\\s+like|seems\\s+like|appears\\s+to\\s+be)\\s+(?:an?\\s+)?${ENGLISH_DIAGNOSIS_TERM}\\b`),
-  new RegExp(`\\b(?:sounds|looks|seems|appears)\\s+like\\s+(?:an?\\s+)?${ENGLISH_DIAGNOSIS_TERM}\\b`),
-  new RegExp(`\\b(?:your|these|this)\\s+(?:symptoms?|results?|findings?|condition)\\b.{0,100}\\b(?:indicate|indicates|suggest|suggests|confirm|confirms|show|shows|mean|means)\\b.{0,50}\\b${ENGLISH_DIAGNOSIS_TERM}\\b`),
-  new RegExp(`\\b(?:diagnosis|diagnosed|diagnostic)\\b.{0,50}\\b${ENGLISH_DIAGNOSIS_TERM}\\b`),
+  new RegExp(`\b(?:sende|sizde)\b.{0,60}\b${MEDICAL_ASSERTION_TERM}\b.{0,30}\b(?:var|oldugun|oldugunu)\b`),
+  new RegExp(`\b${MEDICAL_ASSERTION_TERM}(?:in|un|nin|nun)?\s+var\b`),
+  new RegExp(`\b${MEDICAL_ASSERTION_TERM}\s+hastasi(?:sin|siniz|dir)?\b`),
+  new RegExp(`\b(?:sen|siz)\s+${MEDICAL_ASSERTION_TERM}(?:sin|siniz|sun|sunuz)?\b`),
+  new RegExp(`\b${DIAGNOSIS_TERM}(?:sin|siniz|sun|sunuz)\b`),
+  new RegExp(`\bbu\s+${MEDICAL_ASSERTION_TERM}(?:tir|dir|tur|dur)?\b`),
+  new RegExp(`\b(?:belirti|belirtiler|bulgu|bulgular|sonuc|sonuclar|deger|degerler|durum)\w*\b.{0,100}\b${INFLECTED_MEDICAL_ASSERTION_TERM}\b.{0,50}\b(?:oldugunu|gosteriyor|kanitliyor|dogruluyor|isaret\s+ediyor|dusunduruyor|akla\s+getiriyor)\b`),
+  new RegExp(`\b${MEDICAL_LEXEME}(?:li|lu|da|de|i)?(?:sin|siniz|sun|sunuz|in)\b`),
+  new RegExp(`\b(?:you have|youve got|you are|youre)\s+(?:an?\s+)?${ENGLISH_DIAGNOSIS_TERM}\b`),
+  new RegExp(`\b(?:you|they|he|she)\s+(?:seem|seems|appear|appears|look|looks)\s+(?:to\s+be\s+)?(?:an?\s+)?${ENGLISH_DIAGNOSIS_TERM}\b`),
+  new RegExp(`\b(?:this|that|it)\s+(?:is|looks\s+like|seems\s+like|appears\s+to\s+be)\s+(?:an?\s+)?${ENGLISH_DIAGNOSIS_TERM}\b`),
+  new RegExp(`\b(?:sounds|looks|seems|appears)\s+like\s+(?:an?\s+)?${ENGLISH_DIAGNOSIS_TERM}\b`),
+  new RegExp(`\b(?:this|that|it)\s+(?:may|might|could|can)\s+be\s+(?:an?\s+)?${ENGLISH_DIAGNOSIS_TERM}\b`),
+  new RegExp(`\b(?:you|they|he|she)\s+(?:probably|possibly|likely)\s+(?:have|has|are|is)\s+(?:an?\s+)?${ENGLISH_DIAGNOSIS_TERM}\b`),
+  new RegExp(`\b(?:you|they|he|she)\s+(?:may|might|could)\s+(?:have|be)\s+(?:an?\s+)?${ENGLISH_DIAGNOSIS_TERM}\b`),
+  new RegExp(`\b(?:your|these|this)\s+(?:symptoms?|results?|findings?|condition)\b.{0,100}\b(?:indicate|indicates|suggest|suggests|confirm|confirms|show|shows|mean|means)\b.{0,50}\b${ENGLISH_DIAGNOSIS_TERM}\b`),
+  new RegExp(`\b(?:diagnosis|diagnosed|diagnostic)\b.{0,50}\b${ENGLISH_DIAGNOSIS_TERM}\b`),
 ];
 
 function splitDirectiveClauses(normalized: string): string[] {
@@ -77,7 +80,6 @@ function nearestTokenBefore(value: string): string | null {
   const tokens = value.trim().split(/\s+/).filter(Boolean);
   return tokens.at(-1) ?? null;
 }
-
 function nearestTokenAfter(value: string): string | null {
   return value.trim().split(/\s+/).filter(Boolean)[0] ?? null;
 }
