@@ -42,7 +42,7 @@ const TREATMENT_ACTION = "(?:al|alma|alman|almani|almaniz|almanizi|kullan|kullan
 const TREATMENT_ACTION_GLOBAL = new RegExp(String.raw`\b${TREATMENT_ACTION}\b`, "g");
 const NUTRITION_TARGET_TOKEN = new RegExp(`^${NUTRITION_TARGET}(?:yi|i|u|yu|e|a|den|dan)?$`);
 const PREPARATION_CONTEXT_TOKEN = new RegExp(String.raw`^${PREPARATION_CONTEXT}\w*$`);
-const SAFE_ENGLISH_TREATMENT_TARGET = /^(?:an?\s+)?(?:(?:more|less|some|the)\s+)?(?:food|meal|breakfast|lunch|dinner|snack|water|salt|sugar|oil|olive oil|vegetables?|fruit|bread|protein|carbs?|fiber|fibre|portion|recipe|ingredient)\b/;
+const SAFE_ENGLISH_TREATMENT_TARGET = /^(?:an?\s+)?(?:(?:more|less|some|the)\s+)?(?:food|meal|breakfast|lunch|dinner|snack|water|salt|sugar|oil|olive oil|vegetables?|fruit|bread|protein|carbs?|fiber|fibre|portion|recipe|ingredient)(?:\s+(?:daily|each day|every day|with meals?|with breakfast|with lunch|with dinner))?\s*$/;
 
 const DIAGNOSIS_TERM = "(?:diyabet|prediyabet|colyak|hipertansiyon|hipotansiyon|obezite|anemi|hipotiroidi|hipertiroidi|tiroid|insulin direnci|metabolik sendrom|alerji|intolerans|hastalik|sendrom)";
 const MEDICAL_LEXEME = "(?:kanser|depresyon|anksiyete|astim|migren|epilepsi|bipolar|psikoz|siroz|hepatit|artrit|dermatit|fibroz|skleroz|nefrit|gastrit|kolit|pnomoni|tromboz|losemi|lenfoma|melanom|karsinom|sarkom|parkinson|endometriozis)";
@@ -119,13 +119,32 @@ function clauseContainsUnsafeTreatmentDirective(clause: string): boolean {
   return false;
 }
 
+function targetIsSafeEnglishNutrition(target: string): boolean {
+  return target.length > 0 && SAFE_ENGLISH_TREATMENT_TARGET.test(target.trim());
+}
+
 function clauseContainsUnsafeEnglishTreatmentDirective(clause: string): boolean {
-  const takingDirective = /\b(?:stop|start|begin|continue|resume|skip)\s+(?:taking|using)\s+(.+)/g;
-  for (const match of clause.matchAll(takingDirective)) {
+  const gerundDirective = /\b(?:stop|start|begin|continue|resume|skip)\s+(?:taking|using)\s+(.+)/g;
+  for (const match of clause.matchAll(gerundDirective)) {
     const target = (match[1] ?? "").trim();
-    if (target && SAFE_ENGLISH_TREATMENT_TARGET.test(target)) continue;
+    if (targetIsSafeEnglishNutrition(target)) continue;
     return true;
   }
+
+  const plainTakeDirective = /\btake\s+(.+)/g;
+  for (const match of clause.matchAll(plainTakeDirective)) {
+    const target = (match[1] ?? "").trim();
+    if (targetIsSafeEnglishNutrition(target)) continue;
+    return true;
+  }
+
+  const scheduledUseDirective = /\buse\s+(.+?)(?:\s+(?:daily|each day|every day|as prescribed))$/g;
+  for (const match of clause.matchAll(scheduledUseDirective)) {
+    const target = (match[1] ?? "").trim();
+    if (targetIsSafeEnglishNutrition(`${target} daily`)) continue;
+    return true;
+  }
+
   return /\b(?:reduce|increase|decrease|change|adjust)\s+(?:your\s+)?(?:dose|dosage)\b/.test(clause);
 }
 
