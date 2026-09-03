@@ -15,9 +15,10 @@ test("unknown and unrestricted not-applicable allergen data fail closed for acti
   }
 });
 
-test("malformed active or candidate allergen identifiers fail closed", () => {
+test("malformed or unresolved active allergen exclusions fail closed", () => {
   const candidate = [{ foodId: "zucchini-1", foodName: "Izgara kabak", allergenDataStatus: "verified" as const, allergenIds: [] }];
   assert.throws(() => assertNoAllergyConflict(candidate, ["   "]), /unresolved/);
+  assert.throws(() => assertNoAllergyConflict(candidate, [{ id: null, label: "Kullanıcının aktif alerjeni", resolutionStatus: "unresolved" }]), /active allergen unresolved/);
   assert.throws(() => assertNoAllergyConflict([{ foodId: "mystery-1", foodName: "Belirsiz etiket", allergenDataStatus: "verified", allergenIds: ["   "] }], ["milk"]), /unresolved/);
 });
 
@@ -34,6 +35,7 @@ test("AI medication or treatment management is blocked without a medication regi
     "Warfarini bırak ve sebze ye.", "Warfarini bırak; etkileşim riski var.", "Warfarini sebze ile kullan.",
     "Warfarini kullan sebzeyi azalt.",
     "Bunu ilacın yerine kullanmamalısın.", "Bu ilacı kullanman gerekiyor.",
+    "Stop taking your medication.", "Reduce your dose.", "Start insulin.", "Take metformin every day.",
   ];
   for (const message of unsafe) assert.throws(() => assertNoMedicalOverreach(message), /non-diagnostic/, message);
   assert.doesNotThrow(() => assertNoMedicalOverreach("Bu sonuçları bir sağlık profesyoneliyle değerlendirmen uygun olur."));
