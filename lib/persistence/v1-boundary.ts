@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { deriveCalculatedGoal, type MifflinStJeorV1Inputs } from "@/lib/goals/calculator";
 import { assertMealEnergyAllocations, type MealEnergyAllocation } from "@/lib/goals/types";
-import { assertNoAllergyConflict, assertNoDietaryExclusionConflict, type DietarySafetyExclusion } from "@/lib/health-safety/policy";
+import { assertNoAllergyConflict, assertNoDietaryExclusionConflict, type AllergenSafetyExclusion, type DietarySafetyExclusion } from "@/lib/health-safety/policy";
 import { scaleNutritionForStorage } from "@/lib/nutrition/calculations";
 import { resolvePortionSelection } from "@/lib/nutrition/portions";
 import type { Food, NutritionFacts, PortionSelection } from "@/lib/nutrition/types";
@@ -53,7 +53,8 @@ export interface V1Transaction {
   getNutritionEvent(userSubject:string,eventId:string):Promise<StoredNutritionEvent|null>;
   insertNutritionEvent(event:StoredNutritionEvent):Promise<void>;
   getFoodVersion(userSubject:string,foodVersionId:string):Promise<VersionedFood|null>;
-  getActiveAllergenIds(userSubject:string):Promise<string[]>;
+  /** Return every active allergen exclusion, including unresolved rows with null ids. */
+  getActiveAllergenExclusions(userSubject:string):Promise<AllergenSafetyExclusion[]>;
   getActiveDietaryExclusions(userSubject:string):Promise<DietarySafetyExclusion[]>;
   getScientificReferenceSnapshots(referenceIds:string[]):Promise<ScientificReferenceSnapshot[]>;
   insertGoalVersion(goal:StoredGoalVersion):Promise<void>;
@@ -106,7 +107,7 @@ async function mealPayload(tx:V1Transaction,subject:string,mealType:z.infer<type
     try{nutrition=scaleNutritionForStorage(portion);}catch(error){rejectApplication("nutrition-calculation-failed",error);}
     snapshots.push({foodVersionId:food.id,foodKey:food.foodKey,foodName:food.name,calculationVersion:item.calculationVersion,grams:portion.grams,portion:portion.display??null,nutrition});
   }
-  const allergens=await tx.getActiveAllergenIds(subject);
+  const allergens=await tx.getActiveAllergenExclusions(subject);
   const exclusions=await tx.getActiveDietaryExclusions(subject);
   const allergenCandidates=resolvedFoods.flatMap((food)=>safety(food).allergens);
   const dietaryCandidates=resolvedFoods.flatMap((food)=>safety(food).dietary);
