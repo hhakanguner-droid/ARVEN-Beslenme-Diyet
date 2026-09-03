@@ -74,6 +74,8 @@ test("English diagnostic assertions fail closed at the same AI health boundary",
     "The diagnosis is Parkinson's disease.",
     "You have a balanced meal plan because you may have lupus.",
     "You have a healthy routine and you might be diabetic.",
+    "You have a healthy meal plan and also have cancer.",
+    "You have a practical strategy but also have kidney disease.",
     "You suffer from diabetes.",
     "They suffer from lupus.",
     "You exhibit signs of cancer.",
@@ -81,7 +83,11 @@ test("English diagnostic assertions fail closed at the same AI health boundary",
   ]) {
     assert.throws(() => assertNoMedicalOverreach(message), /non-diagnostic/, message);
   }
-  assert.doesNotThrow(() => assertNoMedicalOverreach("Consider discussing these results with a qualified health professional."));
+  for (const message of [
+    "You have a healthy meal plan.",
+    "You have a practical strategy.",
+    "Consider discussing these results with a qualified health professional.",
+  ]) assert.doesNotThrow(() => assertNoMedicalOverreach(message), message);
 });
 
 test("explicit dietary exclusions are hard blocks and malformed exclusions fail closed", () => {
