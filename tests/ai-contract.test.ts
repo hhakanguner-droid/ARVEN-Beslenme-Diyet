@@ -83,18 +83,18 @@ test("all user-facing meal text rejects numeric deterministic claims", () => {
   }), /Natural portion labels/);
 });
 
-test("food queries cannot be blank, smuggle quantities, or name medication", () => {
+test("food queries cannot be blank, smuggle quantities, or contain medical-management vocabulary", () => {
   for (const foodQuery of [
     "   ", "120 g tavuk", "４３０ kcal tavuk", "٤٣٠ kcal tavuk", "४३० kcal tavuk", "400 kcal yoğurt", "kalori 430 yoğurt",
     "iki miligram sodyum", "iki kilokalori yoğurt", "2 litre su", "iki mililitre süt",
     "1e3 kcal yoğurt", "1e3 calories chicken", "900 kilocalories yogurt", "800 kilojoules soup",
-    "Metformin", "insülin", "Warfarin",
+    "medication", "prescription", "ilaç", "reçete",
   ]) {
     assert.throws(() => parseMealSuggestion({ ...validSuggestion, ingredients: [{ ...validSuggestion.ingredients[0], foodQuery }] }));
   }
 });
 
-test("AI meal parser enforces non-diagnostic and non-medication policy on every narrative surface", () => {
+test("AI meal parser enforces the general no-treatment policy on every narrative surface", () => {
   const unsafe = [
     { ...validSuggestion, title: "Diyabetsin" },
     { ...validSuggestion, rationale: "İlacını bırak." },
@@ -102,6 +102,7 @@ test("AI meal parser enforces non-diagnostic and non-medication policy on every 
     { ...validSuggestion, preparation: ["İnsülin kullanman gerekiyor."] },
     { ...validSuggestion, preparation: ["Warfarin alman gerekiyor."] },
     { ...validSuggestion, preparation: ["Switch from ibuprofen to naproxen."] },
+    { ...validSuggestion, preparation: ["Stop ibuprofen."] },
     { ...validSuggestion, uncertainty: ["Sende kanser var."] },
   ];
   for (const candidate of unsafe) {
@@ -130,6 +131,7 @@ test("weekly AI insight cannot author numeric truth", () => {
     "The twenty-first meal was incomplete.",
     "A dozen meals were incomplete.", "A pair of meals were incomplete.", "A couple of meals were incomplete.",
     "Both meals were incomplete.", "A single meal was incomplete.", "A double serving was logged.",
+    "Water intake increased onefold.", "Water intake increased twofold.", "Adherence improved threefold.",
   ];
   for (const summary of invalidSummaries) assert.throws(() => parseWeeklyInsight({ schemaVersion: "WeeklyInsightV1", summary, positives: [], areasForImprovement: [], suggestions: [], uncertainty: [] }), /must not contain numeric claims/, summary);
 });
