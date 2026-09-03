@@ -46,6 +46,11 @@ test("export manifest requires a real canonical UTC generation timestamp", () =>
   }
 });
 
+test("export manifest requires a valid IANA timezone", () => {
+  assert.throws(() => validateExportManifest({ ...validManifest, timezone: "Mars/Base" }), /valid IANA timezone/);
+  assert.doesNotThrow(() => validateExportManifest({ ...validManifest, timezone: "America/New_York" }));
+});
+
 test("invalid export record counts are rejected", () => {
   assert.throws(() => validateExportManifest({
     format: ARVEN_EXPORT_FORMAT,
