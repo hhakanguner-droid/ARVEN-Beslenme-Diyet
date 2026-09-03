@@ -29,6 +29,15 @@ export type ExportManifest = {
 
 const EXPORT_SECTION_SET = new Set<string>(EXPORT_SECTIONS);
 
+function isValidIanaTimezone(value: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: value }).format(new Date(0));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Validates decoded/untrusted JSON at runtime. Compile-time unions are not a
  * security boundary for imported files, so every section identifier is checked
@@ -46,6 +55,7 @@ export function validateExportManifest(manifest: unknown): asserts manifest is E
   }
   if (typeof candidate.locale !== "string" || !candidate.locale.trim()) throw new Error("locale is required");
   if (typeof candidate.timezone !== "string" || !candidate.timezone.trim()) throw new Error("timezone is required");
+  if (!isValidIanaTimezone(candidate.timezone)) throw new Error("timezone must be a valid IANA timezone");
   if (!Array.isArray(candidate.sections)) throw new Error("sections must be an array");
 
   const seen = new Set<ExportSection>();
