@@ -102,7 +102,7 @@ function actionOccurrenceTargetsNutrition(clause: string, actionIndex: number, a
   const before = clause.slice(0, actionIndex);
   const after = clause.slice(actionIndex + actionLength);
   const previous = nearestTokenBefore(before);
-  if (previous && NUTRITION_TARGET_TOKEN.test(previous)) return true;
+  if (previous !== null) return NUTRITION_TARGET_TOKEN.test(previous);
   const next = nearestTokenAfter(after);
   return next !== null && NUTRITION_TARGET_TOKEN.test(next);
 }
