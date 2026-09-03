@@ -47,6 +47,7 @@ const DIAGNOSIS_TERM = "(?:diyabet|prediyabet|colyak|hipertansiyon|hipotansiyon|
 const MEDICAL_LEXEME = "(?:kanser|depresyon|anksiyete|astim|migren|epilepsi|bipolar|psikoz|siroz|hepatit|artrit|dermatit|fibroz|skleroz|nefrit|gastrit|kolit|pnomoni|tromboz|losemi|lenfoma|melanom|karsinom|sarkom|parkinson|endometriozis)";
 const MEDICAL_ASSERTION_TERM = `(?:${DIAGNOSIS_TERM}|${MEDICAL_LEXEME})`;
 const INFLECTED_MEDICAL_ASSERTION_TERM = `${MEDICAL_ASSERTION_TERM}(?:e|a|i|u|yi|yu|ni|nu|in|un|nin|nun)?`;
+const ENGLISH_DIAGNOSIS_TERM = "(?:diabetes|prediabetes|celiac(?: disease)?|hypertension|hypotension|obesity|anemia|hypothyroidism|hyperthyroidism|thyroid disease|insulin resistance|metabolic syndrome|allergy|intolerance|cancer|depression|anxiety|asthma|migraine|epilepsy|bipolar disorder|psychosis|cirrhosis|hepatitis|arthritis|dermatitis|fibrosis|sclerosis|nephritis|gastritis|colitis|pneumonia|thrombosis|leukemia|lymphoma|melanoma|carcinoma|sarcoma|parkinsons disease|endometriosis)";
 const DIRECT_DIAGNOSIS_PATTERNS = [
   /\b(?:tani|tanisi|taninin|taniya|tanidan|teshis|teshisi|teshisin|teshise|teshisten)\b/,
   new RegExp(`\\b(?:sende|sizde)\\b.{0,60}\\b${MEDICAL_ASSERTION_TERM}\\b.{0,30}\\b(?:var|oldugun|oldugunu)\\b`),
@@ -57,6 +58,9 @@ const DIRECT_DIAGNOSIS_PATTERNS = [
   new RegExp(`\\bbu\\s+${MEDICAL_ASSERTION_TERM}(?:tir|dir|tur|dur)?\\b`),
   new RegExp(`\\b(?:belirti|belirtiler|bulgu|bulgular|sonuc|sonuclar|deger|degerler|durum)\\w*\\b.{0,100}\\b${INFLECTED_MEDICAL_ASSERTION_TERM}\\b.{0,50}\\b(?:oldugunu|gosteriyor|kanitliyor|dogruluyor|isaret\\s+ediyor|dusunduruyor|akla\\s+getiriyor)\\b`),
   new RegExp(`\\b${MEDICAL_LEXEME}(?:li|lu|da|de|i)?(?:sin|siniz|sun|sunuz|in)\\b`),
+  new RegExp(`\\b(?:you have|youve got|you are|youre)\\s+(?:an?\\s+)?${ENGLISH_DIAGNOSIS_TERM}\\b`),
+  new RegExp(`\\b(?:your|these|this)\\s+(?:symptoms?|results?|findings?|condition)\\b.{0,100}\\b(?:indicate|indicates|suggest|suggests|confirm|confirms|show|shows|mean|means)\\b.{0,50}\\b${ENGLISH_DIAGNOSIS_TERM}\\b`),
+  new RegExp(`\\b(?:diagnosis|diagnosed|diagnostic)\\b.{0,50}\\b${ENGLISH_DIAGNOSIS_TERM}\\b`),
 ];
 
 function splitDirectiveClauses(normalized: string): string[] {
