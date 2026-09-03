@@ -62,6 +62,9 @@ export function resolvePortionSelection(food: Food, selection: PortionSelection)
 }
 
 export function approximateGramLabel(portion: Portion): string {
-  const rounded = Math.round(portion.grams);
-  return `≈ ${rounded} g`;
+  const roundedWhole = Math.round(portion.grams);
+  const displayGrams = roundedWhole === 0 && portion.grams > 0
+    ? roundResolvedGrams(portion.grams)
+    : roundedWhole;
+  return `≈ ${formatPortionQuantity(displayGrams)} g`;
 }
