@@ -72,6 +72,8 @@ test("English diagnostic assertions fail closed at the same AI health boundary",
     "These symptoms indicate celiac disease.",
     "Your results suggest cancer.",
     "The diagnosis is Parkinson's disease.",
+    "You have a balanced meal plan because you may have lupus.",
+    "You have a healthy routine and you might be diabetic.",
   ]) {
     assert.throws(() => assertNoMedicalOverreach(message), /non-diagnostic/, message);
   }
