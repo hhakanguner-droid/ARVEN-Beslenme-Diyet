@@ -81,6 +81,7 @@ export const NUTRIENT_UNITS: Readonly<Record<ExtendedNutrientKey, NutrientUnit>>
 };
 
 const NUTRIENT_KEY_SET = new Set<string>(Object.keys(NUTRIENT_UNITS));
+const NUTRIENT_COMPLETENESS_SET = new Set<string>(["complete", "partial", "unknown"]);
 
 export function isExtendedNutrientKey(value: string): value is ExtendedNutrientKey {
   return NUTRIENT_KEY_SET.has(value);
@@ -93,6 +94,9 @@ function finiteNonNegativeOrNull(value: number | null, field: string): number | 
 }
 
 function assertNutrientValueSemantics(value: NutrientValue, field: string): void {
+  if (!NUTRIENT_COMPLETENESS_SET.has(value.completeness)) {
+    throw new Error(`${field} completeness must be complete, partial, or unknown`);
+  }
   const amount = finiteNonNegativeOrNull(value.amount, `${field} amount`);
   if (amount == null && value.completeness !== "unknown") {
     throw new Error(`${field} with a null amount must use unknown completeness`);
