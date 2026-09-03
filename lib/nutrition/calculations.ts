@@ -78,6 +78,9 @@ function roundExtendedNutrition(
 function scaleNutritionExact(portion: Portion): NutritionFacts {
   assertVerifiedNutritionSource(portion.food);
   const grams = finiteNonNegative(portion.grams, "grams");
+  if (portion.food.basisGrams !== 100) {
+    throw new Error("food.basisGrams must equal the canonical 100 g nutrition basis");
+  }
   const n = portion.food.nutrition;
   assertNutritionFactsValid(n, `food:${portion.food.id}`);
   const ratio = grams / portion.food.basisGrams;
