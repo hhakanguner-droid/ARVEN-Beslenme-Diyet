@@ -164,15 +164,17 @@ export class V1MutationService{
         const p=await tx.getProposal(this.subject,actionId);const d=await tx.getDecision(this.subject,actionId);if(!p||!d||d.decision!=="confirmed")throw new Error("Explicit confirmation is required before application");
         const now=instant(this.clock.now());
         try{
+          let decoded:unknown;
+          try{decoded=JSON.parse(p.payloadJson);}catch(error){rejectApplication("invalid-stored-payload",error);}
           await assertProposalIntegrity(p);
           const c=await tx.getUserContext(this.subject);
           let e:StoredNutritionEvent;
           if(p.actionType==="water-log"){
-            let x:z.infer<typeof WaterLogActionV1>;try{x=WaterLogActionV1.parse(JSON.parse(p.payloadJson));}catch(error){rejectApplication("invalid-stored-payload",error);}
+            let x:z.infer<typeof WaterLogActionV1>;try{x=WaterLogActionV1.parse(decoded);}catch(error){rejectApplication("invalid-stored-payload",error);}
             let localDate:string;try{localDate=deriveNutritionLocalDate(x.occurredAt,c.timezone,c.nutritionDayStartMinutes);}catch(error){rejectApplication("local-date-derivation-failed",error);}
             e={id:this.idFactory(),userSubject:this.subject,eventType:"water-log",occurredAt:x.occurredAt,localDate,payloadJson:canonicalJson({schemaVersion:"WaterEventV1",milliliters:x.milliliters}),createdAt:now};
           }else{
-            let x:z.infer<typeof MealLogActionV1>;try{x=MealLogActionV1.parse(JSON.parse(p.payloadJson));}catch(error){rejectApplication("invalid-stored-payload",error);}
+            let x:z.infer<typeof MealLogActionV1>;try{x=MealLogActionV1.parse(decoded);}catch(error){rejectApplication("invalid-stored-payload",error);}
             let localDate:string;try{localDate=deriveNutritionLocalDate(x.occurredAt,c.timezone,c.nutritionDayStartMinutes);}catch(error){rejectApplication("local-date-derivation-failed",error);}
             const payload=await mealPayload(tx,this.subject,x.mealType,x.items);
             e={id:this.idFactory(),userSubject:this.subject,eventType:"meal-log",occurredAt:x.occurredAt,localDate,payloadJson:canonicalJson(payload),createdAt:now};
