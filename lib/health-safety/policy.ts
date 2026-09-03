@@ -51,6 +51,7 @@ const ENGLISH_DIAGNOSIS_TERM = "(?:diabetes|diabetic|prediabetes|prediabetic|cel
 const SAFE_ENGLISH_PREDICATE = /^(?:an?\s+)?(?:(?:very|quite|more|less|well|good|great|solid|clear|simple|balanced|healthy|helpful|realistic|practical|flexible)\s+)*(?:meal|meal plan|plan|goal|option|choice|recipe|ingredient|portion|breakfast|lunch|dinner|snack|routine|schedule|strategy|approach|idea|habit|preference|target)\b/;
 const GENERIC_ENGLISH_DIAGNOSIS_GRAMMARS = [
   /\b(?:you|they|he|she)\s+(?:(?:probably|possibly|likely)\s+)?(?:(?:may|might|could)\s+)?(?:have|has)\s+(.+)/,
+  /\b(?:you|they|he|she)\s+(?:(?:probably|possibly|likely)\s+)?(?:may|might|could)\s+be\s+(.+)/,
   /\b(?:you|they|he|she)\s+(?:seem|seems|appear|appears|look|looks)\s+(?:to\s+be\s+)?(.+)/,
   /\b(?:this|that|it)\s+(?:(?:probably|possibly|likely)\s+)?(?:(?:may|might|could|can)\s+)?(?:is|be)\s+(.+)/,
   /\b(?:this|that|it)\s+(?:looks|seems|appears|sounds)\s+like\s+(.+)/,
