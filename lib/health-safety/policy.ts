@@ -32,9 +32,13 @@ function normalizeTurkishText(value: string): string {
     .replace(/['’ʼ]/g, "").replace(/[^a-z0-9\s,;.!?]/g, " ").replace(/\s+/g, " ");
 }
 
+// ARVEN has no medication feature or medication registry. The deterministic boundary therefore
+// must not depend on recognizing drug names. Generic medical-management nouns fail closed, while
+// directive grammar is judged only by whether its complete target is an explicit nutrition or
+// meal-preparation target.
 const MEDICAL_MANAGEMENT_CONTEXT = [
-  "ilac", "ilaclar", "ilac kullanimi", "medikasyon", "recete", "doz", "tedavi", "insulin", "antibiyotik", "antibiyoti", "warfarin", "metformin", "aspirin", "euthyrox",
-  "medication", "medications", "medicine", "medicines", "prescription", "prescriptions", "dose", "dosage", "treatment", "antibiotic", "antibiotics",
+  "ilac", "ilaclar", "ilac kullanimi", "medikasyon", "recete", "doz", "tedavi",
+  "medication", "medications", "medicine", "medicines", "prescription", "prescriptions", "dose", "dosage", "treatment",
 ];
 const NUTRITION_TARGET = "(?:besin|gida|yemek|ogun|porsiyon|meyve|sebze|ekmek|ekmegi|tuz|tuzu|seker|sekeri|zeytinyagi|yag|yagi|protein|karbonhidrat|lif|kalori|kahvalti|corba|salata|et|tavuk|balik|yumurta|sut|yogurt|peynir|bakliyat|kuruyemis|su|suyu)";
 const PREPARATION_CONTEXT = "(?:ocak|firin|tava|tencere|karisim|hamur|sos|pisir|kaynat|kavur|dinlen|beklet|servis|tabak|kap|kase|malzeme)";
@@ -42,7 +46,10 @@ const TREATMENT_ACTION = "(?:al|alma|alman|almani|almaniz|almanizi|kullan|kullan
 const TREATMENT_ACTION_GLOBAL = new RegExp(String.raw`\b${TREATMENT_ACTION}\b`, "g");
 const NUTRITION_TARGET_TOKEN = new RegExp(`^${NUTRITION_TARGET}(?:yi|i|u|yu|e|a|den|dan)?$`);
 const PREPARATION_CONTEXT_TOKEN = new RegExp(String.raw`^${PREPARATION_CONTEXT}\w*$`);
-const SAFE_ENGLISH_TREATMENT_TARGET = /^(?:an?\s+)?(?:(?:more|less|some|the)\s+)?(?:food|meals?|breakfast|lunch|dinner|snacks?|water|salt|sugar|oil|olive oil|vegetables?|fruit|bread|protein|carbs?|fiber|fibre|portions?|recipes?|ingredients?)(?:\s+(?:daily|each day|every day|with meals?|with breakfast|with lunch|with dinner))?\s*$/;
+
+const SAFE_ENGLISH_ACTION_TARGET = /^(?:an?\s+)?(?:(?:more|less|some|the|your)\s+)?(?:food|meals?|breakfast|lunch|dinner|snacks?|water|salt|sugar|oil|olive oil|butter|vegetables?|fruit|bread|protein|carbs?|fiber|fibre|portions?|recipes?|ingredients?|heat|oven|pan|pot|mixture|batter|sauce)(?:\s+(?:daily|each day|every day|with meals?|with breakfast|with lunch|with dinner))?\s*$/;
+const ENGLISH_MANAGEMENT_VERB = "(?:take|use|stop|start|begin|continue|resume|skip|avoid|discontinue|quit|cease|switch|swap|replace|substitute|change|adjust|reduce|increase|decrease|raise|lower|hold|taper|double|halve|administer)";
+const ENGLISH_MANAGEMENT_DIRECTIVE = new RegExp(String.raw`\b${ENGLISH_MANAGEMENT_VERB}\b\s+(.+)$`);
 
 const DIAGNOSIS_TERM = "(?:diyabet|prediyabet|colyak|hipertansiyon|hipotansiyon|obezite|anemi|hipotiroidi|hipertiroidi|tiroid|insulin direnci|metabolik sendrom|alerji|intolerans|hastalik|sendrom)";
 const MEDICAL_LEXEME = "(?:kanser|depresyon|anksiyete|astim|migren|epilepsi|bipolar|psikoz|siroz|hepatit|artrit|dermatit|fibroz|skleroz|nefrit|gastrit|kolit|pnomoni|tromboz|losemi|lenfoma|melanom|karsinom|sarkom|parkinson|endometriozis)";
@@ -119,56 +126,20 @@ function clauseContainsUnsafeTreatmentDirective(clause: string): boolean {
   return false;
 }
 
-function targetIsSafeEnglishNutrition(target: string): boolean {
-  return target.length > 0 && SAFE_ENGLISH_TREATMENT_TARGET.test(target.trim());
+function targetIsSafeEnglishAction(target: string): boolean {
+  const normalized = target.trim()
+    .replace(/^(?:(?:taking|using)\s+)+/, "")
+    .replace(/^(?:from|to)\s+/, "")
+    .replace(/^your\s+/, "");
+  if (!normalized) return false;
+  const parts = normalized.split(/\s+(?:and|with|for|to|from)\s+/).map((part) => part.trim()).filter(Boolean);
+  return parts.length > 0 && parts.every((part) => SAFE_ENGLISH_ACTION_TARGET.test(part));
 }
 
 function clauseContainsUnsafeEnglishTreatmentDirective(clause: string): boolean {
-  const directTargetPatterns = [
-    /\b(?:stop|start|begin|continue|resume|skip)\s+(?:taking|using)\s+(.+)/g,
-    /\btake\s+(.+)/g,
-    /\bavoid\s+(.+)/g,
-    /\b(?:discontinue|quit)\s+(?:taking|using\s+)?(.+)/g,
-  ];
-  for (const pattern of directTargetPatterns) {
-    for (const match of clause.matchAll(pattern)) {
-      const target = (match[1] ?? "").trim();
-      if (targetIsSafeEnglishNutrition(target)) continue;
-      return true;
-    }
-  }
-
-  const switchFromTo = /\b(?:switch|swap)\s+from\s+(.+?)\s+to\s+(.+)$/g;
-  for (const match of clause.matchAll(switchFromTo)) {
-    const fromTarget = (match[1] ?? "").trim();
-    const toTarget = (match[2] ?? "").trim();
-    if (targetIsSafeEnglishNutrition(fromTarget) && targetIsSafeEnglishNutrition(toTarget)) continue;
-    return true;
-  }
-
-  const switchTo = /\b(?:switch|swap)\s+to\s+(.+)$/g;
-  for (const match of clause.matchAll(switchTo)) {
-    const target = (match[1] ?? "").trim();
-    if (targetIsSafeEnglishNutrition(target)) continue;
-    return true;
-  }
-
-  const replaceWith = /\b(?:replace|substitute)\s+(.+?)\s+(?:with|for)\s+(.+)$/g;
-  for (const match of clause.matchAll(replaceWith)) {
-    const oldTarget = (match[1] ?? "").trim();
-    const newTarget = (match[2] ?? "").trim();
-    if (targetIsSafeEnglishNutrition(oldTarget) && targetIsSafeEnglishNutrition(newTarget)) continue;
-    return true;
-  }
-
-  const scheduledUseDirective = /\buse\s+(.+?)(?:\s+(?:daily|each day|every day|as prescribed))$/g;
-  for (const match of clause.matchAll(scheduledUseDirective)) {
-    const target = (match[1] ?? "").trim();
-    if (targetIsSafeEnglishNutrition(`${target} daily`)) continue;
-    return true;
-  }
-
-  return /\b(?:reduce|increase|decrease|change|adjust)\s+(?:your\s+)?(?:dose|dosage)\b/.test(clause);
+  const match = ENGLISH_MANAGEMENT_DIRECTIVE.exec(clause);
+  if (!match) return false;
+  return !targetIsSafeEnglishAction(match[1] ?? "");
 }
 
 function clauseContainsUnsafeEnglishDiagnosis(clause: string): boolean {
