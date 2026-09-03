@@ -134,7 +134,26 @@ async function readAppliedOutcomeEvent(tx:V1Transaction,subject:string,actionId:
 export class V1MutationService{
   constructor(private readonly subject:string,private readonly runner:V1TransactionRunner,private readonly idFactory:IdFactory=()=>crypto.randomUUID(),private readonly clock:ServiceClock={now:()=>new Date()}){if(!subject.trim())throw new Error("Authenticated subject is required");}
   async createAiProposal(type:AiActionType,input:unknown,idempotencyKey:string):Promise<StoredProposal>{const key=idempotencyKey.trim();if(!key)throw new Error("idempotencyKey is required");const parsed=type==="meal-log"?MealLogActionV1.parse(input):WaterLogActionV1.parse(input);const payloadJson=canonicalJson(parsed);const hash=await sha256(payloadJson);const candidate:StoredProposal={id:this.idFactory(),userSubject:this.subject,actionType:type,schemaVersion:parsed.schemaVersion,payloadJson,payloadSha256:hash,idempotencyKey:key,createdAt:instant(this.clock.now())};return this.runner.transaction(async tx=>assertSameImmutableProposal(await tx.insertProposalIfAbsent(candidate),candidate));}
-  async decideAiAction(actionId:string,decision:AiDecision):Promise<StoredDecision>{return this.runner.transaction(async tx=>{const p=await tx.getProposal(this.subject,actionId);if(!p)throw new Error("AI proposal not found in authenticated scope");const old=await tx.getDecision(this.subject,actionId);if(old){if(old.decision!==decision)throw new Error("AI decision is immutable once recorded");return old;}const d={actionId,userSubject:this.subject,decision,decidedAt:instant(this.clock.now())};await tx.insertDecision(d);return d;});}
+  async decideAiAction(actionId:string,decision:AiDecision):Promise<StoredDecision>{
+    try{
+      return await this.runner.transaction(async tx=>{
+        const p=await tx.getProposal(this.subject,actionId);
+        if(!p)throw new Error("AI proposal not found in authenticated scope");
+        const old=await tx.getDecision(this.subject,actionId);
+        if(old){if(old.decision!==decision)throw new Error("AI decision is immutable once recorded");return old;}
+        const d={actionId,userSubject:this.subject,decision,decidedAt:instant(this.clock.now())};
+        await tx.insertDecision(d);
+        return d;
+      });
+    }catch(error){
+      const winner=await this.runner.transaction(async tx=>tx.getDecision(this.subject,actionId));
+      if(winner){
+        if(winner.decision!==decision)throw new Error("AI decision is immutable once recorded");
+        return winner;
+      }
+      throw error;
+    }
+  }
   async applyConfirmedAiAction(actionId:string):Promise<StoredNutritionEvent>{
     let result:{kind:"applied";event:StoredNutritionEvent}|{kind:"failed";outcome:StoredOutcome;message:string};
     try{
