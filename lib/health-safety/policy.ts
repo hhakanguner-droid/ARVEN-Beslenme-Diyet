@@ -117,11 +117,12 @@ function clauseContainsUnsafeTreatmentDirective(clause: string): boolean {
 
 function clauseContainsUnsafeEnglishDiagnosis(clause: string): boolean {
   for (const grammar of GENERIC_ENGLISH_DIAGNOSIS_GRAMMARS) {
-    const match = grammar.exec(clause);
-    if (!match) continue;
-    const predicate = (match[1] ?? "").trim();
-    if (!predicate || SAFE_ENGLISH_PREDICATE.test(predicate)) continue;
-    return true;
+    const globalGrammar = new RegExp(grammar.source, grammar.flags.includes("g") ? grammar.flags : `${grammar.flags}g`);
+    for (const match of clause.matchAll(globalGrammar)) {
+      const predicate = (match[1] ?? "").trim();
+      if (!predicate || SAFE_ENGLISH_PREDICATE.test(predicate)) continue;
+      return true;
+    }
   }
   return false;
 }
