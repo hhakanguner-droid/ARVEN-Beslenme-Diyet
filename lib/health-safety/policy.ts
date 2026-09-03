@@ -46,6 +46,7 @@ const TREATMENT_ACTION = "(?:al|alma|alman|almani|almaniz|almanizi|kullan|kullan
 const TREATMENT_ACTION_GLOBAL = new RegExp(String.raw`\b${TREATMENT_ACTION}\b`, "g");
 const NUTRITION_TARGET_TOKEN = new RegExp(`^${NUTRITION_TARGET}(?:yi|i|u|yu|e|a|den|dan)?$`);
 const PREPARATION_CONTEXT_TOKEN = new RegExp(String.raw`^${PREPARATION_CONTEXT}\w*$`);
+const TURKISH_TARGET_NEUTRAL_TOKEN = /^(?:bir|iki|uc|dort|bes|alti|yedi|sekiz|dokuz|on|az|cok|daha|biraz|her|gun|gunde|ogunde|bardak|adet|gram|ml|ile|yerine)$/;
 
 const SAFE_ENGLISH_ACTION_TARGET = /^(?:an?\s+)?(?:(?:more|less|some|the|your)\s+)?(?:food|meals?|breakfast|lunch|dinner|snacks?|water|salt|sugar|oil|olive oil|butter|vegetables?|fruit|bread|protein|carbs?|fiber|fibre|portions?|recipes?|ingredients?|heat|oven|pan|pot|mixture|batter|sauce)(?:\s+(?:daily|each day|every day|with meals?|with breakfast|with lunch|with dinner))?\s*$/;
 const ENGLISH_MANAGEMENT_VERB = "(?:take|use|stop|start|begin|continue|resume|skip|avoid|discontinue|quit|cease|switch|swap|replace|substitute|change|adjust|reduce|increase|decrease|raise|lower|hold|taper|double|halve|administer)";
@@ -98,11 +99,33 @@ function nearestTokenAfter(value: string): string | null {
   return value.trim().split(/\s+/).filter(Boolean)[0] ?? null;
 }
 
+function turkishCompoundTargetIsExplicitNutrition(value: string): boolean {
+  const tokens = value.trim().split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return false;
+  let hasExplicitNutritionOrPreparation = false;
+  for (const token of tokens) {
+    if (NUTRITION_TARGET_TOKEN.test(token) || PREPARATION_CONTEXT_TOKEN.test(token)) {
+      hasExplicitNutritionOrPreparation = true;
+      continue;
+    }
+    if (TURKISH_TARGET_NEUTRAL_TOKEN.test(token)) continue;
+    return false;
+  }
+  return hasExplicitNutritionOrPreparation;
+}
+
 function actionOccurrenceTargetsNutrition(clause: string, actionIndex: number, actionLength: number): boolean {
-  const before = clause.slice(0, actionIndex);
+  const before = clause.slice(0, actionIndex).trim();
   const after = clause.slice(actionIndex + actionLength);
   const previous = nearestTokenBefore(before);
-  if (previous !== null) return NUTRITION_TARGET_TOKEN.test(previous);
+  if (previous !== null) {
+    if (!NUTRITION_TARGET_TOKEN.test(previous)) return false;
+    // Turkish comitative/replacement connectors bind multiple targets to one action. In that
+    // case the complete target phrase must be explicit nutrition/preparation context; a nearby
+    // safe token cannot mask an unknown treatment target (for example "ibuprofen ile suyu al").
+    if (/\b(?:ile|yerine)\b/.test(before)) return turkishCompoundTargetIsExplicitNutrition(before);
+    return true;
+  }
   const next = nearestTokenAfter(after);
   return next !== null && NUTRITION_TARGET_TOKEN.test(next);
 }
@@ -217,7 +240,12 @@ export function findDietaryExclusionConflicts(candidates: ResolvedFoodDietarySaf
     else blockedRules.add(id);
   }
   for (const candidate of candidates) {
-    if (blockedFoods.has(candidate.foodId)) conflicts.add(candidate.foodName);
+    const canonicalFoodId = candidate.foodId.trim();
+    if (canonicalFoodId.length === 0) {
+      conflicts.add(`${candidate.foodName} (food identifier unresolved)`);
+    } else if (blockedFoods.has(canonicalFoodId)) {
+      conflicts.add(candidate.foodName);
+    }
     if (blockedRules.size === 0) continue;
     if (candidate.dietarySafetyDataStatus !== "verified") {
       conflicts.add(`${candidate.foodName} (dietary safety data unresolved)`);
