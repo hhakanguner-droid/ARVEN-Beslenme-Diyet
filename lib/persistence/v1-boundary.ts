@@ -120,40 +120,57 @@ function assertSameImmutableProposal(stored:StoredProposal,candidate:StoredPropo
   if(stored.actionType!==candidate.actionType||stored.schemaVersion!==candidate.schemaVersion||stored.payloadSha256!==candidate.payloadSha256||stored.payloadJson!==candidate.payloadJson)throw new Error("Idempotency key is already bound to a different immutable proposal");
   return stored;
 }
+async function readAppliedOutcomeEvent(tx:V1Transaction,subject:string,actionId:string):Promise<StoredNutritionEvent|null>{
+  const outcome=await tx.getOutcome(subject,actionId);
+  if(!outcome)return null;
+  if(outcome.outcome==="failed")throw new Error("Failed AI action cannot later be applied");
+  if(!outcome.resultEventId)throw new Error("Applied outcome is missing its result event id");
+  const event=await tx.getNutritionEvent(subject,outcome.resultEventId);
+  if(!event)throw new Error("Applied outcome references a missing nutrition event");
+  if(event.eventType!==outcome.actionType)throw new Error("Applied outcome references the wrong nutrition event type");
+  return event;
+}
 
 export class V1MutationService{
   constructor(private readonly subject:string,private readonly runner:V1TransactionRunner,private readonly idFactory:IdFactory=()=>crypto.randomUUID(),private readonly clock:ServiceClock={now:()=>new Date()}){if(!subject.trim())throw new Error("Authenticated subject is required");}
   async createAiProposal(type:AiActionType,input:unknown,idempotencyKey:string):Promise<StoredProposal>{const key=idempotencyKey.trim();if(!key)throw new Error("idempotencyKey is required");const parsed=type==="meal-log"?MealLogActionV1.parse(input):WaterLogActionV1.parse(input);const payloadJson=canonicalJson(parsed);const hash=await sha256(payloadJson);const candidate:StoredProposal={id:this.idFactory(),userSubject:this.subject,actionType:type,schemaVersion:parsed.schemaVersion,payloadJson,payloadSha256:hash,idempotencyKey:key,createdAt:instant(this.clock.now())};return this.runner.transaction(async tx=>assertSameImmutableProposal(await tx.insertProposalIfAbsent(candidate),candidate));}
   async decideAiAction(actionId:string,decision:AiDecision):Promise<StoredDecision>{return this.runner.transaction(async tx=>{const p=await tx.getProposal(this.subject,actionId);if(!p)throw new Error("AI proposal not found in authenticated scope");const old=await tx.getDecision(this.subject,actionId);if(old){if(old.decision!==decision)throw new Error("AI decision is immutable once recorded");return old;}const d={actionId,userSubject:this.subject,decision,decidedAt:instant(this.clock.now())};await tx.insertDecision(d);return d;});}
   async applyConfirmedAiAction(actionId:string):Promise<StoredNutritionEvent>{
-    const result=await this.runner.transaction(async tx=>{
-      const old=await tx.getOutcome(this.subject,actionId);
-      if(old){if(old.outcome==="failed")throw new Error("Failed AI action cannot later be applied");if(!old.resultEventId)throw new Error("Applied outcome is missing its result event id");const event=await tx.getNutritionEvent(this.subject,old.resultEventId);if(!event)throw new Error("Applied outcome references a missing nutrition event");if(event.eventType!==old.actionType)throw new Error("Applied outcome references the wrong nutrition event type");return{kind:"applied" as const,event};}
-      const p=await tx.getProposal(this.subject,actionId);const d=await tx.getDecision(this.subject,actionId);if(!p||!d||d.decision!=="confirmed")throw new Error("Explicit confirmation is required before application");
-      const now=instant(this.clock.now());
-      try{
-        const c=await tx.getUserContext(this.subject);
-        let e:StoredNutritionEvent;
-        if(p.actionType==="water-log"){
-          let x:z.infer<typeof WaterLogActionV1>;try{x=WaterLogActionV1.parse(JSON.parse(p.payloadJson));}catch(error){rejectApplication("invalid-stored-payload",error);}
-          let localDate:string;try{localDate=deriveNutritionLocalDate(x.occurredAt,c.timezone,c.nutritionDayStartMinutes);}catch(error){rejectApplication("local-date-derivation-failed",error);}
-          e={id:this.idFactory(),userSubject:this.subject,eventType:"water-log",occurredAt:x.occurredAt,localDate,payloadJson:canonicalJson({schemaVersion:"WaterEventV1",milliliters:x.milliliters}),createdAt:now};
-        }else{
-          let x:z.infer<typeof MealLogActionV1>;try{x=MealLogActionV1.parse(JSON.parse(p.payloadJson));}catch(error){rejectApplication("invalid-stored-payload",error);}
-          let localDate:string;try{localDate=deriveNutritionLocalDate(x.occurredAt,c.timezone,c.nutritionDayStartMinutes);}catch(error){rejectApplication("local-date-derivation-failed",error);}
-          const payload=await mealPayload(tx,this.subject,x.mealType,x.items);
-          e={id:this.idFactory(),userSubject:this.subject,eventType:"meal-log",occurredAt:x.occurredAt,localDate,payloadJson:canonicalJson(payload),createdAt:now};
+    let result:{kind:"applied";event:StoredNutritionEvent}|{kind:"failed";outcome:StoredOutcome;message:string};
+    try{
+      result=await this.runner.transaction(async tx=>{
+        const oldEvent=await readAppliedOutcomeEvent(tx,this.subject,actionId);
+        if(oldEvent)return{kind:"applied" as const,event:oldEvent};
+        const p=await tx.getProposal(this.subject,actionId);const d=await tx.getDecision(this.subject,actionId);if(!p||!d||d.decision!=="confirmed")throw new Error("Explicit confirmation is required before application");
+        const now=instant(this.clock.now());
+        try{
+          const c=await tx.getUserContext(this.subject);
+          let e:StoredNutritionEvent;
+          if(p.actionType==="water-log"){
+            let x:z.infer<typeof WaterLogActionV1>;try{x=WaterLogActionV1.parse(JSON.parse(p.payloadJson));}catch(error){rejectApplication("invalid-stored-payload",error);}
+            let localDate:string;try{localDate=deriveNutritionLocalDate(x.occurredAt,c.timezone,c.nutritionDayStartMinutes);}catch(error){rejectApplication("local-date-derivation-failed",error);}
+            e={id:this.idFactory(),userSubject:this.subject,eventType:"water-log",occurredAt:x.occurredAt,localDate,payloadJson:canonicalJson({schemaVersion:"WaterEventV1",milliliters:x.milliliters}),createdAt:now};
+          }else{
+            let x:z.infer<typeof MealLogActionV1>;try{x=MealLogActionV1.parse(JSON.parse(p.payloadJson));}catch(error){rejectApplication("invalid-stored-payload",error);}
+            let localDate:string;try{localDate=deriveNutritionLocalDate(x.occurredAt,c.timezone,c.nutritionDayStartMinutes);}catch(error){rejectApplication("local-date-derivation-failed",error);}
+            const payload=await mealPayload(tx,this.subject,x.mealType,x.items);
+            e={id:this.idFactory(),userSubject:this.subject,eventType:"meal-log",occurredAt:x.occurredAt,localDate,payloadJson:canonicalJson(payload),createdAt:now};
+          }
+          await tx.insertNutritionEvent(e);
+          await tx.insertOutcome({actionId:p.id,userSubject:this.subject,actionType:p.actionType,confirmationMarker:"confirmed",outcome:"applied",resultEventId:e.id,failureCode:null,recordedAt:now});
+          return{kind:"applied" as const,event:e};
+        }catch(error){
+          if(!(error instanceof ApplicationRejectedError))throw error;
+          const outcome:StoredOutcome={actionId:p.id,userSubject:this.subject,actionType:p.actionType,confirmationMarker:"confirmed",outcome:"failed",resultEventId:null,failureCode:error.code,recordedAt:now};
+          await tx.insertOutcome(outcome);
+          return{kind:"failed" as const,outcome,message:error.message};
         }
-        await tx.insertNutritionEvent(e);
-        await tx.insertOutcome({actionId:p.id,userSubject:this.subject,actionType:p.actionType,confirmationMarker:"confirmed",outcome:"applied",resultEventId:e.id,failureCode:null,recordedAt:now});
-        return{kind:"applied" as const,event:e};
-      }catch(error){
-        if(!(error instanceof ApplicationRejectedError))throw error;
-        const outcome:StoredOutcome={actionId:p.id,userSubject:this.subject,actionType:p.actionType,confirmationMarker:"confirmed",outcome:"failed",resultEventId:null,failureCode:error.code,recordedAt:now};
-        await tx.insertOutcome(outcome);
-        return{kind:"failed" as const,outcome,message:error.message};
-      }
-    });
+      });
+    }catch(error){
+      const winner=await this.runner.transaction(async tx=>readAppliedOutcomeEvent(tx,this.subject,actionId));
+      if(winner)return winner;
+      throw error;
+    }
     if(result.kind==="failed")throw new Error(`AI action application failed permanently (${result.outcome.failureCode}): ${result.message}`);
     return result.event;
   }
