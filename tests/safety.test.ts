@@ -37,10 +37,13 @@ test("AI medication or treatment management is blocked without a medication regi
     "Bunu ilacın yerine kullanmamalısın.", "Bu ilacı kullanman gerekiyor.",
     "Stop taking your medication.", "Reduce your dose.", "Start insulin.", "Take metformin every day.",
     "Stop taking ibuprofen.", "Start taking naproxen.", "Resume using atorvastatin.",
+    "Take ibuprofen every day.", "Take naproxen.", "Use ibuprofen every day.",
+    "Stop using olive oil and ibuprofen.", "Take water and ibuprofen every day.",
   ];
   for (const message of unsafe) assert.throws(() => assertNoMedicalOverreach(message), /non-diagnostic/, message);
   assert.doesNotThrow(() => assertNoMedicalOverreach("Bu sonuçları bir sağlık profesyoneliyle değerlendirmen uygun olur."));
   assert.doesNotThrow(() => assertNoMedicalOverreach("Stop using olive oil."));
+  assert.doesNotThrow(() => assertNoMedicalOverreach("Take water every day."));
 });
 
 test("ordinary nutrition commands are not mistaken for medication management", () => {
