@@ -18,6 +18,7 @@ const NUMBER_WORDS = new Set([
   "eleventh", "twelfth", "thirteenth", "fourteenth", "fifteenth", "sixteenth", "seventeenth", "eighteenth", "nineteenth",
   "twentieth", "thirtieth", "fortieth", "fiftieth", "sixtieth", "seventieth", "eightieth", "ninetieth",
   "hundredth", "thousandth", "millionth", "billionth",
+  "dozen", "dozens", "score", "scores", "pair", "pairs", "couple", "both", "single", "double", "triple", "quadruple", "gross",
 ]);
 const TURKISH_NUMBER_SUFFIXES = new Set([
   "i", "u", "a", "e", "si", "su", "in", "un", "nin", "nun", "ini", "unu", "sini", "sunu", "ina", "ine",
