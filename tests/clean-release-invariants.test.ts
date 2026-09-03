@@ -85,8 +85,7 @@ class SafetyRaceTx implements V1Transaction {
   async getActiveDietaryExclusions(): Promise<DietarySafetyExclusion[]>{ return []; }
   async insertNutritionEvent(event: StoredNutritionEvent){ this.events.set(event.id,event); }
   async getProposal(): Promise<StoredProposal|null>{ return null; }
-  async getProposalByIdempotencyKey(): Promise<StoredProposal|null>{ return null; }
-  async insertProposal(_v:StoredProposal){ throw new Error("unused"); }
+  async insertProposalIfAbsent(v:StoredProposal){ return v; }
   async getDecision(): Promise<StoredDecision|null>{ return null; }
   async insertDecision(_v:StoredDecision){ throw new Error("unused"); }
   async getOutcome(): Promise<StoredOutcome|null>{ return null; }
@@ -95,6 +94,7 @@ class SafetyRaceTx implements V1Transaction {
   async getScientificReferenceSnapshots(): Promise<ScientificReferenceSnapshot[]>{ return []; }
   async insertGoalVersion(_g:StoredGoalVersion){ throw new Error("unused"); }
   async setCurrentGoal(){ throw new Error("unused"); }
+  async purgeAuthenticatedUser(){ throw new Error("unused"); }
 }
 class SafetyRaceRunner implements V1TransactionRunner {
   constructor(readonly tx = new SafetyRaceTx()) {}
