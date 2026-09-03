@@ -12,7 +12,7 @@ const NUMBER_WORDS = new Set([
   "kirk", "elli", "altmis", "yetmis", "seksen", "doksan", "yuz", "bin", "milyon", "milyar", "trilyon",
   "yarim", "bucuk", "ceyrek", "yuzde", "zero", "one", "two", "three", "four", "five", "six", "seven", "eight",
   "nine", "ten", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety", "hundred",
-  "thousand", "million", "billion", "half", "quarter", "percent",
+  "thousand", "million", "billion", "half", "quarter", "percent", "once", "twice", "thrice",
 ]);
 const TURKISH_NUMBER_SUFFIXES = new Set([
   "i", "u", "a", "e", "si", "su", "in", "un", "nin", "nun", "ini", "unu", "sini", "sunu", "ina", "ine",
