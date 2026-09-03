@@ -36,9 +36,11 @@ test("AI medication or treatment management is blocked without a medication regi
     "Warfarini kullan sebzeyi azalt.",
     "Bunu ilacın yerine kullanmamalısın.", "Bu ilacı kullanman gerekiyor.",
     "Stop taking your medication.", "Reduce your dose.", "Start insulin.", "Take metformin every day.",
+    "Stop taking ibuprofen.", "Start taking naproxen.", "Resume using atorvastatin.",
   ];
   for (const message of unsafe) assert.throws(() => assertNoMedicalOverreach(message), /non-diagnostic/, message);
   assert.doesNotThrow(() => assertNoMedicalOverreach("Bu sonuçları bir sağlık profesyoneliyle değerlendirmen uygun olur."));
+  assert.doesNotThrow(() => assertNoMedicalOverreach("Stop using olive oil."));
 });
 
 test("ordinary nutrition commands are not mistaken for medication management", () => {
@@ -71,6 +73,9 @@ test("English diagnostic assertions fail closed at the same AI health boundary",
     "Sounds like celiac disease.",
     "These symptoms indicate celiac disease.",
     "Your results suggest cancer.",
+    "Your condition is diabetes.",
+    "Their diagnosis is lupus.",
+    "Her illness might be kidney disease.",
     "The diagnosis is Parkinson's disease.",
     "You have a balanced meal plan because you may have lupus.",
     "You have a healthy routine and you might be diabetic.",
