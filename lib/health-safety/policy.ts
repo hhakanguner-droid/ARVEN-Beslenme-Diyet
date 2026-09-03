@@ -115,13 +115,12 @@ function actionOccurrenceIsPreparation(clause: string, actionIndex: number, acti
 }
 
 function clauseContainsUnsafeTreatmentDirective(clause: string): boolean {
-  const hasMedicalContext = MEDICAL_MANAGEMENT_CONTEXT.some((term) => clause.includes(term));
   TREATMENT_ACTION_GLOBAL.lastIndex = 0;
   for (const match of clause.matchAll(TREATMENT_ACTION_GLOBAL)) {
     const index = match.index ?? 0;
     if (actionOccurrenceTargetsNutrition(clause, index, match[0].length)) continue;
-    if (!hasMedicalContext && actionOccurrenceIsPreparation(clause, index, match[0].length)) continue;
-    if (hasMedicalContext || /\b(?:gerekiyor|gerekli|onerilir|oneriyorum|tavsiye|her gun|sabah|aksam)\b/.test(clause)) return true;
+    if (actionOccurrenceIsPreparation(clause, index, match[0].length)) continue;
+    return true;
   }
   return false;
 }
