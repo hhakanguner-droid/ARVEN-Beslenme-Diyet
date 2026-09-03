@@ -39,8 +39,13 @@ export type VersionedFood=Food & {foodKey:string};
 export interface V1Transaction {
   getUserContext(userSubject:string):Promise<AuthenticatedUserContext>;
   getProposal(userSubject:string,actionId:string):Promise<StoredProposal|null>;
-  getProposalByIdempotencyKey(userSubject:string,key:string):Promise<StoredProposal|null>;
-  insertProposal(proposal:StoredProposal):Promise<void>;
+  /**
+   * Atomically bind (userSubject,idempotencyKey) to one immutable proposal.
+   * The adapter must use insert-on-conflict/read semantics and return either the
+   * inserted proposal or the already-bound proposal; it must never surface a
+   * normal uniqueness race to the service.
+   */
+  insertProposalIfAbsent(proposal:StoredProposal):Promise<StoredProposal>;
   getDecision(userSubject:string,actionId:string):Promise<StoredDecision|null>;
   insertDecision(decision:StoredDecision):Promise<void>;
   getOutcome(userSubject:string,actionId:string):Promise<StoredOutcome|null>;
@@ -107,10 +112,15 @@ async function mealPayload(tx:V1Transaction,subject:string,mealType:z.infer<type
   return{schemaVersion:"MealEventV1",mealType,items:snapshots};
 }
 function canonicalReferenceIds(ids:string[]):string[]{const result=ids.map(id=>id.trim());if(result.length===0||result.some(id=>!id))throw new Error("At least one scientific reference is required");if(new Set(result).size!==result.length)throw new Error("Scientific reference ids must be unique");return result;}
+function assertSameImmutableProposal(stored:StoredProposal,candidate:StoredProposal):StoredProposal{
+  if(stored.userSubject!==candidate.userSubject||stored.idempotencyKey!==candidate.idempotencyKey)throw new Error("Persistence returned a proposal outside the authenticated idempotency scope");
+  if(stored.actionType!==candidate.actionType||stored.schemaVersion!==candidate.schemaVersion||stored.payloadSha256!==candidate.payloadSha256||stored.payloadJson!==candidate.payloadJson)throw new Error("Idempotency key is already bound to a different immutable proposal");
+  return stored;
+}
 
 export class V1MutationService{
   constructor(private readonly subject:string,private readonly runner:V1TransactionRunner,private readonly idFactory:IdFactory=()=>crypto.randomUUID(),private readonly clock:ServiceClock={now:()=>new Date()}){if(!subject.trim())throw new Error("Authenticated subject is required");}
-  async createAiProposal(type:AiActionType,input:unknown,idempotencyKey:string):Promise<StoredProposal>{const key=idempotencyKey.trim();if(!key)throw new Error("idempotencyKey is required");const parsed=type==="meal-log"?MealLogActionV1.parse(input):WaterLogActionV1.parse(input);const payloadJson=canonicalJson(parsed);const hash=await sha256(payloadJson);return this.runner.transaction(async tx=>{const old=await tx.getProposalByIdempotencyKey(this.subject,key);if(old){if(old.actionType!==type||old.payloadSha256!==hash)throw new Error("Idempotency key is already bound to a different immutable proposal");return old;}const p:StoredProposal={id:this.idFactory(),userSubject:this.subject,actionType:type,schemaVersion:parsed.schemaVersion,payloadJson,payloadSha256:hash,idempotencyKey:key,createdAt:instant(this.clock.now())};await tx.insertProposal(p);return p;});}
+  async createAiProposal(type:AiActionType,input:unknown,idempotencyKey:string):Promise<StoredProposal>{const key=idempotencyKey.trim();if(!key)throw new Error("idempotencyKey is required");const parsed=type==="meal-log"?MealLogActionV1.parse(input):WaterLogActionV1.parse(input);const payloadJson=canonicalJson(parsed);const hash=await sha256(payloadJson);const candidate:StoredProposal={id:this.idFactory(),userSubject:this.subject,actionType:type,schemaVersion:parsed.schemaVersion,payloadJson,payloadSha256:hash,idempotencyKey:key,createdAt:instant(this.clock.now())};return this.runner.transaction(async tx=>assertSameImmutableProposal(await tx.insertProposalIfAbsent(candidate),candidate));}
   async decideAiAction(actionId:string,decision:AiDecision):Promise<StoredDecision>{return this.runner.transaction(async tx=>{const p=await tx.getProposal(this.subject,actionId);if(!p)throw new Error("AI proposal not found in authenticated scope");const old=await tx.getDecision(this.subject,actionId);if(old){if(old.decision!==decision)throw new Error("AI decision is immutable once recorded");return old;}const d={actionId,userSubject:this.subject,decision,decidedAt:instant(this.clock.now())};await tx.insertDecision(d);return d;});}
   async applyConfirmedAiAction(actionId:string):Promise<StoredNutritionEvent>{
     const result=await this.runner.transaction(async tx=>{
