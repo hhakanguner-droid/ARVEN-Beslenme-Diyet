@@ -101,6 +101,9 @@ test("insertNutritionEventWithOutcome writes both rows atomically", async () => 
   const db = freshDatabase();
   insertUser(db, "u1");
   const tx = new DurableObjectV1Transaction(wrapDatabase(db), emptyCatalog);
+  // The outcome's FK requires an existing confirmed proposal+decision, exactly like the real mutation flow.
+  await tx.insertProposalIfAbsent({ id: "a1", userSubject: "u1", actionType: "water-log", schemaVersion: "WaterLogActionV1", payloadJson: "{}", payloadSha256: "a".repeat(64), idempotencyKey: "k1", createdAt: "2026-09-04T00:00:00.000Z" });
+  await tx.insertDecision({ actionId: "a1", userSubject: "u1", decision: "confirmed", decidedAt: "2026-09-04T00:00:00.000Z" });
   const event: StoredNutritionEvent = { id: "e1", userSubject: "u1", eventType: "water-log", occurredAt: "2026-09-04T00:00:00.000Z", localDate: "2026-09-04", payloadJson: "{}", createdAt: "2026-09-04T00:00:00.000Z" };
   const outcome: StoredOutcome = { actionId: "a1", userSubject: "u1", actionType: "water-log", confirmationMarker: "confirmed", outcome: "applied", resultEventId: "e1", failureCode: null, recordedAt: "2026-09-04T00:00:00.000Z" };
   await tx.insertNutritionEventWithOutcome(event, outcome);
@@ -112,7 +115,7 @@ test("insertGoalVersionAndSetCurrent writes and selects the goal atomically", as
   const db = freshDatabase();
   insertUser(db, "u1");
   const tx = new DurableObjectV1Transaction(wrapDatabase(db), emptyCatalog);
-  const goal: StoredGoalVersion = { id: "g1", userSubject: "u1", source: "arven-calculated", calculatorId: "mifflin-st-jeor@v1", calculatorInputsJson: "{}", referenceSnapshotsJson: "[]", energyKcal: 2000, proteinG: 120, carbsG: 200, fatG: 70, fiberG: 28, waterMl: 2500, mealAllocationsJson: "[]", createdAt: "2026-09-04T00:00:00.000Z" };
+  const goal: StoredGoalVersion = { id: "g1", userSubject: "u1", source: "arven-calculated", calculatorId: "mifflin-st-jeor@v1", calculatorInputsJson: "{}", referenceSnapshotsJson: '[{"id":"ref-1","title":"Ref","citation":"Citation"}]', energyKcal: 2000, proteinG: 120, carbsG: 200, fatG: 70, fiberG: 28, waterMl: 2500, mealAllocationsJson: "[]", createdAt: "2026-09-04T00:00:00.000Z" };
   await tx.insertGoalVersionAndSetCurrent(goal, "2026-09-04T00:00:00.000Z");
   const current = db.prepare("SELECT goal_version_id FROM user_current_goal WHERE user_subject=?").get("u1") as { goal_version_id: string } | undefined;
   assert.equal(current?.goal_version_id, "g1");
@@ -134,7 +137,7 @@ test("purgeAuthenticatedUser removes every row for that subject across all owned
   const event: StoredNutritionEvent = { id: "e1", userSubject: "u1", eventType: "water-log", occurredAt: "2026-09-04T00:00:00.000Z", localDate: "2026-09-04", payloadJson: "{}", createdAt: "2026-09-04T00:00:00.000Z" };
   await tx1.insertNutritionEventWithOutcome(event, { actionId: "p1", userSubject: "u1", actionType: "water-log", confirmationMarker: "confirmed", outcome: "applied", resultEventId: "e1", failureCode: null, recordedAt: "2026-09-04T00:00:00.000Z" });
 
-  const goal: StoredGoalVersion = { id: "g1", userSubject: "u1", source: "arven-calculated", calculatorId: "mifflin-st-jeor@v1", calculatorInputsJson: "{}", referenceSnapshotsJson: "[]", energyKcal: 2000, proteinG: 120, carbsG: 200, fatG: 70, fiberG: 28, waterMl: 2500, mealAllocationsJson: "[]", createdAt: "2026-09-04T00:00:00.000Z" };
+  const goal: StoredGoalVersion = { id: "g1", userSubject: "u1", source: "arven-calculated", calculatorId: "mifflin-st-jeor@v1", calculatorInputsJson: "{}", referenceSnapshotsJson: '[{"id":"ref-1","title":"Ref","citation":"Citation"}]', energyKcal: 2000, proteinG: 120, carbsG: 200, fatG: 70, fiberG: 28, waterMl: 2500, mealAllocationsJson: "[]", createdAt: "2026-09-04T00:00:00.000Z" };
   await tx1.insertGoalVersionAndSetCurrent(goal, "2026-09-04T00:00:00.000Z");
   await tx1.insertAssessmentSnapshot({ id: "as1", userSubject: "u1", completedAt: "2026-09-04T00:00:00.000Z", payloadJson: "{\"answers\":{\"x\":1}}", createdAt: "2026-09-04T00:00:00.000Z" });
   await tx1.insertSafetyAcknowledgement({ id: "ack1", userSubject: "u1", acknowledgementType: "non-diagnostic-health-boundary", policyVersion: "v1", acknowledgedAt: "2026-09-04T00:00:00.000Z", createdAt: "2026-09-04T00:00:00.000Z" });
