@@ -47,12 +47,14 @@ class Tx implements V1Transaction {
   async insertOutcome(v:StoredOutcome){ this.outcomes.set(v.actionId,v); if(this.failAfterOutcomeInsert){ this.failAfterOutcomeInsert=false; throw new Error("simulated uniqueness race"); } }
   async getNutritionEvent(s:string,id:string){ const v=this.events.get(id); return v?.userSubject===s?v:null; }
   async insertNutritionEvent(v:StoredNutritionEvent){ this.events.set(v.id,v); }
+  async insertNutritionEventWithOutcome(e:StoredNutritionEvent,o:StoredOutcome){ this.events.set(e.id,e); await this.insertOutcome(o); }
   async getFoodVersion(_s:string,_id:string):Promise<VersionedFood|null>{ return null; }
   async getActiveAllergenExclusions():Promise<AllergenSafetyExclusion[]>{ return []; }
   async getActiveDietaryExclusions():Promise<DietarySafetyExclusion[]>{ return []; }
   async getScientificReferenceSnapshots(_ids:string[]):Promise<ScientificReferenceSnapshot[]>{ return []; }
   async insertGoalVersion(_goal:StoredGoalVersion):Promise<void>{}
   async setCurrentGoal(_s:string,_id:string,_at:string):Promise<void>{}
+  async insertGoalVersionAndSetCurrent(_goal:StoredGoalVersion,_selectedAt:string):Promise<void>{}
   async purgeAuthenticatedUser(_s:string):Promise<void>{}
 }
 class Runner implements V1TransactionRunner { constructor(readonly tx=new Tx()){} async transaction<T>(work:(tx:V1Transaction)=>Promise<T>){ return work(this.tx); } }

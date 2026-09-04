@@ -87,6 +87,7 @@ class SafetyRaceTx implements V1Transaction {
   async getActiveAllergenExclusions(){ return this.allergens; }
   async getActiveDietaryExclusions(): Promise<DietarySafetyExclusion[]>{ return []; }
   async insertNutritionEvent(event: StoredNutritionEvent){ this.events.set(event.id,event); }
+  async insertNutritionEventWithOutcome(_e:StoredNutritionEvent,_o:StoredOutcome){ throw new Error("unused"); }
   async getProposal(): Promise<StoredProposal|null>{ return null; }
   async insertProposalIfAbsent(v:StoredProposal){ return v; }
   async getDecision(): Promise<StoredDecision|null>{ return null; }
@@ -97,6 +98,7 @@ class SafetyRaceTx implements V1Transaction {
   async getScientificReferenceSnapshots(): Promise<ScientificReferenceSnapshot[]>{ return []; }
   async insertGoalVersion(_g:StoredGoalVersion){ throw new Error("unused"); }
   async setCurrentGoal(){ throw new Error("unused"); }
+  async insertGoalVersionAndSetCurrent(_g:StoredGoalVersion,_selectedAt:string){ throw new Error("unused"); }
   async purgeAuthenticatedUser(){ throw new Error("unused"); }
   async getOrCreateUser(): Promise<AuthenticatedUserContext>{ throw new Error("unused"); }
   async getProfile(): Promise<StoredProfile|null>{ return null; }
