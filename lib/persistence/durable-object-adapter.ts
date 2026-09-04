@@ -343,6 +343,15 @@ export class DurableObjectV1Transaction implements V1Transaction {
    * this user owns, `owner_subject`) live in the shared D1 catalog, not here
    * — purging those is D1-side write tooling, explicitly out of scope for
    * this adapter (see plan's "explicitly deferred" section).
+   *
+   * Known follow-up: `food_versions.owner_subject` currently declares
+   * `REFERENCES users(subject) ON DELETE CASCADE` in the shared migration
+   * files. That's only enforceable while both tables sit in one SQLite
+   * connection (as in this adapter's tests); once D1 and a per-user Durable
+   * Object are genuinely separate database instances, SQLite cannot enforce
+   * a foreign key across them at all. Whoever splits the migrations for the
+   * real D1/DO topology needs to revisit that constraint (drop it, or track
+   * ownership without a DB-level FK) — not addressed here.
    */
   async purgeAuthenticatedUser(userSubject: string): Promise<void> {
     this.sql.transactionSync(() => {
