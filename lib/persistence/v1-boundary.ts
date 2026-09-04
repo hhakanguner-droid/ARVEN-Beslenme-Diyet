@@ -5,7 +5,7 @@ import { assertNoAllergyConflict, assertNoDietaryExclusionConflict, type Allerge
 import { scaleNutritionForStorage } from "@/lib/nutrition/calculations";
 import { resolvePortionSelection } from "@/lib/nutrition/portions";
 import type { Food, NutritionFacts, PortionSelection } from "@/lib/nutrition/types";
-import { assertCanonicalUtcInstant, previousLocalDate } from "@/lib/time/canonical";
+import { assertCanonicalLocalDate, assertCanonicalUtcInstant, previousLocalDate } from "@/lib/time/canonical";
 
 export const NUTRITION_CALCULATION_VERSION = "nutrition-v1" as const;
 const Id = z.string().trim().min(1).max(200);
@@ -25,6 +25,34 @@ export const MealLogActionV1 = z.object({ schemaVersion:z.literal("MealLogAction
 export const WaterLogActionV1 = z.object({ schemaVersion:z.literal("WaterLogActionV1"), occurredAt:CanonicalInstant, milliliters:z.number().finite().min(1).max(10000) }).strict();
 const ManualMealItem = MealItemBase.extend({ selection:z.union([HouseholdSelection,CustomGramSelection]) }).strict();
 
+const CanonicalLocalDate = z.string().superRefine((value, ctx) => {
+  try { assertCanonicalLocalDate(value, "birthDate"); }
+  catch (error) { ctx.addIssue({ code: "custom", message: error instanceof Error ? error.message : "Invalid local date" }); }
+});
+const SexAtBirth = z.enum(["male","female"]);
+const ActivityLevel = z.enum(["sedentary","light","moderate","active","very-active"]);
+export const ProfileUpsertV1 = z.object({
+  schemaVersion:z.literal("ProfileUpsertV1"),
+  displayName:z.string().trim().min(1).max(120).nullable(),
+  birthDate:CanonicalLocalDate.nullable(),
+  sexAtBirth:SexAtBirth.nullable(),
+  heightCm:z.number().finite().min(100).max(260).nullable(),
+  activityLevel:ActivityLevel.nullable(),
+}).strict();
+
+const AssessmentAnswerValue = z.union([z.number().finite(),z.string(),z.boolean(),z.null()]);
+export const AssessmentSnapshotPayloadV1 = z.object({
+  schemaVersion:z.literal("AssessmentSnapshotPayloadV1"),
+  answers:z.record(z.string().trim().min(1),AssessmentAnswerValue).refine((a)=>Object.keys(a).length>0,"answers must include at least one entry"),
+}).strict();
+
+export const SAFETY_ACKNOWLEDGEMENT_TYPES=["non-diagnostic-health-boundary","data-processing-consent"] as const;
+export const SafetyAcknowledgementV1 = z.object({
+  schemaVersion:z.literal("SafetyAcknowledgementV1"),
+  acknowledgementType:z.enum(SAFETY_ACKNOWLEDGEMENT_TYPES),
+  policyVersion:z.string().trim().min(1).max(40),
+}).strict();
+
 export type AiActionType="meal-log"|"water-log";
 export type AiDecision="confirmed"|"rejected";
 export type StoredProposal={id:string;userSubject:string;actionType:AiActionType;schemaVersion:"MealLogActionV1"|"WaterLogActionV1";payloadJson:string;payloadSha256:string;idempotencyKey:string;createdAt:string};
@@ -35,9 +63,20 @@ export type ScientificReferenceSnapshot={id:string;title:string;citation:string;
 export type StoredGoalVersion={id:string;userSubject:string;source:"arven-calculated";calculatorId:"mifflin-st-jeor@v1";calculatorInputsJson:string;referenceSnapshotsJson:string;energyKcal:number;proteinG:number;carbsG:number;fatG:number;fiberG:number;waterMl:number;mealAllocationsJson:string;createdAt:string};
 export type AuthenticatedUserContext={timezone:string;nutritionDayStartMinutes:number};
 export type VersionedFood=Food & {foodKey:string};
+export type StoredProfile={userSubject:string;displayName:string|null;birthDate:string|null;sexAtBirth:"male"|"female"|null;heightCm:number|null;activityLevel:"sedentary"|"light"|"moderate"|"active"|"very-active"|null;updatedAt:string};
+export type StoredAssessmentSnapshot={id:string;userSubject:string;completedAt:string;payloadJson:string;createdAt:string};
+export type StoredSafetyAcknowledgement={id:string;userSubject:string;acknowledgementType:typeof SAFETY_ACKNOWLEDGEMENT_TYPES[number];policyVersion:string;acknowledgedAt:string;createdAt:string};
 
 export interface V1Transaction {
   getUserContext(userSubject:string):Promise<AuthenticatedUserContext>;
+  /** Lazily binds the authenticated subject to its `users` row on first request; idempotent. */
+  getOrCreateUser(userSubject:string,defaults:{timezone:string;locale:string}):Promise<AuthenticatedUserContext>;
+  getProfile(userSubject:string):Promise<StoredProfile|null>;
+  upsertProfile(profile:StoredProfile):Promise<void>;
+  insertAssessmentSnapshot(snapshot:StoredAssessmentSnapshot):Promise<void>;
+  getAssessmentSnapshots(userSubject:string):Promise<StoredAssessmentSnapshot[]>;
+  insertSafetyAcknowledgement(acknowledgement:StoredSafetyAcknowledgement):Promise<void>;
+  getSafetyAcknowledgements(userSubject:string):Promise<StoredSafetyAcknowledgement[]>;
   getProposal(userSubject:string,actionId:string):Promise<StoredProposal|null>;
   /**
    * Atomically bind (userSubject,idempotencyKey) to one immutable proposal.
@@ -229,4 +268,8 @@ export class V1MutationService{
   async appendManualMeal(input:{occurredAt:string;mealType:z.infer<typeof MealType>;items:unknown[]}):Promise<StoredNutritionEvent>{const x=z.object({occurredAt:CanonicalInstant,mealType:MealType,items:z.array(ManualMealItem).min(1).max(40)}).strict().parse(input);return this.runner.transaction(async tx=>{const c=await tx.getUserContext(this.subject);let localDate:string;try{localDate=deriveNutritionLocalDate(x.occurredAt,c.timezone,c.nutritionDayStartMinutes);}catch(error){rejectApplication("local-date-derivation-failed",error);}const payload=await mealPayload(tx,this.subject,x.mealType,x.items);const e={id:this.idFactory(),userSubject:this.subject,eventType:"meal-log" as const,occurredAt:x.occurredAt,localDate,payloadJson:canonicalJson(payload),createdAt:instant(this.clock.now())};await tx.insertNutritionEvent(e);return e;});}
   async createCalculatedGoalVersion(inputs:MifflinStJeorV1Inputs,referenceIds:string[],allocations:MealEnergyAllocation[]):Promise<StoredGoalVersion>{const inputSnapshot={...inputs};const allocationSnapshot=allocations.map((allocation)=>({...allocation}));assertMealEnergyAllocations(allocationSnapshot);const ids=canonicalReferenceIds(referenceIds);const targets=deriveCalculatedGoal({method:"mifflin-st-jeor",version:"v1",inputs:inputSnapshot,referenceIds:ids});return this.runner.transaction(async tx=>{const refs=await tx.getScientificReferenceSnapshots(ids);const byId=new Map(refs.map(ref=>[ref.id,ref]));if(byId.size!==ids.length||ids.some(id=>!byId.has(id)))throw new Error("Every scientific reference must resolve to a versioned snapshot");const ordered=ids.map(id=>byId.get(id)!);const now=instant(this.clock.now());const goal:StoredGoalVersion={id:this.idFactory(),userSubject:this.subject,source:"arven-calculated",calculatorId:"mifflin-st-jeor@v1",calculatorInputsJson:canonicalJson(inputSnapshot),referenceSnapshotsJson:canonicalJson(ordered),energyKcal:targets.energyKcal,proteinG:targets.proteinG,carbsG:targets.carbsG,fatG:targets.fatG,fiberG:targets.fiberG,waterMl:targets.waterMl,mealAllocationsJson:canonicalJson(allocationSnapshot),createdAt:now};await tx.insertGoalVersion(goal);await tx.setCurrentGoal(this.subject,goal.id,now);return goal;});}
   async deleteAccount():Promise<void>{await this.runner.transaction(async tx=>{await tx.purgeAuthenticatedUser(this.subject);});}
+  async getOrCreateAuthenticatedUser(defaults:{timezone:string;locale:string}):Promise<AuthenticatedUserContext>{return this.runner.transaction(async tx=>tx.getOrCreateUser(this.subject,defaults));}
+  async upsertProfile(input:unknown):Promise<StoredProfile>{const x=ProfileUpsertV1.parse(input);const profile:StoredProfile={userSubject:this.subject,displayName:x.displayName,birthDate:x.birthDate,sexAtBirth:x.sexAtBirth,heightCm:x.heightCm,activityLevel:x.activityLevel,updatedAt:instant(this.clock.now())};return this.runner.transaction(async tx=>{await tx.upsertProfile(profile);return profile;});}
+  async recordAssessmentSnapshot(input:unknown):Promise<StoredAssessmentSnapshot>{const x=AssessmentSnapshotPayloadV1.parse(input);const now=instant(this.clock.now());const snapshot:StoredAssessmentSnapshot={id:this.idFactory(),userSubject:this.subject,completedAt:now,payloadJson:canonicalJson(x),createdAt:now};return this.runner.transaction(async tx=>{await tx.insertAssessmentSnapshot(snapshot);return snapshot;});}
+  async recordSafetyAcknowledgement(input:unknown):Promise<StoredSafetyAcknowledgement>{const x=SafetyAcknowledgementV1.parse(input);const now=instant(this.clock.now());const acknowledgement:StoredSafetyAcknowledgement={id:this.idFactory(),userSubject:this.subject,acknowledgementType:x.acknowledgementType,policyVersion:x.policyVersion,acknowledgedAt:now,createdAt:now};return this.runner.transaction(async tx=>{await tx.insertSafetyAcknowledgement(acknowledgement);return acknowledgement;});}
 }

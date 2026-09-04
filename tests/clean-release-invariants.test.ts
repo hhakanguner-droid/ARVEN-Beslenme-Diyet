@@ -8,11 +8,14 @@ import {
   V1MutationService,
   type AuthenticatedUserContext,
   type ScientificReferenceSnapshot,
+  type StoredAssessmentSnapshot,
   type StoredDecision,
   type StoredGoalVersion,
   type StoredNutritionEvent,
   type StoredOutcome,
+  type StoredProfile,
   type StoredProposal,
+  type StoredSafetyAcknowledgement,
   type V1Transaction,
   type V1TransactionRunner,
   type VersionedFood,
@@ -95,6 +98,13 @@ class SafetyRaceTx implements V1Transaction {
   async insertGoalVersion(_g:StoredGoalVersion){ throw new Error("unused"); }
   async setCurrentGoal(){ throw new Error("unused"); }
   async purgeAuthenticatedUser(){ throw new Error("unused"); }
+  async getOrCreateUser(): Promise<AuthenticatedUserContext>{ throw new Error("unused"); }
+  async getProfile(): Promise<StoredProfile|null>{ return null; }
+  async upsertProfile(_p:StoredProfile){ throw new Error("unused"); }
+  async insertAssessmentSnapshot(_s:StoredAssessmentSnapshot){ throw new Error("unused"); }
+  async getAssessmentSnapshots(): Promise<StoredAssessmentSnapshot[]>{ return []; }
+  async insertSafetyAcknowledgement(_a:StoredSafetyAcknowledgement){ throw new Error("unused"); }
+  async getSafetyAcknowledgements(): Promise<StoredSafetyAcknowledgement[]>{ return []; }
 }
 class SafetyRaceRunner implements V1TransactionRunner {
   constructor(readonly tx = new SafetyRaceTx()) {}

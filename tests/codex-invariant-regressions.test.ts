@@ -5,11 +5,14 @@ import {
   V1MutationService,
   type AuthenticatedUserContext,
   type ScientificReferenceSnapshot,
+  type StoredAssessmentSnapshot,
   type StoredDecision,
   type StoredGoalVersion,
   type StoredNutritionEvent,
   type StoredOutcome,
+  type StoredProfile,
   type StoredProposal,
+  type StoredSafetyAcknowledgement,
   type V1Transaction,
   type V1TransactionRunner,
   type VersionedFood,
@@ -22,9 +25,20 @@ class Tx implements V1Transaction {
   decisions = new Map<string, StoredDecision>();
   outcomes = new Map<string, StoredOutcome>();
   events = new Map<string, StoredNutritionEvent>();
+  users = new Map<string, AuthenticatedUserContext>();
+  profiles = new Map<string, StoredProfile>();
+  assessments = new Map<string, StoredAssessmentSnapshot>();
+  acknowledgements = new Map<string, StoredSafetyAcknowledgement>();
   failAfterOutcomeInsert = false;
 
   async getUserContext(){ return this.context; }
+  async getOrCreateUser(subject:string,defaults:{timezone:string;locale:string}){ let u=this.users.get(subject); if(!u){ u={timezone:defaults.timezone,nutritionDayStartMinutes:0}; this.users.set(subject,u); } return u; }
+  async getProfile(subject:string){ return this.profiles.get(subject)??null; }
+  async upsertProfile(profile:StoredProfile){ this.profiles.set(profile.userSubject,profile); }
+  async insertAssessmentSnapshot(snapshot:StoredAssessmentSnapshot){ this.assessments.set(snapshot.id,snapshot); }
+  async getAssessmentSnapshots(subject:string){ return [...this.assessments.values()].filter(a=>a.userSubject===subject); }
+  async insertSafetyAcknowledgement(ack:StoredSafetyAcknowledgement){ this.acknowledgements.set(ack.id,ack); }
+  async getSafetyAcknowledgements(subject:string){ return [...this.acknowledgements.values()].filter(a=>a.userSubject===subject); }
   async getProposal(s:string,id:string){ const v=this.proposals.get(id); return v?.userSubject===s?v:null; }
   async insertProposalIfAbsent(v:StoredProposal){ const old=[...this.proposals.values()].find(p=>p.userSubject===v.userSubject&&p.idempotencyKey===v.idempotencyKey); if(old)return old; this.proposals.set(v.id,v); return v; }
   async getDecision(s:string,id:string){ const v=this.decisions.get(id); return v?.userSubject===s?v:null; }
