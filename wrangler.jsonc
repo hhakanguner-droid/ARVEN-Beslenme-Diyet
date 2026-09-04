@@ -1,0 +1,38 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "arven-beslenme-diyet",
+  // Points at the scaffolded worker entry, not a raw Next.js build output —
+  // real Next.js request handling still needs the `@opennextjs/cloudflare`
+  // adapter wired in as a separate follow-up (see custom-worker.ts).
+  "main": "custom-worker.ts",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  "d1_databases": [
+    {
+      "binding": "ARVEN_CATALOG_DB",
+      "database_name": "arven-beslenme-diyet",
+      "database_id": "3a5260d8-1f2a-41de-bfc3-695eab8466f1"
+    }
+  ],
+
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "USER_DO",
+        "class_name": "UserDurableObject"
+      }
+    ]
+  },
+
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["UserDurableObject"]
+    }
+  ],
+
+  "observability": {
+    "enabled": true
+  }
+}
