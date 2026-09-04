@@ -44,6 +44,7 @@ export const EXTERNAL_DATA_FLOWS: readonly ExternalDataFlow[] = [
     categories: ["food-search-term", "app-language"],
     consentMode: "required-for-feature",
     purpose: "Doğrulanabilir paketli gıda ve besin verisi aramak.",
+    policyUrl: "https://world.openfoodfacts.org/terms-of-use",
   },
   {
     id: "open-food-facts-barcode",
@@ -52,6 +53,7 @@ export const EXTERNAL_DATA_FLOWS: readonly ExternalDataFlow[] = [
     categories: ["barcode"],
     consentMode: "required-for-feature",
     purpose: "Barkoddan ürün kaydı bulmak.",
+    policyUrl: "https://world.openfoodfacts.org/terms-of-use",
   },
 ] as const;
 
