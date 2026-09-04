@@ -6,6 +6,7 @@ import type {
   StoredAssessmentSnapshot,
   StoredDecision,
   StoredGoalVersion,
+  StoredMealPlanVersion,
   StoredNutritionEvent,
   StoredOutcome,
   StoredProfile,
@@ -103,6 +104,27 @@ function mapAllergenExclusion(row: Record<string, unknown>): AllergenSafetyExclu
 }
 function mapDietaryExclusion(row: Record<string, unknown>): DietarySafetyExclusion {
   return { kind: asString(row.kind) as DietarySafetyExclusion["kind"], id: asNullableString(row.target_id), label: asString(row.label), resolutionStatus: asString(row.resolution_status) as DietarySafetyExclusion["resolutionStatus"] };
+}
+function mapGoalVersion(row: Record<string, unknown>): StoredGoalVersion {
+  return {
+    id: asString(row.id),
+    userSubject: asString(row.user_subject),
+    source: "arven-calculated",
+    calculatorId: "mifflin-st-jeor@v1",
+    calculatorInputsJson: asString(row.calculator_inputs_json ?? "{}"),
+    referenceSnapshotsJson: asString(row.reference_snapshots_json ?? "[]"),
+    energyKcal: asNumber(row.energy_kcal),
+    proteinG: asNumber(row.protein_g),
+    carbsG: asNumber(row.carbs_g),
+    fatG: asNumber(row.fat_g),
+    fiberG: asNumber(row.fiber_g),
+    waterMl: asNumber(row.water_ml),
+    mealAllocationsJson: asString(row.meal_allocations_json ?? "[]"),
+    createdAt: asString(row.created_at),
+  };
+}
+function mapMealPlanVersion(row: Record<string, unknown>): StoredMealPlanVersion {
+  return { id: asString(row.id), userSubject: asString(row.user_subject), slotsJson: asString(row.slots_json), createdAt: asString(row.created_at) };
 }
 function mapScientificReference(row: Record<string, unknown>): ScientificReferenceSnapshot {
   const snapshot: ScientificReferenceSnapshot = { id: asString(row.id), title: asString(row.title), citation: asString(row.citation) };
@@ -251,7 +273,12 @@ export class DurableObjectV1Transaction implements V1Transaction {
     );
     const food = foodRows[0];
     if (!food) return null;
-    const portionRows = await this.catalog("SELECT * FROM portion_versions WHERE food_version_id=?", [foodVersionId]);
+    return this.hydrateFoodVersion(food);
+  }
+
+  /** Shared row->VersionedFood hydration (fetches this food's portions from the catalog too). Used by every catalog read path. */
+  private async hydrateFoodVersion(food: Record<string, unknown>): Promise<VersionedFood> {
+    const portionRows = await this.catalog("SELECT * FROM portion_versions WHERE food_version_id=?", [asString(food.id)]);
     return {
       id: asString(food.id),
       foodKey: asString(food.food_key),
@@ -342,6 +369,61 @@ export class DurableObjectV1Transaction implements V1Transaction {
     });
   }
 
+  async getCurrentGoalVersion(userSubject: string): Promise<StoredGoalVersion | null> {
+    const row = this.sql.exec(
+      `SELECT g.* FROM user_current_goal c JOIN goal_versions g ON g.id = c.goal_version_id AND g.user_subject = c.user_subject WHERE c.user_subject=?`,
+      userSubject,
+    ).one();
+    return row ? mapGoalVersion(row) : null;
+  }
+
+  async listNutritionEventsForLocalDate(userSubject: string, localDate: string): Promise<StoredNutritionEvent[]> {
+    return this.sql.exec(
+      "SELECT * FROM nutrition_events WHERE user_subject=? AND local_date=? ORDER BY occurred_at",
+      userSubject, localDate,
+    ).toArray().map(mapNutritionEvent);
+  }
+
+  async searchFoodVersions(userSubject: string, query: string, limit: number): Promise<VersionedFood[]> {
+    const normalized = `%${query.trim().toLocaleLowerCase("tr-TR")}%`;
+    const rows = await this.catalog(
+      "SELECT * FROM food_versions WHERE (owner_subject IS NULL OR owner_subject=?) AND normalized_name LIKE ? ORDER BY name LIMIT ?",
+      [userSubject, normalized, limit],
+    );
+    return Promise.all(rows.map((row) => this.hydrateFoodVersion(row)));
+  }
+
+  async findFoodVersionByBarcode(userSubject: string, barcode: string): Promise<VersionedFood | null> {
+    const rows = await this.catalog(
+      "SELECT * FROM food_versions WHERE (owner_subject IS NULL OR owner_subject=?) AND barcode=? LIMIT 1",
+      [userSubject, barcode],
+    );
+    const row = rows[0];
+    return row ? this.hydrateFoodVersion(row) : null;
+  }
+
+  async insertMealPlanVersionAndSetCurrent(plan: StoredMealPlanVersion, selectedAt: string): Promise<void> {
+    this.sql.transactionSync(() => {
+      this.sql.exec(
+        "INSERT INTO meal_plan_versions (id, user_subject, slots_json, created_at) VALUES (?,?,?,?)",
+        plan.id, plan.userSubject, plan.slotsJson, plan.createdAt,
+      );
+      this.sql.exec(
+        `INSERT INTO user_current_meal_plan (user_subject, meal_plan_version_id, selected_at) VALUES (?,?,?)
+         ON CONFLICT(user_subject) DO UPDATE SET meal_plan_version_id=excluded.meal_plan_version_id, selected_at=excluded.selected_at`,
+        plan.userSubject, plan.id, selectedAt,
+      );
+    });
+  }
+
+  async getCurrentMealPlan(userSubject: string): Promise<StoredMealPlanVersion | null> {
+    const row = this.sql.exec(
+      `SELECT p.* FROM user_current_meal_plan c JOIN meal_plan_versions p ON p.id = c.meal_plan_version_id AND p.user_subject = c.user_subject WHERE c.user_subject=?`,
+      userSubject,
+    ).one();
+    return row ? mapMealPlanVersion(row) : null;
+  }
+
   /**
    * Ordered deletes respecting the schema's mixed CASCADE/RESTRICT foreign keys
    * — see db/migrations/*.sql. Only touches this user's own Durable Object
@@ -365,6 +447,8 @@ export class DurableObjectV1Transaction implements V1Transaction {
       this.sql.exec("DELETE FROM ai_action_decisions WHERE user_subject=?", userSubject);
       this.sql.exec("DELETE FROM ai_action_proposals WHERE user_subject=?", userSubject);
       this.sql.exec("DELETE FROM nutrition_events WHERE user_subject=?", userSubject);
+      this.sql.exec("DELETE FROM user_current_meal_plan WHERE user_subject=?", userSubject);
+      this.sql.exec("DELETE FROM meal_plan_versions WHERE user_subject=?", userSubject);
       this.sql.exec("DELETE FROM user_current_goal WHERE user_subject=?", userSubject);
       this.sql.exec("DELETE FROM goal_versions WHERE user_subject=?", userSubject);
       this.sql.exec("DELETE FROM user_safety_exclusions WHERE user_subject=?", userSubject);

@@ -107,6 +107,12 @@ class SafetyRaceTx implements V1Transaction {
   async getAssessmentSnapshots(): Promise<StoredAssessmentSnapshot[]>{ return []; }
   async insertSafetyAcknowledgement(_a:StoredSafetyAcknowledgement){ throw new Error("unused"); }
   async getSafetyAcknowledgements(): Promise<StoredSafetyAcknowledgement[]>{ return []; }
+  async getCurrentGoalVersion(): Promise<StoredGoalVersion|null>{ return null; }
+  async listNutritionEventsForLocalDate(): Promise<StoredNutritionEvent[]>{ return []; }
+  async searchFoodVersions(): Promise<VersionedFood[]>{ return []; }
+  async findFoodVersionByBarcode(): Promise<VersionedFood|null>{ return null; }
+  async insertMealPlanVersionAndSetCurrent(){ throw new Error("unused"); }
+  async getCurrentMealPlan(){ return null; }
 }
 class SafetyRaceRunner implements V1TransactionRunner {
   constructor(readonly tx = new SafetyRaceTx()) {}

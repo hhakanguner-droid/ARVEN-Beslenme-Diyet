@@ -55,6 +55,12 @@ class Tx implements V1Transaction {
   async insertGoalVersion(_goal:StoredGoalVersion):Promise<void>{}
   async setCurrentGoal(_s:string,_id:string,_at:string):Promise<void>{}
   async insertGoalVersionAndSetCurrent(_goal:StoredGoalVersion,_selectedAt:string):Promise<void>{}
+  async getCurrentGoalVersion():Promise<StoredGoalVersion|null>{ return null; }
+  async listNutritionEventsForLocalDate():Promise<StoredNutritionEvent[]>{ return []; }
+  async searchFoodVersions():Promise<VersionedFood[]>{ return []; }
+  async findFoodVersionByBarcode():Promise<VersionedFood|null>{ return null; }
+  async insertMealPlanVersionAndSetCurrent():Promise<void>{}
+  async getCurrentMealPlan(){ return null; }
   async purgeAuthenticatedUser(_s:string):Promise<void>{}
 }
 class Runner implements V1TransactionRunner { constructor(readonly tx=new Tx()){} async transaction<T>(work:(tx:V1Transaction)=>Promise<T>){ return work(this.tx); } }
