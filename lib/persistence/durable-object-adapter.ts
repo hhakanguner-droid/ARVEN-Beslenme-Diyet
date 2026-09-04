@@ -241,8 +241,14 @@ export class DurableObjectV1Transaction implements V1Transaction {
     });
   }
 
-  async getFoodVersion(_userSubject: string, foodVersionId: string): Promise<VersionedFood | null> {
-    const foodRows = await this.catalog("SELECT * FROM food_versions WHERE id=?", [foodVersionId]);
+  async getFoodVersion(userSubject: string, foodVersionId: string): Promise<VersionedFood | null> {
+    // `owner_subject` is NULL for the shared verified catalog and set for a user's own custom
+    // foods (see db/migrations/0001_initial.sql). Without this check, any authenticated subject
+    // could resolve another user's private custom food by guessing/enumerating its id.
+    const foodRows = await this.catalog(
+      "SELECT * FROM food_versions WHERE id=? AND (owner_subject IS NULL OR owner_subject=?)",
+      [foodVersionId, userSubject],
+    );
     const food = foodRows[0];
     if (!food) return null;
     const portionRows = await this.catalog("SELECT * FROM portion_versions WHERE food_version_id=?", [foodVersionId]);

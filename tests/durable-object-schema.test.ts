@@ -68,7 +68,7 @@ test("DurableObjectV1Transaction works against the trimmed schema, reading the c
   const catalogDb = new DatabaseSync(":memory:");
   catalogDb.exec(`
     CREATE TABLE food_versions (
-      id TEXT PRIMARY KEY, food_key TEXT, name TEXT, is_liquid INTEGER,
+      id TEXT PRIMARY KEY, food_key TEXT, owner_subject TEXT, name TEXT, is_liquid INTEGER,
       energy_kcal_100g REAL, protein_g_100g REAL, carbs_g_100g REAL, fat_g_100g REAL,
       allergen_data_status TEXT, allergen_ids_json TEXT,
       dietary_safety_data_status TEXT, dietary_conflict_rule_ids_json TEXT,
@@ -80,8 +80,13 @@ test("DurableObjectV1Transaction works against the trimmed schema, reading the c
     );
   `);
   catalogDb.prepare(
-    `INSERT INTO food_versions (id, food_key, name, is_liquid, energy_kcal_100g, protein_g_100g, carbs_g_100g, fat_g_100g, allergen_data_status, allergen_ids_json, dietary_safety_data_status, dietary_conflict_rule_ids_json, source_provider, verified_at)
-     VALUES ('f1','elma',' Elma',0,52,0.3,14,0.2,'verified','[]','verified','[]','manual-verified','2026-09-04T00:00:00.000Z')`,
+    `INSERT INTO food_versions (id, food_key, owner_subject, name, is_liquid, energy_kcal_100g, protein_g_100g, carbs_g_100g, fat_g_100g, allergen_data_status, allergen_ids_json, dietary_safety_data_status, dietary_conflict_rule_ids_json, source_provider, verified_at)
+     VALUES ('f1','elma',NULL,' Elma',0,52,0.3,14,0.2,'verified','[]','verified','[]','manual-verified','2026-09-04T00:00:00.000Z')`,
+  ).run();
+  // A second food privately owned by a different user ('u2') — must never resolve for 'u1'.
+  catalogDb.prepare(
+    `INSERT INTO food_versions (id, food_key, owner_subject, name, is_liquid, energy_kcal_100g, protein_g_100g, carbs_g_100g, fat_g_100g, allergen_data_status, allergen_ids_json, dietary_safety_data_status, dietary_conflict_rule_ids_json, source_provider, verified_at)
+     VALUES ('f2','ozel-yemek','u2','u2''s private food',0,10,1,1,1,'unknown','[]','unknown','[]','manual-verified','2026-09-04T00:00:00.000Z')`,
   ).run();
 
   const catalog: D1LikeQuery = async (sql, params) => {
@@ -100,11 +105,18 @@ test("DurableObjectV1Transaction works against the trimmed schema, reading the c
 
   const food: VersionedFood | null = await tx.getFoodVersion("u1", "f1");
   assert.equal(food?.name.trim(), "Elma");
+
+  // Global catalog food (owner_subject NULL) resolves for any authenticated subject...
+  const globalFoodForOtherUser = await tx.getFoodVersion("someone-else", "f1");
+  assert.equal(globalFoodForOtherUser?.name.trim(), "Elma");
+  // ...but a private custom food owned by 'u2' must never resolve for 'u1'.
+  const otherUsersPrivateFood = await tx.getFoodVersion("u1", "f2");
+  assert.equal(otherUsersPrivateFood, null, "a user must not be able to read another user's private custom food by id");
   assert.equal(food?.nutrition.energyKcal, 52);
 
   await tx.purgeAuthenticatedUser("u1");
   assert.equal(await tx.getProfile("u1"), null);
   // purgeAuthenticatedUser must never touch the catalog connection at all — it is a different database.
   const stillThere = (catalogDb.prepare("SELECT count(*) as n FROM food_versions").get() as { n: number }).n;
-  assert.equal(stillThere, 1, "the shared catalog is untouched by a per-user purge");
+  assert.equal(stillThere, 2, "the shared catalog is untouched by a per-user purge");
 });

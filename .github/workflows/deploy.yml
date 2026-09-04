@@ -11,8 +11,15 @@ jobs:
     env:
       NEXT_TELEMETRY_DISABLED: "1"
     steps:
+      - name: Refuse to deploy anything except main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::workflow_dispatch was run on '${{ github.ref }}', not main. Production deploys must run from the reviewed main branch."
+          exit 1
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: main
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
