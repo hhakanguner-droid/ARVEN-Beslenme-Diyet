@@ -9,7 +9,7 @@ def reject(conn,sql,params=()):
     except (sqlite3.IntegrityError,sqlite3.OperationalError): return
     raise AssertionError(f'expected rejection: {sql}')
 def main():
-    assert [Path(p).name for p in MIGRATIONS]==['0001_initial.sql','0002_phase2_identity.sql']
+    assert [Path(p).name for p in MIGRATIONS]==['0001_initial.sql','0002_phase2_identity.sql','0003_phase3_planning.sql']
     combined='\n'.join(Path(p).read_text(encoding='utf-8') for p in MIGRATIONS)
     assert 'CREATE TRIGGER' not in combined.upper()
     assert 'CREATE TABLE ai_actions' not in combined
@@ -38,5 +38,8 @@ def main():
     c.execute("INSERT INTO safety_acknowledgements(id,user_subject,acknowledgement_type,policy_version,acknowledged_at,created_at) VALUES('ack1','u1','non-diagnostic-health-boundary','v1',?,?)",(now,now))
     reject(c,"INSERT INTO user_ui_preferences(user_subject,energy_unit,updated_at) VALUES('u1','oz',?)",(now,))
     c.execute("INSERT INTO user_ui_preferences(user_subject,energy_unit,updated_at) VALUES('u1','kj',?)",(now,))
+    c.execute("INSERT INTO meal_plan_versions(id,user_subject,slots_json,created_at) VALUES('mp1','u1','[]',?)",(now,))
+    reject(c,"INSERT INTO user_current_meal_plan(user_subject,meal_plan_version_id,selected_at) VALUES('u2','mp1',?)",(now,))
+    c.execute("INSERT INTO user_current_meal_plan(user_subject,meal_plan_version_id,selected_at) VALUES('u1','mp1',?)",(now,))
     print('CLEAN_V1_MIGRATION_OK')
 if __name__=='__main__':main()

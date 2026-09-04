@@ -24,6 +24,8 @@ const MealItemBase = z.object({ foodVersionId:Id, calculationVersion:z.literal(N
 export const MealLogActionV1 = z.object({ schemaVersion:z.literal("MealLogActionV1"), occurredAt:CanonicalInstant, mealType:MealType, items:z.array(MealItemBase.extend({selection:HouseholdSelection}).strict()).min(1).max(40) }).strict();
 export const WaterLogActionV1 = z.object({ schemaVersion:z.literal("WaterLogActionV1"), occurredAt:CanonicalInstant, milliliters:z.number().finite().min(1).max(10000) }).strict();
 const ManualMealItem = MealItemBase.extend({ selection:z.union([HouseholdSelection,CustomGramSelection]) }).strict();
+export const MealPlanSlotV1 = z.object({ mealType:MealType, items:z.array(ManualMealItem).min(1).max(40) }).strict();
+export const MealPlanVersionV1 = z.object({ schemaVersion:z.literal("MealPlanVersionV1"), slots:z.array(MealPlanSlotV1).min(1).max(12) }).strict();
 
 const CanonicalLocalDate = z.string().superRefine((value, ctx) => {
   try { assertCanonicalLocalDate(value, "birthDate"); }
@@ -66,6 +68,7 @@ export type VersionedFood=Food & {foodKey:string};
 export type StoredProfile={userSubject:string;displayName:string|null;birthDate:string|null;sexAtBirth:"male"|"female"|null;heightCm:number|null;activityLevel:"sedentary"|"light"|"moderate"|"active"|"very-active"|null;updatedAt:string};
 export type StoredAssessmentSnapshot={id:string;userSubject:string;completedAt:string;payloadJson:string;createdAt:string};
 export type StoredSafetyAcknowledgement={id:string;userSubject:string;acknowledgementType:typeof SAFETY_ACKNOWLEDGEMENT_TYPES[number];policyVersion:string;acknowledgedAt:string;createdAt:string};
+export type StoredMealPlanVersion={id:string;userSubject:string;slotsJson:string;createdAt:string};
 
 export interface V1Transaction {
   getUserContext(userSubject:string):Promise<AuthenticatedUserContext>;
@@ -102,6 +105,18 @@ export interface V1Transaction {
   setCurrentGoal(userSubject:string,goalVersionId:string,selectedAt:string):Promise<void>;
   /** Atomically inserts the goal version and selects it as current in one write. */
   insertGoalVersionAndSetCurrent(goal:StoredGoalVersion,selectedAt:string):Promise<void>;
+  /** The authenticated subject's currently-selected goal version, or null before one has ever been set. */
+  getCurrentGoalVersion(userSubject:string):Promise<StoredGoalVersion|null>;
+  /** Every nutrition event recorded for one authenticated local calendar day (read-only; `Bugün`'s daily snapshot). */
+  listNutritionEventsForLocalDate(userSubject:string,localDate:string):Promise<StoredNutritionEvent[]>;
+  /** Verified-catalog text search by normalized name, scoped to global rows plus this subject's own custom foods. */
+  searchFoodVersions(userSubject:string,query:string,limit:number):Promise<VersionedFood[]>;
+  /** Verified-catalog barcode lookup, scoped the same way as `searchFoodVersions`. */
+  findFoodVersionByBarcode(userSubject:string,barcode:string):Promise<VersionedFood|null>;
+  /** Atomically inserts a new meal-plan version and selects it as current in one write. */
+  insertMealPlanVersionAndSetCurrent(plan:StoredMealPlanVersion,selectedAt:string):Promise<void>;
+  /** The authenticated subject's currently-selected meal plan ("Planım"), or null before one has ever been created. */
+  getCurrentMealPlan(userSubject:string):Promise<StoredMealPlanVersion|null>;
   /** Delete the authenticated account and all dependent lifecycle rows in one transaction, in dependency-safe order. */
   purgeAuthenticatedUser(userSubject:string):Promise<void>;
 }
@@ -270,6 +285,27 @@ export class V1MutationService{
   async appendManualWater(occurredAt:string,milliliters:number):Promise<StoredNutritionEvent>{const x=WaterLogActionV1.omit({schemaVersion:true}).parse({occurredAt,milliliters});return this.runner.transaction(async tx=>{const c=await tx.getUserContext(this.subject);let localDate:string;try{localDate=deriveNutritionLocalDate(x.occurredAt,c.timezone,c.nutritionDayStartMinutes);}catch(error){rejectApplication("local-date-derivation-failed",error);}const e={id:this.idFactory(),userSubject:this.subject,eventType:"water-log" as const,occurredAt:x.occurredAt,localDate,payloadJson:canonicalJson({schemaVersion:"WaterEventV1",milliliters:x.milliliters}),createdAt:instant(this.clock.now())};await tx.insertNutritionEvent(e);return e;});}
   async appendManualMeal(input:{occurredAt:string;mealType:z.infer<typeof MealType>;items:unknown[]}):Promise<StoredNutritionEvent>{const x=z.object({occurredAt:CanonicalInstant,mealType:MealType,items:z.array(ManualMealItem).min(1).max(40)}).strict().parse(input);return this.runner.transaction(async tx=>{const c=await tx.getUserContext(this.subject);let localDate:string;try{localDate=deriveNutritionLocalDate(x.occurredAt,c.timezone,c.nutritionDayStartMinutes);}catch(error){rejectApplication("local-date-derivation-failed",error);}const payload=await mealPayload(tx,this.subject,x.mealType,x.items);const e={id:this.idFactory(),userSubject:this.subject,eventType:"meal-log" as const,occurredAt:x.occurredAt,localDate,payloadJson:canonicalJson(payload),createdAt:instant(this.clock.now())};await tx.insertNutritionEvent(e);return e;});}
   async createCalculatedGoalVersion(inputs:MifflinStJeorV1Inputs,referenceIds:string[],allocations:MealEnergyAllocation[]):Promise<StoredGoalVersion>{const inputSnapshot={...inputs};const allocationSnapshot=allocations.map((allocation)=>({...allocation}));assertMealEnergyAllocations(allocationSnapshot);const ids=canonicalReferenceIds(referenceIds);const targets=deriveCalculatedGoal({method:"mifflin-st-jeor",version:"v1",inputs:inputSnapshot,referenceIds:ids});return this.runner.transaction(async tx=>{const refs=await tx.getScientificReferenceSnapshots(ids);const byId=new Map(refs.map(ref=>[ref.id,ref]));if(byId.size!==ids.length||ids.some(id=>!byId.has(id)))throw new Error("Every scientific reference must resolve to a versioned snapshot");const ordered=ids.map(id=>byId.get(id)!);const now=instant(this.clock.now());const goal:StoredGoalVersion={id:this.idFactory(),userSubject:this.subject,source:"arven-calculated",calculatorId:"mifflin-st-jeor@v1",calculatorInputsJson:canonicalJson(inputSnapshot),referenceSnapshotsJson:canonicalJson(ordered),energyKcal:targets.energyKcal,proteinG:targets.proteinG,carbsG:targets.carbsG,fatG:targets.fatG,fiberG:targets.fiberG,waterMl:targets.waterMl,mealAllocationsJson:canonicalJson(allocationSnapshot),createdAt:now};await tx.insertGoalVersionAndSetCurrent(goal,now);return goal;});}
+  /**
+   * "Planım": stores a new versioned day plan (one or more meal slots) and makes it current.
+   * Each slot's items are resolved and safety-checked exactly like a manual meal log (same
+   * `mealPayload` helper), so a plan can never be created around a food a user is not allowed
+   * to eat — it just never becomes a `nutrition_events` row until the user actually logs it.
+   */
+  async createMealPlanVersion(input:unknown):Promise<StoredMealPlanVersion>{
+    const x=MealPlanVersionV1.parse(input);
+    return this.runner.transaction(async tx=>{
+      const resolvedSlots=[];
+      for(const slot of x.slots){
+        const payload=await mealPayload(tx,this.subject,slot.mealType,slot.items);
+        resolvedSlots.push({mealType:slot.mealType,items:(payload as {items:unknown[]}).items});
+      }
+      const now=instant(this.clock.now());
+      const plan:StoredMealPlanVersion={id:this.idFactory(),userSubject:this.subject,slotsJson:canonicalJson(resolvedSlots),createdAt:now};
+      await tx.insertMealPlanVersionAndSetCurrent(plan,now);
+      return plan;
+    });
+  }
+  async getCurrentMealPlan():Promise<StoredMealPlanVersion|null>{return this.runner.transaction(async tx=>tx.getCurrentMealPlan(this.subject));}
   async deleteAccount():Promise<void>{await this.runner.transaction(async tx=>{await tx.purgeAuthenticatedUser(this.subject);});}
   async getOrCreateAuthenticatedUser(defaults:{timezone:string;locale:string}):Promise<AuthenticatedUserContext>{return this.runner.transaction(async tx=>tx.getOrCreateUser(this.subject,defaults));}
   async upsertProfile(input:unknown):Promise<StoredProfile>{const x=ProfileUpsertV1.parse(input);const profile:StoredProfile={userSubject:this.subject,displayName:x.displayName,birthDate:x.birthDate,sexAtBirth:x.sexAtBirth,heightCm:x.heightCm,activityLevel:x.activityLevel,updatedAt:instant(this.clock.now())};return this.runner.transaction(async tx=>{await tx.upsertProfile(profile);return profile;});}

@@ -44,6 +44,7 @@ test("the per-user Durable Object schema owns exactly the per-user tables, not t
     "users", "profiles", "user_ui_preferences", "goal_versions", "user_current_goal",
     "user_safety_exclusions", "ai_action_proposals", "ai_action_decisions", "nutrition_events",
     "ai_action_outcomes", "assessment_snapshots", "safety_acknowledgements",
+    "meal_plan_versions", "user_current_meal_plan",
   ]) {
     assert.ok(names.includes(owned), `expected per-user table ${owned} to exist`);
   }

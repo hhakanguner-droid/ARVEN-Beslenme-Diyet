@@ -6,7 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import { DurableObjectV1Transaction, type D1LikeQuery, type SyncSqlStorage } from "../lib/persistence/durable-object-adapter";
 import type { StoredGoalVersion, StoredNutritionEvent, StoredOutcome, StoredProposal } from "../lib/persistence/v1-boundary";
 
-const MIGRATIONS = ["0001_initial.sql", "0002_phase2_identity.sql"].map(
+const MIGRATIONS = ["0001_initial.sql", "0002_phase2_identity.sql", "0003_phase3_planning.sql"].map(
   (name) => fileURLToPath(new URL(`../db/migrations/${name}`, import.meta.url)),
 );
 
@@ -121,6 +121,58 @@ test("insertGoalVersionAndSetCurrent writes and selects the goal atomically", as
   assert.equal(current?.goal_version_id, "g1");
 });
 
+test("getCurrentGoalVersion returns null before any goal exists, then the selected version", async () => {
+  const db = freshDatabase();
+  insertUser(db, "u1");
+  const tx = new DurableObjectV1Transaction(wrapDatabase(db), emptyCatalog);
+  assert.equal(await tx.getCurrentGoalVersion("u1"), null);
+  const goal: StoredGoalVersion = { id: "g1", userSubject: "u1", source: "arven-calculated", calculatorId: "mifflin-st-jeor@v1", calculatorInputsJson: "{}", referenceSnapshotsJson: '[{"id":"ref-1","title":"Ref","citation":"Citation"}]', energyKcal: 2000, proteinG: 120, carbsG: 200, fatG: 70, fiberG: 28, waterMl: 2500, mealAllocationsJson: "[]", createdAt: "2026-09-04T00:00:00.000Z" };
+  await tx.insertGoalVersionAndSetCurrent(goal, "2026-09-04T00:00:00.000Z");
+  const current = await tx.getCurrentGoalVersion("u1");
+  assert.equal(current?.id, "g1");
+  assert.equal(current?.energyKcal, 2000);
+});
+
+test("listNutritionEventsForLocalDate scopes to one authenticated subject and one local date", async () => {
+  const db = freshDatabase();
+  insertUser(db, "u1");
+  insertUser(db, "u2");
+  const tx = new DurableObjectV1Transaction(wrapDatabase(db), emptyCatalog);
+  await tx.insertNutritionEvent({ id: "e1", userSubject: "u1", eventType: "water-log", occurredAt: "2026-09-04T08:00:00.000Z", localDate: "2026-09-04", payloadJson: "{}", createdAt: "2026-09-04T08:00:00.000Z" });
+  await tx.insertNutritionEvent({ id: "e2", userSubject: "u1", eventType: "water-log", occurredAt: "2026-09-03T08:00:00.000Z", localDate: "2026-09-03", payloadJson: "{}", createdAt: "2026-09-03T08:00:00.000Z" });
+  await tx.insertNutritionEvent({ id: "e3", userSubject: "u2", eventType: "water-log", occurredAt: "2026-09-04T08:00:00.000Z", localDate: "2026-09-04", payloadJson: "{}", createdAt: "2026-09-04T08:00:00.000Z" });
+  const events = await tx.listNutritionEventsForLocalDate("u1", "2026-09-04");
+  assert.deepEqual(events.map((e) => e.id), ["e1"]);
+});
+
+test("searchFoodVersions and findFoodVersionByBarcode never resolve another user's private custom food", async () => {
+  const db = freshDatabase();
+  insertUser(db, "u1");
+  insertUser(db, "u2");
+  const now = "2026-09-04T00:00:00.000Z";
+  db.prepare("INSERT INTO food_versions (id, food_key, version, owner_subject, name, normalized_name, barcode, energy_kcal_100g, protein_g_100g, carbs_g_100g, fat_g_100g, allergen_data_status, dietary_safety_data_status, source_provider, verified_at, created_at) VALUES ('f1','elma',1,NULL,'Elma','elma','1111',52,0.3,14,0.2,'unknown','unknown','manual-verified',?,?)").run(now, now);
+  db.prepare("INSERT INTO food_versions (id, food_key, version, owner_subject, name, normalized_name, barcode, energy_kcal_100g, protein_g_100g, carbs_g_100g, fat_g_100g, allergen_data_status, dietary_safety_data_status, source_provider, verified_at, created_at) VALUES ('f2','ozel',1,'u2','u2 Özel','ozel','2222',10,1,1,1,'unknown','unknown','manual-verified',?,?)").run(now, now);
+  const tx = new DurableObjectV1Transaction(wrapDatabase(db), (sql, params) => Promise.resolve(db.prepare(sql).all(...(params as never[])) as Record<string, unknown>[]));
+  const bySearch = await tx.searchFoodVersions("u1", "elma", 10);
+  assert.deepEqual(bySearch.map((f) => f.id), ["f1"]);
+  assert.equal((await tx.searchFoodVersions("u1", "özel", 10)).length, 0);
+  assert.ok(await tx.findFoodVersionByBarcode("u1", "1111"));
+  assert.equal(await tx.findFoodVersionByBarcode("u1", "2222"), null);
+  assert.ok(await tx.findFoodVersionByBarcode("u2", "2222"));
+});
+
+test("insertMealPlanVersionAndSetCurrent writes and selects the plan atomically", async () => {
+  const db = freshDatabase();
+  insertUser(db, "u1");
+  const tx = new DurableObjectV1Transaction(wrapDatabase(db), emptyCatalog);
+  assert.equal(await tx.getCurrentMealPlan("u1"), null);
+  await tx.insertMealPlanVersionAndSetCurrent({ id: "mp1", userSubject: "u1", slotsJson: '[{"mealType":"breakfast","items":[]}]', createdAt: "2026-09-04T00:00:00.000Z" }, "2026-09-04T00:00:00.000Z");
+  const current = await tx.getCurrentMealPlan("u1");
+  assert.equal(current?.id, "mp1");
+  await tx.insertMealPlanVersionAndSetCurrent({ id: "mp2", userSubject: "u1", slotsJson: "[]", createdAt: "2026-09-04T01:00:00.000Z" }, "2026-09-04T01:00:00.000Z");
+  assert.equal((await tx.getCurrentMealPlan("u1"))?.id, "mp2");
+});
+
 test("purgeAuthenticatedUser removes every row for that subject across all owned tables, leaves others untouched", async () => {
   const db = freshDatabase();
   insertUser(db, "u1");
@@ -150,10 +202,11 @@ test("purgeAuthenticatedUser removes every row for that subject across all owned
   // enforced across them at all, so that CASCADE clause needs reconsidering once the schema is
   // actually split — tracked as follow-up D1-side work, not fixed here.
   db.prepare("INSERT INTO food_versions (id, food_key, version, owner_subject, name, normalized_name, energy_kcal_100g, protein_g_100g, carbs_g_100g, fat_g_100g, allergen_data_status, dietary_safety_data_status, source_provider, verified_at, created_at) VALUES ('f1','custom-food',1,'u1','Custom','custom',100,1,1,1,'unknown','unknown','manual-verified','2026-09-04T00:00:00.000Z','2026-09-04T00:00:00.000Z')").run();
+  await tx1.insertMealPlanVersionAndSetCurrent({ id: "mp1", userSubject: "u1", slotsJson: "[]", createdAt: "2026-09-04T00:00:00.000Z" }, "2026-09-04T00:00:00.000Z");
 
   await assert.doesNotReject(() => tx1.purgeAuthenticatedUser("u1"));
 
-  for (const table of ["users", "profiles", "ai_action_proposals", "ai_action_decisions", "ai_action_outcomes", "nutrition_events", "goal_versions", "user_current_goal", "assessment_snapshots", "safety_acknowledgements"]) {
+  for (const table of ["users", "profiles", "ai_action_proposals", "ai_action_decisions", "ai_action_outcomes", "nutrition_events", "goal_versions", "user_current_goal", "assessment_snapshots", "safety_acknowledgements", "meal_plan_versions", "user_current_meal_plan"]) {
     const count = (db.prepare(`SELECT count(*) as n FROM ${table} WHERE ${table === "users" ? "subject" : "user_subject"}='u1'`).get() as { n: number }).n;
     assert.equal(count, 0, `${table} should have no rows left for u1`);
   }
