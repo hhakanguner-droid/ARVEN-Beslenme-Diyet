@@ -6,6 +6,7 @@ import { parseSafeLabExtraction } from "@/lib/health-safety/lab-extraction";
 import { getFlowsForTrigger } from "@/lib/privacy/data-flows";
 
 const LAB_AI_CONSENT_HEADER = "x-arven-lab-ai-consent";
+const LAB_AI_MODE_HEADER = "x-arven-lab-ai-mode";
 const LAB_EXTRACTION_SYSTEM_PROMPT = [
   "You are a transcription component for ARVEN.",
   "Read only the visible laboratory report text in the supplied image.",
@@ -14,16 +15,16 @@ const LAB_EXTRACTION_SYSTEM_PROMPT = [
 ].join("\n");
 
 /**
- * Lab-photo extraction: when an external AI provider is configured, consent is checked before the
- * sensitive file is persisted or transmitted. Only the image plus a minimal transcription prompt
- * is sent externally; ARVEN profile, allergy, diet and memory context are deliberately excluded.
+ * Lab-photo extraction: external AI use is explicit opt-in. Callers may instead request local-only
+ * storage with x-arven-lab-ai-mode: local, in which case the image is never sent to a provider.
  */
 export async function POST(request: Request) {
   try {
     const context = await resolveRouteContext(request);
     const provider = getOptionalAiProvider();
+    const localOnly = request.headers.get(LAB_AI_MODE_HEADER) === "local";
 
-    if (provider) {
+    if (provider && !localOnly) {
       const declaredFlows = getFlowsForTrigger("lab-extraction");
       if (declaredFlows.length === 0 || declaredFlows.some((flow) => flow.consentMode !== "explicit-opt-in")) {
         return Response.json({ error: "lab-ai-data-flow-not-declared" }, { status: 503 });
@@ -35,8 +36,8 @@ export async function POST(request: Request) {
 
     const { document, bytes } = await parseLabPhotoUpload(request, context);
 
-    if (!provider) {
-      return Response.json({ labDocumentId: document.id, entries: [], aiAvailable: false });
+    if (!provider || localOnly) {
+      return Response.json({ labDocumentId: document.id, entries: [], aiAvailable: Boolean(provider), localOnly: true });
     }
 
     try {
@@ -55,7 +56,10 @@ export async function POST(request: Request) {
       return Response.json({ labDocumentId: document.id, entries, uncertainty: extraction.uncertainty, aiAvailable: true });
     } catch (error) {
       if (error instanceof AiProviderError) {
-        return Response.json({ labDocumentId: document.id, entries: [], aiAvailable: true, error: error.code });
+        return Response.json(
+          { labDocumentId: document.id, entries: [], aiAvailable: true, error: error.code },
+          { status: 502 },
+        );
       }
       throw error;
     }
