@@ -111,6 +111,8 @@ class SafetyRaceTx implements V1Transaction {
   async listNutritionEventsForLocalDate(): Promise<StoredNutritionEvent[]>{ return []; }
   async searchFoodVersions(): Promise<VersionedFood[]>{ return []; }
   async findFoodVersionByBarcode(): Promise<VersionedFood|null>{ return null; }
+  async getFoodVersionByFoodKey(): Promise<VersionedFood|null>{ return null; }
+  async importVerifiedFoodVersion(){ throw new Error("unused"); }
   async insertMealPlanVersionAndSetCurrent(){ throw new Error("unused"); }
   async getCurrentMealPlan(){ return null; }
   async deleteManualNutritionEvent(){ throw new Error("unused"); }

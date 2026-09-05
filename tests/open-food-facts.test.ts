@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  candidateToVerifiedFoodImport,
   lookupBarcode,
   OpenFoodFactsError,
   searchProducts,
   type OffFetch,
   type OffFetchResponse,
+  type OpenFoodFactsCandidate,
 } from "../lib/nutrition/providers/open-food-facts";
 
 const USER_AGENT = "ARVEN-Beslenme-Diyet/0.1 (hhakanguner@gmail.com)";
@@ -158,4 +160,77 @@ test("search with zero results returns an empty product list", async () => {
   const fetchImpl = fakeFetch(() => jsonResponse({ count: 0, page: 1, page_count: 0, page_size: 20, products: [] }));
   const result = await searchProducts("xyzxyzxyz-does-not-exist", { userAgent: USER_AGENT, fetchImpl, baseUrl: BASE_URL });
   assert.deepEqual(result, { count: 0, products: [] });
+});
+
+test("candidateToVerifiedFoodImport maps a complete candidate into the import shape the catalog requires", async () => {
+  const fetchImpl = fakeFetch(() => jsonResponse(NUTELLA_PAYLOAD));
+  const candidate = await lookupBarcode("3017620422003", { userAgent: USER_AGENT, fetchImpl, baseUrl: BASE_URL });
+  assert.ok("nutrition" in candidate);
+  if (!("nutrition" in candidate)) return;
+  const imported = candidateToVerifiedFoodImport("3017620422003", candidate);
+  assert.deepEqual(imported, {
+    schemaVersion: "VerifiedFoodImportV1",
+    sourceProvider: "open-food-facts",
+    sourceExternalId: "3017620422003",
+    barcode: "3017620422003",
+    name: "Nutella",
+    brand: "Nutella, Ferrero, Yum yum",
+    isLiquid: false,
+    energyKcal: 539,
+    proteinG: 6.3,
+    carbsG: 57.5,
+    fatG: 30.9,
+    fiberG: null,
+    sourceEvidenceUrl: candidate.provenance.sourceUrl,
+  });
+});
+
+test("candidateToVerifiedFoodImport returns null when a required macro is missing, even if fiber is present", async () => {
+  const incomplete: OpenFoodFactsCandidate = {
+    barcode: "1234567890123",
+    name: "Eksik Ürün",
+    brand: null,
+    quantity: null,
+    nutrition: {
+      energyKcal: { present: true, value: 100 },
+      proteinG: { present: false },
+      carbsG: { present: true, value: 10 },
+      fatG: { present: true, value: 2 },
+      fiberG: { present: true, value: 3 },
+      sugarsG: { present: false },
+      saltG: { present: false },
+      sodiumG: { present: false },
+      nutritionDataPer: "100g",
+    },
+    rawAllergenTags: [],
+    rawCategoryTags: [],
+    provenance: { provider: "open-food-facts", fetchedAt: "2026-09-04T00:00:00.000Z", sourceUrl: `${BASE_URL}/api/v2/product/1234567890123.json` },
+  };
+  assert.equal(candidateToVerifiedFoodImport("1234567890123", incomplete), null);
+});
+
+test("candidateToVerifiedFoodImport uses the barcode passed in, not a blank candidate.barcode", async () => {
+  const candidate: OpenFoodFactsCandidate = {
+    barcode: "",
+    name: "İsimli Ürün",
+    brand: "Marka",
+    quantity: null,
+    nutrition: {
+      energyKcal: { present: true, value: 50 },
+      proteinG: { present: true, value: 1 },
+      carbsG: { present: true, value: 5 },
+      fatG: { present: true, value: 0.5 },
+      fiberG: { present: false },
+      sugarsG: { present: false },
+      saltG: { present: false },
+      sodiumG: { present: false },
+      nutritionDataPer: "100g",
+    },
+    rawAllergenTags: [],
+    rawCategoryTags: [],
+    provenance: { provider: "open-food-facts", fetchedAt: "2026-09-04T00:00:00.000Z", sourceUrl: `${BASE_URL}/x` },
+  };
+  const imported = candidateToVerifiedFoodImport("9999999999999", candidate);
+  assert.equal(imported?.barcode, "9999999999999");
+  assert.equal(imported?.sourceExternalId, "9999999999999");
 });

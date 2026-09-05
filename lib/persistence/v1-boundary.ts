@@ -40,6 +40,29 @@ export const CustomFoodV1 = z.object({
   fiberG:z.number().finite().min(0).max(1000).optional(),
   portions:z.array(CustomPortionInputV1).min(1).max(10),
 }).strict();
+/**
+ * One externally-verified food (currently: an Open Food Facts product) being imported into the
+ * shared catalog for the first time. `sourceExternalId` is always the provider's own product id
+ * (for Open Food Facts, the barcode) — `V1MutationService.importVerifiedFood` derives this row's
+ * deterministic `food_key` from it (`off-${sourceExternalId}`), so re-importing the same product
+ * (a repeat barcode scan, the same item turning up again in a text search) always resolves to the
+ * same catalog row instead of creating a duplicate.
+ */
+export const VerifiedFoodImportV1 = z.object({
+  schemaVersion:z.literal("VerifiedFoodImportV1"),
+  sourceProvider:z.literal("open-food-facts"),
+  sourceExternalId:z.string().trim().min(1).max(200),
+  barcode:z.string().trim().min(1).max(64).nullable(),
+  name:z.string().trim().min(1).max(120),
+  brand:z.string().trim().min(1).max(120).nullable(),
+  isLiquid:z.boolean().optional(),
+  energyKcal:z.number().finite().min(0).max(10000),
+  proteinG:z.number().finite().min(0).max(1000),
+  carbsG:z.number().finite().min(0).max(1000),
+  fatG:z.number().finite().min(0).max(1000),
+  fiberG:z.number().finite().min(0).max(1000).nullable(),
+  sourceEvidenceUrl:z.string().trim().min(1).max(500).nullable(),
+}).strict();
 export const RecipeIngredientV1 = MealItemBase.extend({ selection:z.union([HouseholdSelection,CustomGramSelection]) }).strict();
 export const RecipeFoodV1 = z.object({
   schemaVersion:z.literal("RecipeFoodV1"),
@@ -99,6 +122,13 @@ export type StoredCustomFoodVersion={
   dietarySafetyDataStatus:"verified"|"unknown"|"not-applicable";dietaryConflictRuleIds:string[];
   verifiedAt:string;createdAt:string;portions:StoredCustomPortion[];
 };
+/** A new global (unowned) catalog row imported from an external verified source. No household portions are attached — the app logs these by exact grams. */
+export type StoredVerifiedFoodImport={
+  id:string;foodKey:string;name:string;brand:string|null;barcode:string|null;isLiquid:boolean;
+  energyKcal:number;proteinG:number;carbsG:number;fatG:number;fiberG:number|null;
+  sourceProvider:"open-food-facts";sourceExternalId:string;sourceEvidenceUrl:string|null;
+  verifiedAt:string;createdAt:string;
+};
 
 export interface V1Transaction {
   getUserContext(userSubject:string):Promise<AuthenticatedUserContext>;
@@ -143,6 +173,10 @@ export interface V1Transaction {
   searchFoodVersions(userSubject:string,query:string,limit:number):Promise<VersionedFood[]>;
   /** Verified-catalog barcode lookup, scoped the same way as `searchFoodVersions`. */
   findFoodVersionByBarcode(userSubject:string,barcode:string):Promise<VersionedFood|null>;
+  /** Verified-catalog lookup by deterministic `food_key` (e.g. `off-3017620422003`), used to make external-source imports idempotent. */
+  getFoodVersionByFoodKey(userSubject:string,foodKey:string):Promise<VersionedFood|null>;
+  /** Inserts one externally-verified food as a new global (unowned) catalog row. Callers must pre-check `getFoodVersionByFoodKey` themselves — this does not deduplicate. */
+  importVerifiedFoodVersion(food:StoredVerifiedFoodImport):Promise<void>;
   /** Atomically inserts a new meal-plan version and selects it as current in one write. */
   insertMealPlanVersionAndSetCurrent(plan:StoredMealPlanVersion,selectedAt:string):Promise<void>;
   /** The authenticated subject's currently-selected meal plan ("Planım"), or null before one has ever been created. */
@@ -421,6 +455,40 @@ export class V1MutationService{
       await tx.insertCustomFoodVersion(food);
       const stored=await tx.getFoodVersion(this.subject,id);
       if(!stored)throw new Error("Recipe food insert did not become visible");
+      return stored;
+    });
+  }
+  /**
+   * "Doğrulanmış kaynaktan yemek ekle": imports one externally-verified product (currently only
+   * Open Food Facts) into the shared catalog, e.g. after a barcode scan or a text search misses
+   * the local catalog. Idempotent by design: the food_key is derived from the source's own
+   * external id, so a repeat import of the same product (another scan, the same result turning up
+   * again) always resolves to the one existing row instead of creating a duplicate — including
+   * under a race between two concurrent imports of the same product.
+   */
+  async importVerifiedFood(input:unknown):Promise<VersionedFood>{
+    const x=VerifiedFoodImportV1.parse(input);
+    const foodKey=`off-${x.sourceExternalId}`;
+    return this.runner.transaction(async tx=>{
+      const existing=await tx.getFoodVersionByFoodKey(this.subject,foodKey);
+      if(existing)return existing;
+      const now=instant(this.clock.now());
+      const food:StoredVerifiedFoodImport={
+        id:this.idFactory(),foodKey,name:x.name,brand:x.brand,barcode:x.barcode,isLiquid:!!x.isLiquid,
+        energyKcal:x.energyKcal,proteinG:x.proteinG,carbsG:x.carbsG,fatG:x.fatG,fiberG:x.fiberG,
+        sourceProvider:x.sourceProvider,sourceExternalId:x.sourceExternalId,sourceEvidenceUrl:x.sourceEvidenceUrl,
+        verifiedAt:now,createdAt:now,
+      };
+      try{
+        await tx.importVerifiedFoodVersion(food);
+      }catch(error){
+        // Race: another request imported the same food_key between our check and this insert.
+        const winner=await tx.getFoodVersionByFoodKey(this.subject,foodKey);
+        if(winner)return winner;
+        throw error;
+      }
+      const stored=await tx.getFoodVersionByFoodKey(this.subject,foodKey);
+      if(!stored)throw new Error("Verified food import did not become visible");
       return stored;
     });
   }

@@ -141,6 +141,53 @@ export async function searchProducts(
   return { count: typeof b.count === "number" ? b.count : products.length, products };
 }
 
+/** Shape `V1MutationService.importVerifiedFood` accepts (see `lib/persistence/v1-boundary.ts`'s `VerifiedFoodImportV1`). */
+export type VerifiedFoodImportInput = {
+  schemaVersion: "VerifiedFoodImportV1";
+  sourceProvider: "open-food-facts";
+  sourceExternalId: string;
+  barcode: string;
+  name: string;
+  brand: string | null;
+  isLiquid: boolean;
+  energyKcal: number;
+  proteinG: number;
+  carbsG: number;
+  fatG: number;
+  fiberG: number | null;
+  sourceEvidenceUrl: string;
+};
+
+/**
+ * Maps a raw Open Food Facts candidate into the import shape `V1MutationService.importVerifiedFood`
+ * expects, or `null` when the candidate is missing one of the four macros ARVEN's catalog requires
+ * for every food (energy/protein/carbs/fat — see `db/migrations/0001_initial.sql`'s `NOT NULL`
+ * columns). Fiber is allowed to be absent, matching that same schema. `barcode` is passed in
+ * explicitly rather than trusted from `candidate.barcode` alone, since a barcode-lookup caller
+ * already knows the exact code it asked for and OFF's own `code` field is occasionally blank.
+ */
+export function candidateToVerifiedFoodImport(barcode: string, candidate: OpenFoodFactsCandidate): VerifiedFoodImportInput | null {
+  const trimmedBarcode = barcode.trim();
+  if (!trimmedBarcode) return null;
+  const n = candidate.nutrition;
+  if (!n.energyKcal.present || !n.proteinG.present || !n.carbsG.present || !n.fatG.present) return null;
+  return {
+    schemaVersion: "VerifiedFoodImportV1",
+    sourceProvider: "open-food-facts",
+    sourceExternalId: trimmedBarcode,
+    barcode: trimmedBarcode,
+    name: candidate.name ?? candidate.brand ?? trimmedBarcode,
+    brand: candidate.brand,
+    isLiquid: false,
+    energyKcal: n.energyKcal.value,
+    proteinG: n.proteinG.value,
+    carbsG: n.carbsG.value,
+    fatG: n.fatG.value,
+    fiberG: n.fiberG.present ? n.fiberG.value : null,
+    sourceEvidenceUrl: candidate.provenance.sourceUrl,
+  };
+}
+
 export type OpenFoodFactsClient = {
   lookupBarcode: (barcode: string) => ReturnType<typeof lookupBarcode>;
   searchProducts: (query: string, options?: { pageSize?: number }) => ReturnType<typeof searchProducts>;
@@ -157,4 +204,16 @@ export function createOpenFoodFactsClient(env?: { userAgent?: string }): OpenFoo
     lookupBarcode: (barcode: string) => lookupBarcode(barcode, config),
     searchProducts: (query: string, options?: { pageSize?: number }) => searchProducts(query, config, options),
   };
+}
+
+/**
+ * Same as `createOpenFoodFactsClient`, but returns `null` instead of throwing when
+ * `OFF_CONTACT_USER_AGENT` is not configured — for call sites (route handlers) where live
+ * Open Food Facts lookup is an optional enhancement on top of the local catalog, not a
+ * hard requirement, and a missing contact string should degrade gracefully rather than 500.
+ */
+export function getOptionalOpenFoodFactsClient(env?: { userAgent?: string }): OpenFoodFactsClient | null {
+  const userAgent = env?.userAgent ?? process.env.OFF_CONTACT_USER_AGENT;
+  if (!userAgent || !userAgent.trim()) return null;
+  return createOpenFoodFactsClient({ userAgent });
 }

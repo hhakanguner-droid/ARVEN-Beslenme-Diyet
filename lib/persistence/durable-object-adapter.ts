@@ -7,6 +7,7 @@ import type {
   StoredDecision,
   StoredGoalVersion,
   StoredCustomFoodVersion,
+  StoredVerifiedFoodImport,
   StoredMealPlanVersion,
   StoredNutritionEvent,
   StoredOutcome,
@@ -419,6 +420,36 @@ export class DurableObjectV1Transaction implements V1Transaction {
     );
     const row = rows[0];
     return row ? this.hydrateFoodVersion(row) : null;
+  }
+
+  async getFoodVersionByFoodKey(userSubject: string, foodKey: string): Promise<VersionedFood | null> {
+    const rows = await this.catalog(
+      "SELECT * FROM food_versions WHERE food_key=? AND (owner_subject IS NULL OR owner_subject=?) ORDER BY verified_at DESC LIMIT 1",
+      [foodKey, userSubject],
+    );
+    const row = rows[0];
+    return row ? this.hydrateFoodVersion(row) : null;
+  }
+
+  /**
+   * Inserts one externally-verified food (e.g. an Open Food Facts product) as a new global
+   * (unowned) catalog row — no household portions, since the app logs these by exact grams
+   * instead. Allergen/dietary status is always "unknown": OFF's raw allergen/category tags are not
+   * yet mapped to this app's internal allergen/dietary-rule ids (future work, same as noted in
+   * `lib/nutrition/providers/open-food-facts.ts`). Callers must pre-check `getFoodVersionByFoodKey`
+   * themselves — this does not deduplicate.
+   */
+  async importVerifiedFoodVersion(food: StoredVerifiedFoodImport): Promise<void> {
+    await this.catalog(
+      `INSERT INTO food_versions (id, food_key, version, owner_subject, name, normalized_name, brand, barcode, is_liquid, energy_kcal_100g, protein_g_100g, carbs_g_100g, fat_g_100g, fiber_g_100g, extended_nutrition_json, allergen_data_status, allergen_ids_json, dietary_safety_data_status, dietary_conflict_rule_ids_json, source_provider, source_external_id, source_evidence_url, source_license_id, verified_at, created_at)
+       VALUES (?,?,1,NULL,?,?,?,?,?,?,?,?,?,?,'{}','unknown','[]','unknown','[]',?,?,?,NULL,?,?)`,
+      [
+        food.id, food.foodKey, food.name, normalizeFoodName(food.name), food.brand, food.barcode, food.isLiquid ? 1 : 0,
+        food.energyKcal, food.proteinG, food.carbsG, food.fatG, food.fiberG,
+        food.sourceProvider, food.sourceExternalId, food.sourceEvidenceUrl,
+        food.verifiedAt, food.createdAt,
+      ],
+    );
   }
 
   async insertMealPlanVersionAndSetCurrent(plan: StoredMealPlanVersion, selectedAt: string): Promise<void> {
