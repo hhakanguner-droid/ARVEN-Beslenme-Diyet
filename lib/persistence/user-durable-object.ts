@@ -1,5 +1,6 @@
 import type { D1Database, DurableObjectState, SqlStorage } from "@cloudflare/workers-types";
 import { USER_DURABLE_OBJECT_SCHEMA_V1 } from "@/db/migrations/durable-object/0001_user_schema";
+import { USER_DURABLE_OBJECT_PHASE6_HARDENING } from "@/db/migrations/durable-object/0002_phase6_health_hardening";
 import { DurableObjectV1Transaction, DurableObjectV1TransactionRunner, type D1LikeQuery, type SyncSqlStorage } from "@/lib/persistence/durable-object-adapter";
 import type { V1TransactionRunner } from "@/lib/persistence/v1-boundary";
 
@@ -40,23 +41,9 @@ function d1Catalog(db: D1Database): D1LikeQuery {
 }
 
 /**
- * One `UserDurableObject` instance == one authenticated user's V1
- * persistence (see `docs/CLEAN_V1_PERSISTENCE.md`). The shared verified-food
- * catalog is not stored here — it is read live from `env.ARVEN_CATALOG_DB`
- * (D1) through `DurableObjectV1Transaction`'s injected `D1LikeQuery`.
- *
- * Schema is applied idempotently (`CREATE TABLE/INDEX IF NOT EXISTS`) inside
- * `blockConcurrencyWhile` on every wake, so no request reaches the
- * transaction adapter before the schema exists — cheap, and safe to run on
- * a warm object that already has it.
- *
- * Deliberately out of scope here (tracked, not fixed in this slice): the
- * Next.js route handler does not yet call this Durable Object over HTTP —
- * that needs the `@opennextjs/cloudflare` adapter wired into the build,
- * which is a separate follow-up. This class only needs to exist, own its
- * schema, and be exercised directly by `tests/durable-object-schema.test.ts`
- * plus `custom-worker.ts`'s export for `wrangler`'s Durable Object
- * migrations to find it.
+ * One `UserDurableObject` instance == one authenticated user's V1 persistence.
+ * Base schema and incremental hardening schemas are applied idempotently inside
+ * `blockConcurrencyWhile` on every wake before any request can reach the adapter.
  */
 export class UserDurableObject {
   private readonly runner: V1TransactionRunner;
@@ -64,6 +51,7 @@ export class UserDurableObject {
   constructor(private readonly ctx: DurableObjectState, env: UserDurableObjectEnv) {
     this.ctx.blockConcurrencyWhile(async () => {
       this.ctx.storage.sql.exec(USER_DURABLE_OBJECT_SCHEMA_V1);
+      this.ctx.storage.sql.exec(USER_DURABLE_OBJECT_PHASE6_HARDENING);
     });
     const sql = wrapDurableObjectSql(this.ctx.storage.sql, (closure) => this.ctx.storage.transactionSync(closure));
     const tx = new DurableObjectV1Transaction(sql, d1Catalog(env.ARVEN_CATALOG_DB));
@@ -75,10 +63,7 @@ export class UserDurableObject {
     return this.runner;
   }
 
-  /**
-   * No HTTP-level API is defined yet — see the class doc comment. A request
-   * reaching this object today is a misconfiguration, not a supported path.
-   */
+  /** No HTTP-level API is defined yet; a request reaching this object today is a misconfiguration. */
   async fetch(): Promise<Response> {
     return new Response("UserDurableObject has no HTTP API yet", { status: 501 });
   }
