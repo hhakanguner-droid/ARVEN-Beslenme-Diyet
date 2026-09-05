@@ -1,6 +1,6 @@
 import {
-  parseArvenChatReply, parseMealPhotoEstimate, parseMenuAnalysis, parseProductPhotoIdentification, parseWeeklyInsight,
-  type ArvenChatReply, type MealPhotoEstimate, type MenuAnalysis, type ProductPhotoIdentification, type WeeklyInsight,
+  parseArvenChatReply, parseLabResultExtraction, parseMealPhotoEstimate, parseMenuAnalysis, parseProductPhotoIdentification, parseWeeklyInsight,
+  type ArvenChatReply, type LabResultExtraction, type MealPhotoEstimate, type MenuAnalysis, type ProductPhotoIdentification, type WeeklyInsight,
 } from "@/lib/ai/contracts";
 import type { WeeklyMetricsV1 } from "@/lib/nutrition/weekly-metrics";
 
@@ -61,6 +61,16 @@ const PRODUCT_PHOTO_SCHEMA_HINT =
   "null bırak. Bu alanlar yalnızca uygulamanın kendi doğrulanmış ürün kataloğunda arama yapmak için birer aday " +
   "önerisidir — kesin besin değerlerini SEN üretme.";
 
+const LAB_RESULT_SCHEMA_HINT =
+  "Sana bir laboratuvar tahlil sonucu fotoğrafı gösterilecek. Yanıtını YALNIZCA şu alanları içeren tek bir JSON " +
+  "nesnesi olarak ver, başka hiçbir metin, açıklama veya kod bloğu işareti ekleme: " +
+  '{"schemaVersion":"LabResultExtractionV1","entries":[{"markerName":"...","valueText":"...",' +
+  '"unitText":"..."|null,"referenceRangeText":"..."|null}],"uncertainty":["..."]}. ' +
+  "Fotoğrafta gördüğün her tahlil kalemini (ör. Glukoz, HbA1c, TSH) ayrı bir öğe olarak, gördüğün gibi " +
+  "harfiyen aktar — değeri, birimini ve varsa referans aralığını olduğu gibi yaz, YORUMLAMA veya YUVARLAMA. " +
+  "Hiçbir alanda tanı koyma, hastalık ismi söyleme veya tedavi/ilaç önerisi verme; yalnızca fotoğrafta " +
+  "yazılanı transkript et. Net okuyamadığın veya emin olamadığın kısımları uncertainty alanında belirt.";
+
 export type AiFetchResponse = { ok: boolean; status: number; json(): Promise<unknown> };
 export type AiFetch = (url: string, init: { method: string; headers: Record<string, string>; body: string }) => Promise<AiFetchResponse>;
 
@@ -96,6 +106,7 @@ export type ArvenAiProvider = {
   analyzeMealPhoto: (request: ArvenPhotoRequest) => Promise<MealPhotoEstimate>;
   analyzeMenuPhoto: (request: ArvenPhotoRequest) => Promise<MenuAnalysis>;
   identifyProductPhoto: (request: ArvenPhotoRequest) => Promise<ProductPhotoIdentification>;
+  extractLabResult: (request: ArvenPhotoRequest) => Promise<LabResultExtraction>;
 };
 
 export type OpenAiClientConfig = {
@@ -253,6 +264,26 @@ export async function identifyProductPhoto(config: OpenAiClientConfig, request: 
   }
 }
 
+/**
+ * Pure core — one OpenAI vision chat-completion round trip, validated against LabResultExtractionV1.
+ * Unlike the other three vision functions above, the model's numbers here are exactly what the
+ * caller wants (a transcription of the user's own lab report) — see LabResultExtractionV1's doc
+ * comment in lib/ai/contracts.ts for why the usual no-numbers rule does not apply, and what does.
+ */
+export async function extractLabResult(config: OpenAiClientConfig, request: ArvenPhotoRequest): Promise<LabResultExtraction> {
+  const messages: ChatMessage[] = [
+    { role: "system", content: `${request.systemPrompt}\n\n${LAB_RESULT_SCHEMA_HINT}` },
+    buildPhotoUserMessage("Ekteki tahlil sonucu fotoğrafını incele ve gördüğün değerleri aktar.", request),
+  ];
+  const body = await performJsonCompletion(config, messages);
+  const parsedJson = parseJsonContent(extractMessageContent(body));
+  try {
+    return parseLabResultExtraction(parsedJson);
+  } catch (error) {
+    throw new AiProviderError("invalid-reply", error instanceof Error ? error.message : "OpenAI lab result extraction failed contract validation");
+  }
+}
+
 /** Production wrapper: uses the global `fetch` and an env-configured API key/model. Throws if unset. */
 export function createOpenAiProvider(env?: { apiKey?: string; model?: string }): ArvenAiProvider {
   const apiKey = env?.apiKey ?? process.env.OPENAI_API_KEY;
@@ -267,6 +298,7 @@ export function createOpenAiProvider(env?: { apiKey?: string; model?: string }):
     analyzeMealPhoto: (request) => analyzeMealPhoto(config, request),
     analyzeMenuPhoto: (request) => analyzeMenuPhoto(config, request),
     identifyProductPhoto: (request) => identifyProductPhoto(config, request),
+    extractLabResult: (request) => extractLabResult(config, request),
   };
 }
 

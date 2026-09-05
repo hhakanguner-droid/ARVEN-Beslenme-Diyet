@@ -226,3 +226,30 @@ export const ProductPhotoIdentificationV1 = z.object({
 }).strict();
 export type ProductPhotoIdentification = z.infer<typeof ProductPhotoIdentificationV1>;
 export function parseProductPhotoIdentification(input: unknown): ProductPhotoIdentification { return ProductPhotoIdentificationV1.parse(input); }
+
+// Phase 6: lab result extraction. Unlike every contract above, a lab report's numbers ARE the
+// ground truth the user is trying to capture from their own document — the numeric-claim guards
+// used everywhere else exist only to stop the model inventing NUTRITION numbers, so they do not
+// apply here. What still applies unchanged is the non-diagnostic health policy: the model
+// transcribes marker/value/range text off the photo, it never asserts a diagnosis or gives
+// treatment/medication direction about what it read (see assertNoMedicalOverreach in
+// lib/health-safety/policy.ts). Every extracted row is 'extracted' (unreviewed) until the user
+// confirms it, optionally after editing the transcription — see db/migrations/0006_phase6_health.sql.
+const LabMarkerName = z.string().trim().min(1).max(160).refine(assertSafeNarrative, "Lab marker name violates ARVEN non-diagnostic health policy");
+const LabResultText = z.string().trim().min(1).max(80);
+const LabExtractedEntry = z.object({
+  markerName: LabMarkerName,
+  valueText: LabResultText,
+  unitText: z.string().trim().min(1).max(40).nullable(),
+  referenceRangeText: z.string().trim().min(1).max(80).nullable(),
+}).strict();
+function labNarrative(max: number) {
+  return z.string().trim().min(1).max(max).refine(assertSafeNarrative, "AI output violates ARVEN non-diagnostic health policy");
+}
+export const LabResultExtractionV1 = z.object({
+  schemaVersion: z.literal("LabResultExtractionV1"),
+  entries: z.array(LabExtractedEntry).min(1).max(40),
+  uncertainty: z.array(labNarrative(240)).max(8),
+}).strict();
+export type LabResultExtraction = z.infer<typeof LabResultExtractionV1>;
+export function parseLabResultExtraction(input: unknown): LabResultExtraction { return LabResultExtractionV1.parse(input); }
