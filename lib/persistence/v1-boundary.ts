@@ -63,6 +63,14 @@ export const VerifiedFoodImportV1 = z.object({
   fiberG:z.number().finite().min(0).max(1000).nullable(),
   sourceEvidenceUrl:z.string().trim().min(1).max(500).nullable(),
 }).strict();
+/** One fact ARVEN keeps between conversations to personalize replies (e.g. "kahvaltıda genelde yumurta tercih ediyor"). Unlike every other input here this is user-deletable at any time — see `V1MutationService.deleteMemoryFact`. */
+const MemoryFactInput = z.object({
+  factText: z.string().trim().min(1).max(300),
+  confidence: z.enum(["high","medium","low"]),
+  provenance: z.enum(["user-stated","ai-inferred"]).default("ai-inferred"),
+}).strict();
+export const MemoryFactRecordV1 = z.object({ schemaVersion:z.literal("MemoryFactRecordV1"), facts:z.array(MemoryFactInput).min(1).max(5) }).strict();
+
 export const RecipeIngredientV1 = MealItemBase.extend({ selection:z.union([HouseholdSelection,CustomGramSelection]) }).strict();
 export const RecipeFoodV1 = z.object({
   schemaVersion:z.literal("RecipeFoodV1"),
@@ -74,6 +82,10 @@ export const RecipeFoodV1 = z.object({
 
 const CanonicalLocalDate = z.string().superRefine((value, ctx) => {
   try { assertCanonicalLocalDate(value, "birthDate"); }
+  catch (error) { ctx.addIssue({ code: "custom", message: error instanceof Error ? error.message : "Invalid local date" }); }
+});
+const CanonicalWeekStartDate = z.string().superRefine((value, ctx) => {
+  try { assertCanonicalLocalDate(value, "weekStartLocalDate"); }
   catch (error) { ctx.addIssue({ code: "custom", message: error instanceof Error ? error.message : "Invalid local date" }); }
 });
 const SexAtBirth = z.enum(["male","female"]);
@@ -129,6 +141,11 @@ export type StoredVerifiedFoodImport={
   sourceProvider:"open-food-facts";sourceExternalId:string;sourceEvidenceUrl:string|null;
   verifiedAt:string;createdAt:string;
 };
+export type MemoryFactProvenance="user-stated"|"ai-inferred";
+export type MemoryFactConfidence="high"|"medium"|"low";
+export type StoredMemoryFact={id:string;userSubject:string;factText:string;provenance:MemoryFactProvenance;confidence:MemoryFactConfidence;createdAt:string};
+/** `narrative` is null until a provider has actually produced a validated `WeeklyInsightV1` for this week — deterministic `metrics` are always available immediately. */
+export type StoredWeeklyInsightSnapshot={id:string;userSubject:string;weekStartLocalDate:string;metricsJson:string;narrativeJson:string|null;createdAt:string};
 
 export interface V1Transaction {
   getUserContext(userSubject:string):Promise<AuthenticatedUserContext>;
@@ -193,6 +210,16 @@ export interface V1Transaction {
   insertCustomFoodVersion(food:StoredCustomFoodVersion):Promise<void>;
   /** Delete the authenticated account and all dependent lifecycle rows in one transaction, in dependency-safe order. */
   purgeAuthenticatedUser(userSubject:string):Promise<void>;
+  /** Appends one ARVEN memory fact. Never deduplicated by the adapter — the service decides what's worth remembering. */
+  insertMemoryFact(fact:StoredMemoryFact):Promise<void>;
+  /** Every memory fact for this subject, most recent first — the exact list the user sees (and can delete from) in "ARVEN hafızası". */
+  listMemoryFacts(userSubject:string):Promise<StoredMemoryFact[]>;
+  /** User-initiated forget: unlike every other ledger table here, a memory fact is genuinely deleted, not superseded. Silently succeeds if the id is already gone or belongs to another subject. */
+  deleteMemoryFact(userSubject:string,id:string):Promise<void>;
+  /** Appends one weekly insight snapshot (deterministic metrics, plus a narrative once a provider has generated one). */
+  insertWeeklyInsightSnapshot(snapshot:StoredWeeklyInsightSnapshot):Promise<void>;
+  /** The most recently generated snapshot for this exact week, or null if none exists yet. */
+  getLatestWeeklyInsightSnapshot(userSubject:string,weekStartLocalDate:string):Promise<StoredWeeklyInsightSnapshot|null>;
 }
 export interface V1TransactionRunner{transaction<T>(work:(tx:V1Transaction)=>Promise<T>):Promise<T>}
 export type ServiceClock={now():Date}; export type IdFactory=()=>string;
@@ -491,6 +518,29 @@ export class V1MutationService{
       if(!stored)throw new Error("Verified food import did not become visible");
       return stored;
     });
+  }
+  /** Records one or more ARVEN memory facts in a single write (e.g. after a chat turn the provider judged worth remembering). */
+  async recordMemoryFacts(input:unknown):Promise<StoredMemoryFact[]>{
+    const x=MemoryFactRecordV1.parse(input);
+    const now=instant(this.clock.now());
+    const facts:StoredMemoryFact[]=x.facts.map((fact)=>({id:this.idFactory(),userSubject:this.subject,factText:fact.factText,provenance:fact.provenance,confidence:fact.confidence,createdAt:now}));
+    return this.runner.transaction(async tx=>{
+      for(const fact of facts) await tx.insertMemoryFact(fact);
+      return facts;
+    });
+  }
+  async listMemoryFacts():Promise<StoredMemoryFact[]>{return this.runner.transaction(async tx=>tx.listMemoryFacts(this.subject));}
+  /** User-initiated forget — see `V1Transaction.deleteMemoryFact`'s doc comment. */
+  async deleteMemoryFact(id:string):Promise<void>{const parsed=Id.parse(id);await this.runner.transaction(async tx=>{await tx.deleteMemoryFact(this.subject,parsed);});}
+  /** Persists one weekly insight snapshot: the deterministic metrics it was grounded in, and — once a provider has produced one — the validated narrative-only `WeeklyInsightV1` output. `metrics`/`narrative` are stored verbatim as canonical JSON; callers own their own shape/validation (deterministic weekly-metrics service, `lib/ai/contracts.ts`'s `parseWeeklyInsight`). */
+  async recordWeeklyInsightSnapshot(weekStartLocalDate:string,metrics:unknown,narrative:unknown|null):Promise<StoredWeeklyInsightSnapshot>{
+    const parsedDate=CanonicalWeekStartDate.parse(weekStartLocalDate);
+    const snapshot:StoredWeeklyInsightSnapshot={id:this.idFactory(),userSubject:this.subject,weekStartLocalDate:parsedDate,metricsJson:canonicalJson(metrics),narrativeJson:narrative==null?null:canonicalJson(narrative),createdAt:instant(this.clock.now())};
+    return this.runner.transaction(async tx=>{await tx.insertWeeklyInsightSnapshot(snapshot);return snapshot;});
+  }
+  async getWeeklyInsightSnapshot(weekStartLocalDate:string):Promise<StoredWeeklyInsightSnapshot|null>{
+    const parsedDate=CanonicalWeekStartDate.parse(weekStartLocalDate);
+    return this.runner.transaction(async tx=>tx.getLatestWeeklyInsightSnapshot(this.subject,parsedDate));
   }
   async deleteAccount():Promise<void>{await this.runner.transaction(async tx=>{await tx.purgeAuthenticatedUser(this.subject);});}
   async getOrCreateAuthenticatedUser(defaults:{timezone:string;locale:string}):Promise<AuthenticatedUserContext>{return this.runner.transaction(async tx=>tx.getOrCreateUser(this.subject,defaults));}
