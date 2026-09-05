@@ -9,11 +9,13 @@ import type {
   StoredCustomFoodVersion,
   StoredVerifiedFoodImport,
   StoredMealPlanVersion,
+  StoredMemoryFact,
   StoredNutritionEvent,
   StoredOutcome,
   StoredProfile,
   StoredProposal,
   StoredSafetyAcknowledgement,
+  StoredWeeklyInsightSnapshot,
   V1Transaction,
   V1TransactionRunner,
   VersionedFood,
@@ -128,6 +130,12 @@ function mapGoalVersion(row: Record<string, unknown>): StoredGoalVersion {
 }
 function mapMealPlanVersion(row: Record<string, unknown>): StoredMealPlanVersion {
   return { id: asString(row.id), userSubject: asString(row.user_subject), slotsJson: asString(row.slots_json), createdAt: asString(row.created_at) };
+}
+function mapMemoryFact(row: Record<string, unknown>): StoredMemoryFact {
+  return { id: asString(row.id), userSubject: asString(row.user_subject), factText: asString(row.fact_text), provenance: asString(row.provenance) as StoredMemoryFact["provenance"], confidence: asString(row.confidence) as StoredMemoryFact["confidence"], createdAt: asString(row.created_at) };
+}
+function mapWeeklyInsightSnapshot(row: Record<string, unknown>): StoredWeeklyInsightSnapshot {
+  return { id: asString(row.id), userSubject: asString(row.user_subject), weekStartLocalDate: asString(row.week_start_local_date), metricsJson: asString(row.metrics_json), narrativeJson: asNullableString(row.narrative_json), createdAt: asString(row.created_at) };
 }
 /** Keeps one row per `food_key` (the most recently verified), preserving first-seen order otherwise. */
 function dedupeByFoodKey(rows: Record<string, unknown>[]): Record<string, unknown>[] {
@@ -507,6 +515,36 @@ export class DurableObjectV1Transaction implements V1Transaction {
     }
   }
 
+  async insertMemoryFact(fact: StoredMemoryFact): Promise<void> {
+    this.sql.exec(
+      "INSERT INTO ai_memory_facts (id, user_subject, fact_text, provenance, confidence, created_at) VALUES (?,?,?,?,?,?)",
+      fact.id, fact.userSubject, fact.factText, fact.provenance, fact.confidence, fact.createdAt,
+    );
+  }
+
+  async listMemoryFacts(userSubject: string): Promise<StoredMemoryFact[]> {
+    return this.sql.exec("SELECT * FROM ai_memory_facts WHERE user_subject=? ORDER BY created_at DESC", userSubject).toArray().map(mapMemoryFact);
+  }
+
+  async deleteMemoryFact(userSubject: string, id: string): Promise<void> {
+    this.sql.exec("DELETE FROM ai_memory_facts WHERE id=? AND user_subject=?", id, userSubject);
+  }
+
+  async insertWeeklyInsightSnapshot(snapshot: StoredWeeklyInsightSnapshot): Promise<void> {
+    this.sql.exec(
+      "INSERT INTO weekly_insight_snapshots (id, user_subject, week_start_local_date, metrics_json, narrative_json, created_at) VALUES (?,?,?,?,?,?)",
+      snapshot.id, snapshot.userSubject, snapshot.weekStartLocalDate, snapshot.metricsJson, snapshot.narrativeJson, snapshot.createdAt,
+    );
+  }
+
+  async getLatestWeeklyInsightSnapshot(userSubject: string, weekStartLocalDate: string): Promise<StoredWeeklyInsightSnapshot | null> {
+    const row = this.sql.exec(
+      "SELECT * FROM weekly_insight_snapshots WHERE user_subject=? AND week_start_local_date=? ORDER BY created_at DESC LIMIT 1",
+      userSubject, weekStartLocalDate,
+    ).one();
+    return row ? mapWeeklyInsightSnapshot(row) : null;
+  }
+
   /**
    * Ordered deletes respecting the schema's mixed CASCADE/RESTRICT foreign keys
    * — see db/migrations/*.sql. Only touches this user's own Durable Object
@@ -538,6 +576,8 @@ export class DurableObjectV1Transaction implements V1Transaction {
       this.sql.exec("DELETE FROM assessment_snapshots WHERE user_subject=?", userSubject);
       this.sql.exec("DELETE FROM safety_acknowledgements WHERE user_subject=?", userSubject);
       this.sql.exec("DELETE FROM user_ui_preferences WHERE user_subject=?", userSubject);
+      this.sql.exec("DELETE FROM weekly_insight_snapshots WHERE user_subject=?", userSubject);
+      this.sql.exec("DELETE FROM ai_memory_facts WHERE user_subject=?", userSubject);
       this.sql.exec("DELETE FROM profiles WHERE user_subject=?", userSubject);
       this.sql.exec("DELETE FROM users WHERE subject=?", userSubject);
     });
