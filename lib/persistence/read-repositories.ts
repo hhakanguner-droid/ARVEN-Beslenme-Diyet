@@ -6,20 +6,14 @@ import type {
   NutritionReadRepository,
 } from "@/lib/persistence/contracts";
 import type { ConsumptionCoverage, Food, NutritionFacts } from "@/lib/nutrition/types";
+import { sumNutrition } from "@/lib/nutrition/calculations";
 import { deriveNutritionLocalDate } from "@/lib/persistence/v1-boundary";
 import { previousLocalDate } from "@/lib/time/canonical";
 import type { V1TransactionRunner } from "@/lib/persistence/v1-boundary";
 
-type MealEventItemPayload = { nutrition: { energyKcal: number; proteinG: number; carbsG: number; fatG: number; fiberG?: number }; foodVersionId: string };
+type MealEventItemPayload = { nutrition: NutritionFacts; foodVersionId: string };
 type MealEventPayload = { schemaVersion: "MealEventV1"; mealType: string; items: MealEventItemPayload[] };
 type WaterEventPayload = { schemaVersion: "WaterEventV1"; milliliters: number };
-
-function zeroFacts(): NutritionFacts {
-  return { energyKcal: 0, proteinG: 0, carbsG: 0, fatG: 0, fiberG: 0 };
-}
-function addFacts(a: NutritionFacts, b: NutritionFacts): NutritionFacts {
-  return { energyKcal: a.energyKcal + b.energyKcal, proteinG: a.proteinG + b.proteinG, carbsG: a.carbsG + b.carbsG, fatG: a.fatG + b.fatG, fiberG: (a.fiberG ?? 0) + (b.fiberG ?? 0) };
-}
 
 /** Backs `contracts.ts`'s `NutritionReadRepository` — the exact read shape `Bugün` needs. */
 export class V1NutritionReadRepository implements NutritionReadRepository {
@@ -32,7 +26,7 @@ export class V1NutritionReadRepository implements NutritionReadRepository {
         tx.listNutritionEventsForLocalDate(subject, localDate),
       ]);
 
-      let consumed = zeroFacts();
+      const itemNutritions: NutritionFacts[] = [];
       let waterMl = 0;
       let hasMealEvent = false;
       for (const event of events) {
@@ -40,13 +34,16 @@ export class V1NutritionReadRepository implements NutritionReadRepository {
           hasMealEvent = true;
           let payload: MealEventPayload;
           try { payload = JSON.parse(event.payloadJson) as MealEventPayload; } catch { continue; }
-          for (const item of payload.items ?? []) consumed = addFacts(consumed, item.nutrition);
+          for (const item of payload.items ?? []) itemNutritions.push(item.nutrition);
         } else if (event.eventType === "water-log") {
           let payload: WaterEventPayload;
           try { payload = JSON.parse(event.payloadJson) as WaterEventPayload; } catch { continue; }
           waterMl += payload.milliliters;
         }
       }
+      // `sumNutrition` (the same deterministic aggregator every meal total in this app goes through)
+      // also combines each item's extended vitamin/mineral values with correct completeness rules.
+      const consumed = sumNutrition(itemNutritions);
       const consumptionCoverage: ConsumptionCoverage = hasMealEvent ? "logged-foods" : "empty-day";
 
       return {

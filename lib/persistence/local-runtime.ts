@@ -69,6 +69,7 @@ PRAGMA journal_mode = WAL;
 CREATE TABLE IF NOT EXISTS food_versions (
   id TEXT PRIMARY KEY NOT NULL,
   food_key TEXT NOT NULL,
+  version INTEGER NOT NULL DEFAULT 1,
   owner_subject TEXT,
   name TEXT NOT NULL,
   normalized_name TEXT NOT NULL,
@@ -97,6 +98,8 @@ CREATE INDEX IF NOT EXISTS food_versions_barcode_idx ON food_versions(barcode);
 
 CREATE TABLE IF NOT EXISTS portion_versions (
   id TEXT PRIMARY KEY NOT NULL,
+  portion_key TEXT,
+  version INTEGER NOT NULL DEFAULT 1,
   food_version_id TEXT NOT NULL REFERENCES food_versions(id) ON DELETE RESTRICT,
   measure TEXT NOT NULL,
   size TEXT,
@@ -113,6 +116,8 @@ CREATE INDEX IF NOT EXISTS portion_versions_food_idx ON portion_versions(food_ve
 `;
 
 type SeedPortion = { measure: string; label: string; gramsPerUnit: number };
+/** amount + unit only — completeness is always "complete" for these hand-entered reference figures. */
+type SeedNutrient = { mg?: number; mcg?: number };
 type SeedFood = {
   key: string;
   name: string;
@@ -122,22 +127,34 @@ type SeedFood = {
   carbsG: number;
   fatG: number;
   fiberG?: number;
+  /** A handful of well-known per-100g vitamin/mineral figures — illustrative dev-seed data, not a full micronutrient profile. */
+  extended?: Record<string, SeedNutrient>;
   portions: SeedPortion[];
 };
 
+function nutrientJson(extended?: Record<string, SeedNutrient>): string {
+  if (!extended) return "{}";
+  const result: Record<string, { amount: number; unit: "mg" | "mcg"; completeness: "complete" }> = {};
+  for (const [key, value] of Object.entries(extended)) {
+    if (value.mg != null) result[key] = { amount: value.mg, unit: "mg", completeness: "complete" };
+    else if (value.mcg != null) result[key] = { amount: value.mcg, unit: "mcg", completeness: "complete" };
+  }
+  return JSON.stringify(result);
+}
+
 /** A modest set of common Turkish foods so search/quick-add works out of the box in a fresh dev environment. */
 const SEED_FOODS: SeedFood[] = [
-  { key: "elma", name: "Elma", energyKcal: 52, proteinG: 0.3, carbsG: 14, fatG: 0.2, fiberG: 2.4, portions: [{ measure: "piece", label: "1 orta boy elma", gramsPerUnit: 180 }] },
-  { key: "yogurt-suzme", name: "Süzme yoğurt", energyKcal: 97, proteinG: 9, carbsG: 4, fatG: 5, portions: [{ measure: "bowl", label: "1 kase", gramsPerUnit: 200 }] },
-  { key: "tavuk-gogsu-izgara", name: "Izgara tavuk göğsü", energyKcal: 165, proteinG: 31, carbsG: 0, fatG: 3.6, portions: [{ measure: "serving", label: "1 porsiyon (150 g)", gramsPerUnit: 150 }] },
+  { key: "elma", name: "Elma", energyKcal: 52, proteinG: 0.3, carbsG: 14, fatG: 0.2, fiberG: 2.4, extended: { "vitamin-c": { mg: 4.6 }, potassium: { mg: 107 } }, portions: [{ measure: "piece", label: "1 orta boy elma", gramsPerUnit: 180 }] },
+  { key: "yogurt-suzme", name: "Süzme yoğurt", energyKcal: 97, proteinG: 9, carbsG: 4, fatG: 5, extended: { calcium: { mg: 110 }, sodium: { mg: 36 } }, portions: [{ measure: "bowl", label: "1 kase", gramsPerUnit: 200 }] },
+  { key: "tavuk-gogsu-izgara", name: "Izgara tavuk göğsü", energyKcal: 165, proteinG: 31, carbsG: 0, fatG: 3.6, extended: { potassium: { mg: 256 }, iron: { mg: 0.7 } }, portions: [{ measure: "serving", label: "1 porsiyon (150 g)", gramsPerUnit: 150 }] },
   { key: "pirinc-pilavi", name: "Pirinç pilavı", energyKcal: 130, proteinG: 2.7, carbsG: 28, fatG: 0.3, portions: [{ measure: "serving", label: "1 porsiyon", gramsPerUnit: 150 }] },
-  { key: "tam-bugday-ekmek", name: "Tam buğday ekmeği", energyKcal: 247, proteinG: 13, carbsG: 41, fatG: 3.4, fiberG: 7, portions: [{ measure: "slice", label: "1 dilim", gramsPerUnit: 30 }] },
-  { key: "yumurta-haslanmis", name: "Haşlanmış yumurta", energyKcal: 155, proteinG: 13, carbsG: 1.1, fatG: 11, portions: [{ measure: "piece", label: "1 adet", gramsPerUnit: 50 }] },
-  { key: "zeytinyagi", name: "Zeytinyağı", isLiquid: true, energyKcal: 884, proteinG: 0, carbsG: 0, fatG: 100, portions: [{ measure: "tablespoon", label: "1 yemek kaşığı", gramsPerUnit: 13.5 }] },
-  { key: "sut-yagli", name: "Tam yağlı süt", isLiquid: true, energyKcal: 61, proteinG: 3.2, carbsG: 4.8, fatG: 3.3, portions: [{ measure: "water-glass", label: "1 su bardağı", gramsPerUnit: 200 }] },
-  { key: "mercimek-corbasi", name: "Mercimek çorbası", isLiquid: true, energyKcal: 90, proteinG: 5, carbsG: 14, fatG: 1.8, fiberG: 3, portions: [{ measure: "bowl", label: "1 kase", gramsPerUnit: 250 }] },
-  { key: "muz", name: "Muz", energyKcal: 89, proteinG: 1.1, carbsG: 23, fatG: 0.3, fiberG: 2.6, portions: [{ measure: "piece", label: "1 orta boy muz", gramsPerUnit: 120 }] },
-  { key: "badem", name: "Badem", energyKcal: 579, proteinG: 21, carbsG: 22, fatG: 50, fiberG: 12.5, portions: [{ measure: "handful", label: "1 avuç (yaklaşık 20 adet)", gramsPerUnit: 24 }] },
+  { key: "tam-bugday-ekmek", name: "Tam buğday ekmeği", energyKcal: 247, proteinG: 13, carbsG: 41, fatG: 3.4, fiberG: 7, extended: { magnesium: { mg: 76 }, iron: { mg: 2.5 } }, portions: [{ measure: "slice", label: "1 dilim", gramsPerUnit: 30 }] },
+  { key: "yumurta-haslanmis", name: "Haşlanmış yumurta", energyKcal: 155, proteinG: 13, carbsG: 1.1, fatG: 11, extended: { "vitamin-b12": { mcg: 0.89 }, selenium: { mcg: 30.8 } }, portions: [{ measure: "piece", label: "1 adet", gramsPerUnit: 50 }] },
+  { key: "zeytinyagi", name: "Zeytinyağı", isLiquid: true, energyKcal: 884, proteinG: 0, carbsG: 0, fatG: 100, extended: { "vitamin-e": { mg: 14.4 } }, portions: [{ measure: "tablespoon", label: "1 yemek kaşığı", gramsPerUnit: 13.5 }] },
+  { key: "sut-yagli", name: "Tam yağlı süt", isLiquid: true, energyKcal: 61, proteinG: 3.2, carbsG: 4.8, fatG: 3.3, extended: { calcium: { mg: 113 }, "vitamin-b12": { mcg: 0.45 } }, portions: [{ measure: "water-glass", label: "1 su bardağı", gramsPerUnit: 200 }] },
+  { key: "mercimek-corbasi", name: "Mercimek çorbası", isLiquid: true, energyKcal: 90, proteinG: 5, carbsG: 14, fatG: 1.8, fiberG: 3, extended: { iron: { mg: 3.3 }, potassium: { mg: 369 } }, portions: [{ measure: "bowl", label: "1 kase", gramsPerUnit: 250 }] },
+  { key: "muz", name: "Muz", energyKcal: 89, proteinG: 1.1, carbsG: 23, fatG: 0.3, fiberG: 2.6, extended: { potassium: { mg: 358 }, "vitamin-b6": { mg: 0.4 }, "vitamin-c": { mg: 8.7 } }, portions: [{ measure: "piece", label: "1 orta boy muz", gramsPerUnit: 120 }] },
+  { key: "badem", name: "Badem", energyKcal: 579, proteinG: 21, carbsG: 22, fatG: 50, fiberG: 12.5, extended: { calcium: { mg: 269 }, magnesium: { mg: 270 }, iron: { mg: 3.7 }, "vitamin-e": { mg: 25.6 } }, portions: [{ measure: "handful", label: "1 avuç (yaklaşık 20 adet)", gramsPerUnit: 24 }] },
   { key: "su", name: "Su", isLiquid: true, energyKcal: 0, proteinG: 0, carbsG: 0, fatG: 0, portions: [{ measure: "water-glass", label: "1 su bardağı", gramsPerUnit: 200 }] },
 ];
 
@@ -150,8 +167,8 @@ function seedCatalogIfEmpty(db: DatabaseSync): void {
   if (n > 0) return;
   const now = new Date().toISOString();
   const insertFood = db.prepare(
-    `INSERT INTO food_versions (id, food_key, owner_subject, name, normalized_name, brand, barcode, is_liquid, energy_kcal_100g, protein_g_100g, carbs_g_100g, fat_g_100g, fiber_g_100g, allergen_data_status, dietary_safety_data_status, source_provider, verified_at, created_at)
-     VALUES (?,?,NULL,?,?,NULL,NULL,?,?,?,?,?,?,'unknown','not-applicable','manual-verified',?,?)`,
+    `INSERT INTO food_versions (id, food_key, owner_subject, name, normalized_name, brand, barcode, is_liquid, energy_kcal_100g, protein_g_100g, carbs_g_100g, fat_g_100g, fiber_g_100g, extended_nutrition_json, allergen_data_status, dietary_safety_data_status, source_provider, verified_at, created_at)
+     VALUES (?,?,NULL,?,?,NULL,NULL,?,?,?,?,?,?,?,'unknown','not-applicable','manual-verified',?,?)`,
   );
   const insertPortion = db.prepare(
     `INSERT INTO portion_versions (id, food_version_id, measure, size, label, grams_per_unit, source_provider, verified_at, created_at)
@@ -161,7 +178,7 @@ function seedCatalogIfEmpty(db: DatabaseSync): void {
   try {
     for (const food of SEED_FOODS) {
       const id = randomUUID();
-      insertFood.run(id, food.key, food.name, normalize(food.name), food.isLiquid ? 1 : 0, food.energyKcal, food.proteinG, food.carbsG, food.fatG, food.fiberG ?? null, now, now);
+      insertFood.run(id, food.key, food.name, normalize(food.name), food.isLiquid ? 1 : 0, food.energyKcal, food.proteinG, food.carbsG, food.fatG, food.fiberG ?? null, nutrientJson(food.extended), now, now);
       for (const portion of food.portions) {
         insertPortion.run(randomUUID(), id, portion.measure, portion.label, portion.gramsPerUnit, now, now);
       }
