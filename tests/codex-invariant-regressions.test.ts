@@ -75,6 +75,18 @@ class Tx implements V1Transaction {
   async getPhotoAsset(){ return null; }
   async listPhotoAssets(){ return []; }
   async deletePhotoAsset(){}
+  async insertLabDocument(){}
+  async getLabDocument(){ return null; }
+  async listLabDocuments(){ return []; }
+  async deleteLabDocument(){}
+  async insertLabResultEntry(){}
+  async listLabResultEntries(){ return []; }
+  async confirmLabResultEntry(): Promise<never> { throw new Error("unused"); }
+  async deleteLabResultEntry(){}
+  async insertSupplementRecord(){}
+  async listSupplementRecords(){ return []; }
+  async setSupplementRecordActive(){}
+  async deleteSupplementRecord(){}
 }
 class Runner implements V1TransactionRunner { constructor(readonly tx=new Tx()){} async transaction<T>(work:(tx:V1Transaction)=>Promise<T>){ return work(this.tx); } }
 function ids(...values:string[]){ let i=0; return()=>values[i++]??`id-${i}`; }
