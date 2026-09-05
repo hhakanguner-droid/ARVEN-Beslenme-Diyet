@@ -16,15 +16,19 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   }
 }
 
-/** Deletes both the metadata row and the underlying bytes. Any lab_result_entries that pointed at this document keep existing — see the schema's ON DELETE SET NULL. */
+/**
+ * Deletes the sensitive object before deleting its metadata. If object deletion fails, metadata
+ * remains intact so a later retry still knows the storage key; this avoids untraceable orphaned
+ * lab files. Existing lab_result_entries survive through the schema's ON DELETE SET NULL.
+ */
 export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
     const context = await resolveRouteContext(request);
     const document = await context.service.getLabDocument(id);
     if (!document) return Response.json({ error: "Document not found" }, { status: 404 });
-    await context.service.deleteLabDocument(id);
     await getMediaStorage().delete(document.storageKey);
+    await context.service.deleteLabDocument(id);
     return Response.json({ deleted: true });
   } catch (error) {
     return routeErrorResponse(error);
