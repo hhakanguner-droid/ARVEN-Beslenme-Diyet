@@ -122,6 +122,10 @@ class SafetyRaceTx implements V1Transaction {
   async deleteMemoryFact(){ throw new Error("unused"); }
   async insertWeeklyInsightSnapshot(){ throw new Error("unused"); }
   async getLatestWeeklyInsightSnapshot(){ return null; }
+  async insertPhotoAsset(){ throw new Error("unused"); }
+  async getPhotoAsset(){ return null; }
+  async listPhotoAssets(){ return []; }
+  async deletePhotoAsset(){ throw new Error("unused"); }
 }
 class SafetyRaceRunner implements V1TransactionRunner {
   constructor(readonly tx = new SafetyRaceTx()) {}

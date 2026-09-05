@@ -2,10 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   AiProviderError,
+  analyzeMealPhoto,
+  analyzeMenuPhoto,
   generateChatReply,
   generateWeeklyInsight,
+  identifyProductPhoto,
   type AiFetch,
   type AiFetchResponse,
+  type ArvenPhotoRequest,
   type OpenAiClientConfig,
 } from "../lib/ai/provider";
 import type { WeeklyMetricsV1 } from "../lib/nutrition/weekly-metrics";
@@ -135,6 +139,105 @@ test("generateWeeklyInsight rejects a narrative that echoes back a number from t
   })));
   await assert.rejects(
     () => generateWeeklyInsight(config(fetchImpl), { systemPrompt: "Sistem", metrics: sampleMetrics }),
+    (error: unknown) => error instanceof AiProviderError && error.code === "invalid-reply",
+  );
+});
+
+// Phase 5: vision provider functions. Each sends a two-part user message — an instruction string
+// plus an `image_url` content part carrying the photo as a `data:` URL — and validates the model's
+// JSON reply against the matching Phase 5 contract, exactly like generateWeeklyInsight above.
+
+const photoRequest: ArvenPhotoRequest = { systemPrompt: "Sistem", imageBase64: "ZmFrZS1pbWFnZS1ieXRlcw==", mimeType: "image/jpeg" };
+
+function lastUserMessage(sentMessages: { role: string; content: unknown }[]) {
+  return sentMessages[sentMessages.length - 1] as { role: string; content: { type: string; text?: string; image_url?: { url: string } }[] };
+}
+
+test("analyzeMealPhoto sends the photo as a data: URL image_url part and validates the reply against MealPhotoEstimateV1", async () => {
+  let sentMessages: { role: string; content: unknown }[] = [];
+  const fetchImpl = fakeFetch((_url, init) => {
+    sentMessages = JSON.parse(init.body).messages;
+    return jsonResponse(chatCompletionEnvelope({
+      schemaVersion: "MealPhotoEstimateV1",
+      items: [{ foodQuery: "ızgara tavuk göğüssü", portionHint: { measure: "palm", quantity: 1, naturalLabel: "1 avuç içi" }, confidence: "medium" }],
+      overallConfidence: "medium",
+      uncertainty: [],
+    }));
+  });
+  const estimate = await analyzeMealPhoto(config(fetchImpl), photoRequest);
+  const userMessage = lastUserMessage(sentMessages);
+  assert.equal(userMessage.role, "user");
+  const imagePart = userMessage.content.find((part) => part.type === "image_url");
+  assert.equal(imagePart?.image_url?.url, `data:${photoRequest.mimeType};base64,${photoRequest.imageBase64}`);
+  assert.equal(estimate.items[0]?.foodQuery, "ızgara tavuk göğüssü");
+});
+
+test("analyzeMealPhoto throws invalid-reply when the model's JSON fails MealPhotoEstimateV1 validation", async () => {
+  const fetchImpl = fakeFetch(() => jsonResponse(chatCompletionEnvelope({ schemaVersion: "MealPhotoEstimateV1", items: [], overallConfidence: "medium", uncertainty: [] })));
+  await assert.rejects(
+    () => analyzeMealPhoto(config(fetchImpl), photoRequest),
+    (error: unknown) => error instanceof AiProviderError && error.code === "invalid-reply",
+  );
+});
+
+test("analyzeMenuPhoto sends the photo as an image_url part and validates the reply against MenuAnalysisV1", async () => {
+  let sentMessages: { role: string; content: unknown }[] = [];
+  const fetchImpl = fakeFetch((_url, init) => {
+    sentMessages = JSON.parse(init.body).messages;
+    return jsonResponse(chatCompletionEnvelope({
+      schemaVersion: "MenuAnalysisV1",
+      rankedItems: [{ itemName: "Izgara somon", rationale: "Protein ağırlıklı bir seçenek.", fitsGoal: "good-fit" }],
+      uncertainty: [],
+    }));
+  });
+  const analysis = await analyzeMenuPhoto(config(fetchImpl), photoRequest);
+  const imagePart = lastUserMessage(sentMessages).content.find((part) => part.type === "image_url");
+  assert.equal(imagePart?.image_url?.url, `data:${photoRequest.mimeType};base64,${photoRequest.imageBase64}`);
+  assert.equal(analysis.rankedItems[0]?.fitsGoal, "good-fit");
+});
+
+test("analyzeMenuPhoto throws invalid-reply when the model's JSON fails MenuAnalysisV1 validation", async () => {
+  const fetchImpl = fakeFetch(() => jsonResponse(chatCompletionEnvelope({
+    schemaVersion: "MenuAnalysisV1",
+    rankedItems: [{ itemName: "Izgara somon", rationale: "Yaklaşık 450 kalori civarında." }],
+    uncertainty: [],
+  })));
+  await assert.rejects(
+    () => analyzeMenuPhoto(config(fetchImpl), photoRequest),
+    (error: unknown) => error instanceof AiProviderError && error.code === "invalid-reply",
+  );
+});
+
+test("identifyProductPhoto sends the photo as an image_url part and validates the reply against ProductPhotoIdentificationV1", async () => {
+  let sentMessages: { role: string; content: unknown }[] = [];
+  const fetchImpl = fakeFetch((_url, init) => {
+    sentMessages = JSON.parse(init.body).messages;
+    return jsonResponse(chatCompletionEnvelope({
+      schemaVersion: "ProductPhotoIdentificationV1",
+      candidateProductName: "yulaf ezmesi",
+      candidateBrand: "Örnek Marka",
+      detectedBarcode: "8690000000012",
+      confidence: "high",
+      uncertainty: [],
+    }));
+  });
+  const identification = await identifyProductPhoto(config(fetchImpl), photoRequest);
+  const imagePart = lastUserMessage(sentMessages).content.find((part) => part.type === "image_url");
+  assert.equal(imagePart?.image_url?.url, `data:${photoRequest.mimeType};base64,${photoRequest.imageBase64}`);
+  assert.equal(identification.detectedBarcode, "8690000000012");
+});
+
+test("identifyProductPhoto throws invalid-reply when the model's JSON fails ProductPhotoIdentificationV1 validation", async () => {
+  const fetchImpl = fakeFetch(() => jsonResponse(chatCompletionEnvelope({
+    schemaVersion: "ProductPhotoIdentificationV1",
+    candidateProductName: "yulaf ezmesi",
+    candidateBrand: "Örnek Marka",
+    detectedBarcode: "12",
+    confidence: "high",
+    uncertainty: [],
+  })));
+  await assert.rejects(
+    () => identifyProductPhoto(config(fetchImpl), photoRequest),
     (error: unknown) => error instanceof AiProviderError && error.code === "invalid-reply",
   );
 });

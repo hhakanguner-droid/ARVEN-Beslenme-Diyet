@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseArvenChatReply, parseMealSuggestion, parseWeeklyInsight } from "../lib/ai/contracts";
+import {
+  parseArvenChatReply, parseMealPhotoEstimate, parseMealSuggestion, parseMenuAnalysis,
+  parseProductPhotoIdentification, parseWeeklyInsight,
+} from "../lib/ai/contracts";
 
 const validSuggestion = {
   schemaVersion: "MealSuggestionV1",
   title: "Dengeli öğün",
   rationale: "Protein ve sebze ağırlıklı bir alternatif.",
-  ingredients: [{ foodQuery: "ızgara tavuk göğüşü", portionHint: { measure: "palm", quantity: 1, naturalLabel: "1 avuç içi" } }],
+  ingredients: [{ foodQuery: "ızgara tavuk göğüsü", portionHint: { measure: "palm", quantity: 1, naturalLabel: "1 avuç içi" } }],
   preparation: ["Izgarada pişir."],
   uncertainty: [],
 };
@@ -23,7 +26,7 @@ test("AI portion label must agree with structured measure, size, and quantity", 
   }), /naturalLabel must match structured portion hint/);
   assert.throws(() => parseMealSuggestion({
     ...validSuggestion,
-    ingredients: [{ foodQuery: "çorba", portionHint: { measure: "bowl", size: "small", quantity: 1, naturalLabel: "1 kase" } }],
+    ingredients: [{ foodQuery: "çorba", portionHint: { measure: "bowl", size: "small", quantity: 1, naturalLabel: "1 bardak" } }],
   }), /1 küçük kase/);
   const parsed = parseMealSuggestion({
     ...validSuggestion,
@@ -54,7 +57,7 @@ test("all user-facing meal text rejects numeric deterministic claims", () => {
     { ...validSuggestion, rationale: "Bu öğün 430 kcal içerir." },
     { ...validSuggestion, rationale: "Bu öğün ４３０ kcal içerir." },
     { ...validSuggestion, rationale: "Bu öğün ٤٣٠ kcal içerir." },
-    { ...validSuggestion, rationale: "Bu öğün ४४४ kcal içerir." },
+    { ...validSuggestion, rationale: "Bu öğün ११११ kcal içerir." },
     { ...validSuggestion, rationale: "Bu öğünde kalori 430, protein 30." },
     { ...validSuggestion, rationale: "Kalori: bir." },
     { ...validSuggestion, rationale: "Calories: one." },
@@ -85,7 +88,7 @@ test("all user-facing meal text rejects numeric deterministic claims", () => {
 
 test("food queries cannot be blank, smuggle quantities, or contain medical-management vocabulary", () => {
   for (const foodQuery of [
-    "   ", "120 g tavuk", "４３０ kcal tavuk", "٤٣٠ kcal tavuk", "४४४ kcal tavuk", "400 kcal yoğurt", "kalori 430 yoğurt",
+    "   ", "120 g tavuk", "４３０ kcal tavuk", "٤٣٠ kcal tavuk", "११११ kcal tavuk", "400 kcal yoğurt", "kalori 430 yoğurt",
     "iki miligram sodyum", "iki kilokalori yoğurt", "2 litre su", "iki mililitre süt",
     "1e3 kcal yoğurt", "1e3 calories chicken", "900 kilocalories yogurt", "800 kilojoules soup",
     "medication", "prescription", "ilaç", "reçete",
@@ -138,7 +141,7 @@ test("weekly AI insight cannot author numeric truth", () => {
 
 test("weekly insight parser enforces the same health policy on all narrative arrays", () => {
   const base = { schemaVersion: "WeeklyInsightV1", summary: "Nitel bir haftalık özet.", positives: [], areasForImprovement: [], suggestions: [], uncertainty: [] };
-  assert.throws(() => parseWeeklyInsight({ ...base, summary: "Çölyaksın." }), /non-diagnostic health policy/);
+  assert.throws(() => parseWeeklyInsight({ ...base, summary: "Çölyaksin." }), /non-diagnostic health policy/);
   assert.throws(() => parseWeeklyInsight({ ...base, suggestions: ["İlacını kes."] }), /non-diagnostic health policy/);
   assert.throws(() => parseWeeklyInsight({ ...base, suggestions: ["İnsülin kullanman gerekiyor."] }), /non-diagnostic health policy/);
 });
@@ -189,4 +192,78 @@ test("ARVEN chat reply rejects a memory update whose fact text smuggles a numeri
     ...validChatReply,
     memoryUpdates: [{ factText: "Günde 1900 kcal hedefliyor.", provenance: "user-stated", confidence: "high" }],
   }));
+});
+
+// Phase 5: vision contracts. Every text/narrative field goes through the same numeric-claim and
+// non-diagnostic-health guards as the chat/meal-suggestion/weekly-insight contracts above — the
+// only genuinely new thing is a per-item/per-photo PhotoConfidence label.
+
+const validMealPhotoEstimate = {
+  schemaVersion: "MealPhotoEstimateV1",
+  items: [{ foodQuery: "ızgara tavuk göğüsü", portionHint: { measure: "palm", quantity: 1, naturalLabel: "1 avuç içi" }, confidence: "medium" }],
+  overallConfidence: "medium",
+  uncertainty: [],
+};
+
+test("meal photo estimate accepts a well-formed item list with per-item confidence", () => {
+  const parsed = parseMealPhotoEstimate(validMealPhotoEstimate);
+  assert.equal(parsed.items[0]?.confidence, "medium");
+  assert.equal(parsed.overallConfidence, "medium");
+});
+
+test("meal photo estimate requires at least one item and rejects an unknown confidence label", () => {
+  assert.throws(() => parseMealPhotoEstimate({ ...validMealPhotoEstimate, items: [] }));
+  assert.throws(() => parseMealPhotoEstimate({ ...validMealPhotoEstimate, overallConfidence: "certain" }));
+});
+
+test("meal photo estimate still enforces the natural-portion-label and no-numbers rules on its items", () => {
+  assert.throws(() => parseMealPhotoEstimate({
+    ...validMealPhotoEstimate,
+    items: [{ foodQuery: "150 gram tavuk", portionHint: { measure: "palm", quantity: 1, naturalLabel: "1 avuç içi" }, confidence: "high" }],
+  }));
+});
+
+const validMenuAnalysis = {
+  schemaVersion: "MenuAnalysisV1",
+  rankedItems: [{ itemName: "Izgara somon", rationale: "Protein ağırlıklı ve yağ dengesi hedefine daha uygun.", fitsGoal: "good-fit" }],
+  uncertainty: [],
+};
+
+test("menu analysis accepts a ranked list with a qualitative fitsGoal label", () => {
+  const parsed = parseMenuAnalysis(validMenuAnalysis);
+  assert.equal(parsed.rankedItems[0]?.fitsGoal, "good-fit");
+});
+
+test("menu analysis rejects a numeric fit score and enforces the numeric-claim guard on rationale text", () => {
+  assert.throws(() => parseMenuAnalysis({ ...validMenuAnalysis, rankedItems: [{ ...validMenuAnalysis.rankedItems[0], fitsGoal: 9 }] }));
+  assert.throws(() => parseMenuAnalysis({
+    ...validMenuAnalysis,
+    rankedItems: [{ ...validMenuAnalysis.rankedItems[0], rationale: "Yaklaşık 450 kalori civarında." }],
+  }));
+});
+
+const validProductPhotoIdentification = {
+  schemaVersion: "ProductPhotoIdentificationV1",
+  candidateProductName: "yulaf ezmesi",
+  candidateBrand: "Örnek Marka",
+  detectedBarcode: "8690000000012",
+  confidence: "high",
+  uncertainty: [],
+};
+
+test("product photo identification accepts a full candidate identity with a valid barcode", () => {
+  const parsed = parseProductPhotoIdentification(validProductPhotoIdentification);
+  assert.equal(parsed.detectedBarcode, "8690000000012");
+});
+
+test("product photo identification allows every candidate field to be null when nothing was legible", () => {
+  const parsed = parseProductPhotoIdentification({
+    ...validProductPhotoIdentification, candidateProductName: null, candidateBrand: null, detectedBarcode: null,
+  });
+  assert.equal(parsed.detectedBarcode, null);
+});
+
+test("product photo identification rejects a barcode that is not 6 to 14 digits", () => {
+  assert.throws(() => parseProductPhotoIdentification({ ...validProductPhotoIdentification, detectedBarcode: "12" }));
+  assert.throws(() => parseProductPhotoIdentification({ ...validProductPhotoIdentification, detectedBarcode: "abc123456" }));
 });
