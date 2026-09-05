@@ -190,4 +190,26 @@ CREATE TABLE IF NOT EXISTS user_current_meal_plan (
   selected_at TEXT NOT NULL,
   FOREIGN KEY (meal_plan_version_id, user_subject) REFERENCES meal_plan_versions(id, user_subject) ON DELETE RESTRICT
 ) STRICT, WITHOUT ROWID;
+
+-- Phase 4: ARVEN AI — memory facts (user-deletable, see db/migrations/0004_phase4_ai.sql)
+-- and weekly insight report snapshots (deterministic metrics + validated narrative-only output).
+CREATE TABLE IF NOT EXISTS ai_memory_facts (
+  id TEXT PRIMARY KEY NOT NULL CHECK (length(trim(id)) > 0),
+  user_subject TEXT NOT NULL REFERENCES users(subject) ON DELETE CASCADE,
+  fact_text TEXT NOT NULL CHECK (length(trim(fact_text)) > 0 AND length(fact_text) <= 300),
+  provenance TEXT NOT NULL CHECK (provenance IN ('user-stated','ai-inferred')),
+  confidence TEXT NOT NULL CHECK (confidence IN ('high','medium','low')),
+  created_at TEXT NOT NULL
+) STRICT, WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS ai_memory_facts_user_idx ON ai_memory_facts(user_subject, created_at);
+
+CREATE TABLE IF NOT EXISTS weekly_insight_snapshots (
+  id TEXT PRIMARY KEY NOT NULL CHECK (length(trim(id)) > 0),
+  user_subject TEXT NOT NULL REFERENCES users(subject) ON DELETE CASCADE,
+  week_start_local_date TEXT NOT NULL CHECK (length(week_start_local_date) = 10),
+  metrics_json TEXT NOT NULL CHECK (json_valid(metrics_json) = 1 AND json_type(metrics_json) = 'object'),
+  narrative_json TEXT CHECK (narrative_json IS NULL OR (json_valid(narrative_json) = 1 AND json_type(narrative_json) = 'object')),
+  created_at TEXT NOT NULL
+) STRICT, WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS weekly_insight_snapshots_user_idx ON weekly_insight_snapshots(user_subject, week_start_local_date, created_at);
 `;

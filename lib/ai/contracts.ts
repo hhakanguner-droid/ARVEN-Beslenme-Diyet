@@ -35,7 +35,7 @@ const MEASURE_LABELS: Record<z.infer<typeof PortionMeasure>, string> = {
 const SIZE_LABELS: Record<z.infer<typeof PortionSize>, string> = { small: "küçük", medium: "orta", large: "büyük" };
 
 function normalizeNumberText(value: string): string {
-  return value.toLocaleLowerCase("tr-TR").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+  return value.toLocaleLowerCase("tr-TR").normalize("NFD").replace(/[̀-ͯ]/g, "")
     .replace(/ı/g, "i").replace(/ş/g, "s").replace(/ğ/g, "g").replace(/ç/g, "c")
     .replace(/ö/g, "o").replace(/ü/g, "u").replace(/[^a-z0-9\p{N}\s.,+\-]/gu, " ").replace(/\s+/g, " ");
 }
@@ -131,3 +131,41 @@ export const WeeklyInsightV1 = z.object({
 export type WeeklyInsight = z.infer<typeof WeeklyInsightV1>;
 export function parseMealSuggestion(input: unknown): MealSuggestion { return MealSuggestionV1.parse(input); }
 export function parseWeeklyInsight(input: unknown): WeeklyInsight { return WeeklyInsightV1.parse(input); }
+
+// Phase 4: ARVEN chat. chatNarrative mirrors mealNarrative's numeric-claim guard so free-form
+// chat replies are held to the same "AI never states a number" rule as meal text.
+function chatNarrative(max: number) {
+  return z.string().trim().min(1).max(max)
+    .refine((value) => !containsDigitNutritionClaim(value) && !containsSpelledNutritionClaim(value),
+      "AI chat text must not contain numeric nutrition/weight/adherence claims")
+    .refine(assertSafeNarrative, "AI output violates ARVEN non-diagnostic health policy");
+}
+const MemoryFactProvenance = z.enum(["user-stated", "ai-inferred"]);
+const MemoryFactConfidence = z.enum(["high", "medium", "low"]);
+// Mirrors the shape of the persistence layer's MemoryFactInput (lib/persistence/v1-boundary.ts)
+// but is defined independently here to keep this AI-output-facing contract module free of any
+// dependency on the persistence module.
+export const MemoryUpdateV1 = z.object({
+  factText: z.string().trim().min(1).max(300)
+    .refine((value) => !containsDigitNutritionClaim(value) && !containsSpelledNutritionClaim(value),
+      "Memory facts must not contain numeric nutrition/weight quantities")
+    .refine(assertSafeNarrative, "Memory fact violates ARVEN non-diagnostic health policy"),
+  provenance: MemoryFactProvenance,
+  confidence: MemoryFactConfidence,
+}).strict();
+export type MemoryUpdate = z.infer<typeof MemoryUpdateV1>;
+export const ProposedWaterActionV1 = z.object({
+  kind: z.literal("water-log"),
+  milliliters: z.number().int().min(1).max(5000),
+}).strict();
+export type ProposedWaterAction = z.infer<typeof ProposedWaterActionV1>;
+export const ArvenChatReplyV1 = z.object({
+  schemaVersion: z.literal("ArvenChatReplyV1"),
+  reply: chatNarrative(2000),
+  mealSuggestion: MealSuggestionV1.optional(),
+  proposedWaterAction: ProposedWaterActionV1.optional(),
+  memoryUpdates: z.array(MemoryUpdateV1).max(5).optional(),
+  uncertainty: z.array(chatNarrative(240)).max(6),
+}).strict();
+export type ArvenChatReply = z.infer<typeof ArvenChatReplyV1>;
+export function parseArvenChatReply(input: unknown): ArvenChatReply { return ArvenChatReplyV1.parse(input); }
