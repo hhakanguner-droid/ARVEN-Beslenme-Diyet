@@ -1,13 +1,36 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { AllergenSafetyExclusion, DietarySafetyExclusion } from "@/lib/health-safety/policy";
-import { V1MutationService,deriveNutritionLocalDate,type AuthenticatedUserContext,type ScientificReferenceSnapshot,type StoredAssessmentSnapshot,type StoredCustomFoodVersion,type StoredDecision,type StoredGoalVersion,type StoredMealPlanVersion,type StoredMemoryFact,type StoredNutritionEvent,type StoredOutcome,type StoredPhotoAsset,type StoredProfile,type StoredProposal,type StoredSafetyAcknowledgement,type StoredVerifiedFoodImport,type StoredWeeklyInsightSnapshot,type V1Transaction,type V1TransactionRunner,type VersionedFood } from "@/lib/persistence/v1-boundary";
+import { V1MutationService,deriveNutritionLocalDate,type AuthenticatedUserContext,type ScientificReferenceSnapshot,type StoredAssessmentSnapshot,type StoredCustomFoodVersion,type StoredDecision,type StoredGoalVersion,type StoredLabDocument,type StoredLabResultEntry,type StoredMealPlanVersion,type StoredMemoryFact,type StoredNutritionEvent,type StoredOutcome,type StoredPhotoAsset,type StoredProfile,type StoredProposal,type StoredSafetyAcknowledgement,type StoredSupplementRecord,type StoredVerifiedFoodImport,type StoredWeeklyInsightSnapshot,type V1Transaction,type V1TransactionRunner,type VersionedFood } from "@/lib/persistence/v1-boundary";
 class MemoryTx implements V1Transaction{
  context:AuthenticatedUserContext={timezone:"Europe/Istanbul",nutritionDayStartMinutes:0};proposals=new Map<string,StoredProposal>();decisions=new Map<string,StoredDecision>();outcomes=new Map<string,StoredOutcome>();events=new Map<string,StoredNutritionEvent>();foods=new Map<string,VersionedFood>();allergens:AllergenSafetyExclusion[]=[];exclusions:DietarySafetyExclusion[]=[];refs=new Map<string,ScientificReferenceSnapshot>();goals=new Map<string,StoredGoalVersion>();currentGoal:string|null=null;purgedSubjects:string[]=[];users=new Map<string,AuthenticatedUserContext>();profiles=new Map<string,StoredProfile>();assessments=new Map<string,StoredAssessmentSnapshot>();acknowledgements=new Map<string,StoredSafetyAcknowledgement>();mealPlans=new Map<string,StoredMealPlanVersion>();currentMealPlan:string|null=null;customFoods=new Map<string,StoredCustomFoodVersion>();memoryFacts=new Map<string,StoredMemoryFact>();weeklyInsights:StoredWeeklyInsightSnapshot[]=[];photoAssets=new Map<string,StoredPhotoAsset>();
  async insertPhotoAsset(asset:StoredPhotoAsset){this.photoAssets.set(asset.id,asset)}
  async getPhotoAsset(s:string,id:string){const v=this.photoAssets.get(id);return v?.userSubject===s?v:null}
  async listPhotoAssets(s:string){return [...this.photoAssets.values()].filter(p=>p.userSubject===s).sort((a,b)=>b.createdAt.localeCompare(a.createdAt))}
  async deletePhotoAsset(s:string,id:string){const p=this.photoAssets.get(id);if(p&&p.userSubject===s)this.photoAssets.delete(id)}
+ labDocuments=new Map<string,StoredLabDocument>();labResultEntries=new Map<string,StoredLabResultEntry>();supplementRecords=new Map<string,StoredSupplementRecord>();
+ async insertLabDocument(doc:StoredLabDocument){this.labDocuments.set(doc.id,doc)}
+ async getLabDocument(s:string,id:string){const v=this.labDocuments.get(id);return v?.userSubject===s?v:null}
+ async listLabDocuments(s:string){return [...this.labDocuments.values()].filter(d=>d.userSubject===s).sort((a,b)=>b.createdAt.localeCompare(a.createdAt))}
+ async deleteLabDocument(s:string,id:string){const d=this.labDocuments.get(id);if(d&&d.userSubject===s)this.labDocuments.delete(id)}
+ async insertLabResultEntry(entry:StoredLabResultEntry){this.labResultEntries.set(entry.id,entry)}
+ async listLabResultEntries(s:string){return [...this.labResultEntries.values()].filter(e=>e.userSubject===s).sort((a,b)=>b.createdAt.localeCompare(a.createdAt))}
+ async confirmLabResultEntry(s:string,id:string,edited:{markerName:string;valueText:string;unitText:string|null;referenceRangeText:string|null}){
+   const existing=this.labResultEntries.get(id);
+   if(!existing||existing.userSubject!==s) throw new Error("Lab result entry not found");
+   const updated:StoredLabResultEntry={...existing,...edited,status:"confirmed"};
+   this.labResultEntries.set(id,updated);
+   return updated;
+ }
+ async deleteLabResultEntry(s:string,id:string){const e=this.labResultEntries.get(id);if(e&&e.userSubject===s)this.labResultEntries.delete(id)}
+ async insertSupplementRecord(record:StoredSupplementRecord){this.supplementRecords.set(record.id,record)}
+ async listSupplementRecords(s:string){return [...this.supplementRecords.values()].filter(r=>r.userSubject===s).sort((a,b)=>b.createdAt.localeCompare(a.createdAt))}
+ async setSupplementRecordActive(s:string,id:string,isActive:boolean){
+   const existing=this.supplementRecords.get(id);
+   if(!existing||existing.userSubject!==s) throw new Error("Supplement record not found");
+   this.supplementRecords.set(id,{...existing,isActive});
+ }
+ async deleteSupplementRecord(s:string,id:string){const r=this.supplementRecords.get(id);if(r&&r.userSubject===s)this.supplementRecords.delete(id)}
  async insertMemoryFact(fact:StoredMemoryFact){this.memoryFacts.set(fact.id,fact)}
  async listMemoryFacts(s:string){return [...this.memoryFacts.values()].filter(f=>f.userSubject===s).sort((a,b)=>b.createdAt.localeCompare(a.createdAt))}
  async deleteMemoryFact(s:string,id:string){const f=this.memoryFacts.get(id);if(f&&f.userSubject===s)this.memoryFacts.delete(id)}
@@ -109,4 +132,86 @@ test("recordPhotoAsset rejects an unsupported mime type and an oversized byte co
  const s=new V1MutationService("u1",new MemoryRunner());
  await assert.rejects(()=>s.recordPhotoAsset({kind:"meal-photo",mimeType:"image/gif",byteSize:100,storageKey:"u1/x"}));
  await assert.rejects(()=>s.recordPhotoAsset({kind:"meal-photo",mimeType:"image/jpeg",byteSize:9_000_000,storageKey:"u1/x"}));
+});
+
+test("recordLabDocument stores metadata the owner can later list and delete, scoped to the authenticated subject",async()=>{
+ const r=new MemoryRunner();
+ let tick=0;
+ const s=new V1MutationService("u1",r,ids("doc-1","doc-2"),{now:()=>new Date(Date.parse("2026-09-02T20:00:00Z")+(tick++)*1000)});
+ const first=await s.recordLabDocument({mimeType:"image/jpeg",byteSize:12345,storageKey:"u1/doc-1"});
+ assert.equal(first.id,"doc-1");
+ const second=await s.recordLabDocument({mimeType:"image/png",byteSize:54321,storageKey:"u1/doc-2"});
+ const listed=await s.listLabDocuments();
+ assert.equal(listed.length,2);
+ assert.equal(listed[0]?.id,second.id);
+ assert.equal((await s.getLabDocument(first.id))?.storageKey,"u1/doc-1");
+ const other=new V1MutationService("u2",r);
+ assert.equal(await other.getLabDocument(first.id),null);
+ await other.deleteLabDocument(first.id);
+ assert.equal((await s.listLabDocuments()).length,2,"another user's delete must not remove this user's document");
+ await s.deleteLabDocument(first.id);
+ assert.equal((await s.listLabDocuments()).length,1);
+});
+
+test("recordLabDocument rejects an unsupported mime type and an oversized byte count",async()=>{
+ const s=new V1MutationService("u1",new MemoryRunner());
+ await assert.rejects(()=>s.recordLabDocument({mimeType:"application/pdf",byteSize:100,storageKey:"u1/x"}));
+ await assert.rejects(()=>s.recordLabDocument({mimeType:"image/jpeg",byteSize:9_000_000,storageKey:"u1/x"}));
+});
+
+test("recordLabResultEntries inserts every extraction candidate as 'extracted', and confirmLabResultEntry edits the text and flips it to 'confirmed', scoped to the authenticated subject",async()=>{
+ const r=new MemoryRunner();
+ let tick=0;
+ const s=new V1MutationService("u1",r,ids("doc-1","entry-1","entry-2"),{now:()=>new Date(Date.parse("2026-09-02T20:00:00Z")+(tick++)*1000)});
+ const doc=await s.recordLabDocument({mimeType:"image/jpeg",byteSize:12345,storageKey:"u1/doc-1"});
+ const [entry1,entry2]=await s.recordLabResultEntries(doc.id,[
+   {markerName:"Glukoz",valueText:"95",unitText:"mg/dL",referenceRangeText:"70-100"},
+   {markerName:"HbA1c",valueText:"5.4",unitText:"%",referenceRangeText:null},
+ ]);
+ assert.equal(entry1.status,"extracted");
+ assert.equal(entry2.status,"extracted");
+ assert.equal((await s.listLabResultEntries()).length,2);
+
+ const other=new V1MutationService("u2",r);
+ await assert.rejects(()=>other.confirmLabResultEntry(entry1.id,{markerName:"Glukoz",valueText:"95",unitText:"mg/dL",referenceRangeText:"70-100"}));
+
+ const confirmed=await s.confirmLabResultEntry(entry1.id,{markerName:"Açlık glukoz",valueText:"96",unitText:"mg/dL",referenceRangeText:"70-100"});
+ assert.equal(confirmed.status,"confirmed");
+ assert.equal(confirmed.markerName,"Açlık glukoz");
+
+ await other.deleteLabResultEntry(entry2.id);
+ assert.equal((await s.listLabResultEntries()).length,2,"another user's delete must not remove this user's entry");
+ await s.deleteLabResultEntry(entry2.id);
+ assert.equal((await s.listLabResultEntries()).length,1);
+});
+
+test("recordManualLabResultEntry stores an already-confirmed row with no AI extraction involved",async()=>{
+ const s=new V1MutationService("u1",new MemoryRunner());
+ const entry=await s.recordManualLabResultEntry({labDocumentId:null,markerName:"TSH",valueText:"2.1",unitText:"mIU/L",referenceRangeText:"0.4-4.0"});
+ assert.equal(entry.status,"confirmed");
+ assert.equal(entry.labDocumentId,null);
+});
+
+test("recordSupplement adds an active record the owner can list, deactivate and delete, scoped to the authenticated subject",async()=>{
+ const r=new MemoryRunner();
+ const s=new V1MutationService("u1",r,ids("sup-1"));
+ const record=await s.recordSupplement({foodVersionId:null,name:"D Vitamini",note:"Kahvaltıda"});
+ assert.equal(record.isActive,true);
+ assert.equal((await s.listSupplements()).length,1);
+
+ const other=new V1MutationService("u2",r);
+ await assert.rejects(()=>other.setSupplementActive(record.id,false));
+
+ await s.setSupplementActive(record.id,false);
+ assert.equal((await s.listSupplements())[0]?.isActive,false);
+
+ await other.deleteSupplement(record.id);
+ assert.equal((await s.listSupplements()).length,1,"another user's delete must not remove this user's supplement");
+ await s.deleteSupplement(record.id);
+ assert.equal((await s.listSupplements()).length,0);
+});
+
+test("recordSupplement rejects a blank name",async()=>{
+ const s=new V1MutationService("u1",new MemoryRunner());
+ await assert.rejects(()=>s.recordSupplement({foodVersionId:null,name:"   ",note:null}));
 });
