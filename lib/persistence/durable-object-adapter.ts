@@ -621,6 +621,14 @@ export class DurableObjectV1Transaction implements V1Transaction {
   }
 
   async confirmLabResultEntry(userSubject: string, id: string, edited: { markerName: string; valueText: string; unitText: string | null; referenceRangeText: string | null }): Promise<StoredLabResultEntry> {
+    const existingRow = this.sql.exec("SELECT * FROM lab_result_entries WHERE id=? AND user_subject=?", id, userSubject).one();
+    if (!existingRow) throw new Error("Lab result entry not found");
+    const existing = mapLabResultEntry(existingRow);
+    if (existing.status === "confirmed") {
+      const identical = existing.markerName === edited.markerName && existing.valueText === edited.valueText && existing.unitText === edited.unitText && existing.referenceRangeText === edited.referenceRangeText;
+      if (identical) return existing;
+      throw new Error("Confirmed lab result entries are immutable; create a new correction instead");
+    }
     this.sql.exec(
       "UPDATE lab_result_entries SET marker_name=?, value_text=?, unit_text=?, reference_range_text=?, status='confirmed' WHERE id=? AND user_subject=?",
       edited.markerName, edited.valueText, edited.unitText, edited.referenceRangeText, id, userSubject,

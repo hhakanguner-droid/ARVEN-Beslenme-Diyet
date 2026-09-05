@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { deriveCalculatedGoal, type MifflinStJeorV1Inputs } from "@/lib/goals/calculator";
 import { assertMealEnergyAllocations, type MealEnergyAllocation } from "@/lib/goals/types";
-import { assertNoAllergyConflict, assertNoDietaryExclusionConflict, type AllergenSafetyExclusion, type DietarySafetyExclusion } from "@/lib/health-safety/policy";
+import { assertNoAllergyConflict, assertNoDietaryExclusionConflict, assertNoMedicalOverreach, type AllergenSafetyExclusion, type DietarySafetyExclusion } from "@/lib/health-safety/policy";
+import { isKnownSupplementName } from "@/lib/supplements/reference";
 import { scaleNutritionForStorage, sumNutrition } from "@/lib/nutrition/calculations";
 import { resolvePortionSelection } from "@/lib/nutrition/portions";
 import type { Food, NutritionFacts, PortionSelection } from "@/lib/nutrition/types";
@@ -652,6 +653,7 @@ export class V1MutationService{
     const now=instant(this.clock.now());
     const rows:StoredLabResultEntry[]=entries.map((entry)=>{
       const x=LabExtractedEntryInput.parse(entry);
+      for(const value of [x.markerName,x.valueText,x.unitText,x.referenceRangeText]){if(value!=null)assertNoMedicalOverreach(value);}
       return {id:this.idFactory(),userSubject:this.subject,labDocumentId:parsedDocumentId,markerName:x.markerName,valueText:x.valueText,unitText:x.unitText,referenceRangeText:x.referenceRangeText,status:"extracted" as const,createdAt:now};
     });
     return this.runner.transaction(async tx=>{for(const row of rows) await tx.insertLabResultEntry(row);return rows;});
