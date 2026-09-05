@@ -9,7 +9,7 @@ def reject(conn,sql,params=()):
     except (sqlite3.IntegrityError,sqlite3.OperationalError): return
     raise AssertionError(f'expected rejection: {sql}')
 def main():
-    assert [Path(p).name for p in MIGRATIONS]==['0001_initial.sql','0002_phase2_identity.sql','0003_phase3_planning.sql','0004_phase4_ai.sql','0005_phase5_vision.sql']
+    assert [Path(p).name for p in MIGRATIONS]==['0001_initial.sql','0002_phase2_identity.sql','0003_phase3_planning.sql','0004_phase4_ai.sql','0005_phase5_vision.sql','0006_phase6_health.sql']
     combined='\n'.join(Path(p).read_text(encoding='utf-8') for p in MIGRATIONS)
     assert 'CREATE TRIGGER' not in combined.upper()
     assert 'CREATE TABLE ai_actions' not in combined
@@ -53,5 +53,17 @@ def main():
     reject(c,"INSERT INTO photo_assets(id,user_subject,kind,mime_type,byte_size,storage_key,created_at) VALUES('ph-bad4','u1','meal-photo','image/jpeg',9000000,'u1/ph-bad4',?)",(now,))
     c.execute("INSERT INTO photo_assets(id,user_subject,kind,mime_type,byte_size,storage_key,created_at) VALUES('ph1','u1','meal-photo','image/jpeg',12345,'u1/ph1',?)",(now,))
     c.execute("DELETE FROM photo_assets WHERE id='ph1'")
+    reject(c,"INSERT INTO lab_documents(id,user_subject,mime_type,byte_size,storage_key,created_at) VALUES('ld-bad','u1','application/pdf',100,'u1/ld-bad',?)",(now,))
+    c.execute("INSERT INTO lab_documents(id,user_subject,mime_type,byte_size,storage_key,created_at) VALUES('ld1','u1','image/jpeg',12345,'u1/ld1',?)",(now,))
+    reject(c,"INSERT INTO lab_result_entries(id,user_subject,lab_document_id,marker_name,value_text,unit_text,reference_range_text,status,created_at) VALUES('lr-bad','u1','ld1','Glukoz','95','mg/dL','70-100','pending',?)",(now,))
+    c.execute("INSERT INTO lab_result_entries(id,user_subject,lab_document_id,marker_name,value_text,unit_text,reference_range_text,status,created_at) VALUES('lr1','u1','ld1','Glukoz','95','mg/dL','70-100','extracted',?)",(now,))
+    c.execute("UPDATE lab_result_entries SET status='confirmed' WHERE id='lr1'")
+    c.execute("DELETE FROM lab_documents WHERE id='ld1'")
+    assert c.execute("SELECT lab_document_id FROM lab_result_entries WHERE id='lr1'").fetchone()[0] is None
+    c.execute("DELETE FROM lab_result_entries WHERE id='lr1'")
+    reject(c,"INSERT INTO supplement_records(id,user_subject,food_version_id,name,note,is_active,created_at) VALUES('sr-bad','u1',NULL,'  ',NULL,1,?)",(now,))
+    c.execute("INSERT INTO supplement_records(id,user_subject,food_version_id,name,note,is_active,created_at) VALUES('sr1','u1',NULL,'D Vitamini',NULL,1,?)",(now,))
+    c.execute("UPDATE supplement_records SET is_active=0 WHERE id='sr1'")
+    c.execute("DELETE FROM supplement_records WHERE id='sr1'")
     print('CLEAN_V1_MIGRATION_OK')
 if __name__=='__main__':main()

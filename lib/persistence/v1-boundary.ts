@@ -81,6 +81,35 @@ const PhotoAssetInput = z.object({
   storageKey: z.string().trim().min(1).max(300),
 }).strict();
 
+// Phase 6: health context. Lab documents reuse the exact same mime-type/size limits as
+// photo_assets (Phase 5) — a separate table because that migration is already merged (see
+// db/migrations/0006_phase6_health.sql).
+const LAB_DOCUMENT_MIME_TYPES=["image/jpeg","image/png","image/webp"] as const;
+const LabDocumentInput = z.object({
+  mimeType: z.enum(LAB_DOCUMENT_MIME_TYPES),
+  byteSize: z.number().int().min(1).max(8_000_000),
+  storageKey: z.string().trim().min(1).max(300),
+}).strict();
+const LAB_RESULT_STATUSES=["extracted","confirmed"] as const;
+const LabResultEntryText = z.string().trim().min(1).max(80);
+/** Shared shape for one lab reading's transcribed text — used both for an AI extraction candidate and for the user's edits when confirming one. */
+const LabExtractedEntryInput = z.object({
+  markerName: z.string().trim().min(1).max(160),
+  valueText: LabResultEntryText,
+  unitText: z.string().trim().min(1).max(40).nullable(),
+  referenceRangeText: z.string().trim().min(1).max(80).nullable(),
+}).strict();
+const LabResultEntryInput = LabExtractedEntryInput.extend({ labDocumentId: Id.nullable() }).strict();
+const LabResultEntryUpdate = LabExtractedEntryInput;
+// Explicitly NOT a medication registry — no dosage/schedule field exists here on purpose (see
+// docs/ROADMAP.md's Phase 6 entry). foodVersionId is optional, pointed at the existing verified
+// multi-source food catalog when the user's supplement happens to be found there.
+const SupplementRecordInput = z.object({
+  foodVersionId: Id.nullable(),
+  name: z.string().trim().min(1).max(160),
+  note: z.string().trim().max(300).nullable(),
+}).strict();
+
 export const RecipeIngredientV1 = MealItemBase.extend({ selection:z.union([HouseholdSelection,CustomGramSelection]) }).strict();
 export const RecipeFoodV1 = z.object({
   schemaVersion:z.literal("RecipeFoodV1"),
@@ -159,6 +188,11 @@ export type StoredWeeklyInsightSnapshot={id:string;userSubject:string;weekStartL
 export type PhotoAssetKind=typeof PHOTO_ASSET_KINDS[number];
 export type PhotoAssetMimeType=typeof PHOTO_ASSET_MIME_TYPES[number];
 export type StoredPhotoAsset={id:string;userSubject:string;kind:PhotoAssetKind;mimeType:PhotoAssetMimeType;byteSize:number;storageKey:string;createdAt:string};
+export type LabDocumentMimeType=typeof LAB_DOCUMENT_MIME_TYPES[number];
+export type StoredLabDocument={id:string;userSubject:string;mimeType:LabDocumentMimeType;byteSize:number;storageKey:string;createdAt:string};
+export type LabResultEntryStatus=typeof LAB_RESULT_STATUSES[number];
+export type StoredLabResultEntry={id:string;userSubject:string;labDocumentId:string|null;markerName:string;valueText:string;unitText:string|null;referenceRangeText:string|null;status:LabResultEntryStatus;createdAt:string};
+export type StoredSupplementRecord={id:string;userSubject:string;foodVersionId:string|null;name:string;note:string|null;isActive:boolean;createdAt:string};
 
 export interface V1Transaction {
   getUserContext(userSubject:string):Promise<AuthenticatedUserContext>;
@@ -240,6 +274,29 @@ export interface V1Transaction {
   listPhotoAssets(userSubject:string):Promise<StoredPhotoAsset[]>;
   /** User-initiated forget, same semantics as `deleteMemoryFact`: genuinely deleted, silently a no-op if already gone or owned by another subject. Callers are responsible for also deleting the underlying bytes via `lib/media/storage.ts`. */
   deletePhotoAsset(userSubject:string,id:string):Promise<void>;
+  /** Records metadata for one already-stored lab document (see `lib/media/storage.ts`); the adapter never touches the bytes themselves. */
+  insertLabDocument(document:StoredLabDocument):Promise<void>;
+  getLabDocument(userSubject:string,id:string):Promise<StoredLabDocument|null>;
+  /** Every lab document for this subject, most recent first. */
+  listLabDocuments(userSubject:string):Promise<StoredLabDocument[]>;
+  /** User-initiated forget. Callers are responsible for also deleting the underlying bytes via `lib/media/storage.ts`; the schema sets any referencing `lab_result_entries.lab_document_id` to NULL rather than deleting those rows, so a confirmed reading survives its source photo being removed. */
+  deleteLabDocument(userSubject:string,id:string):Promise<void>;
+  /** Appends one 'extracted' (unreviewed) or user-entered lab result row. */
+  insertLabResultEntry(entry:StoredLabResultEntry):Promise<void>;
+  /** Every lab result entry for this subject, most recent first. */
+  listLabResultEntries(userSubject:string):Promise<StoredLabResultEntry[]>;
+  /** Edits an entry's transcribed text and marks it 'confirmed' in one write — the only supported transition, since a confirmed entry going back to 'extracted' has no product meaning. Must throw if the row does not exist or belongs to another subject. */
+  confirmLabResultEntry(userSubject:string,id:string,edited:{markerName:string;valueText:string;unitText:string|null;referenceRangeText:string|null}):Promise<StoredLabResultEntry>;
+  /** User-initiated forget: rejecting an unreviewed extraction, or removing a confirmed entry later. Silently a no-op if already gone or owned by another subject. */
+  deleteLabResultEntry(userSubject:string,id:string):Promise<void>;
+  /** Adds one supplement record ("the user takes this") — no dosage/schedule, see the type's doc comment. */
+  insertSupplementRecord(record:StoredSupplementRecord):Promise<void>;
+  /** Every supplement record for this subject, most recent first (active and inactive alike — the client decides what to show). */
+  listSupplementRecords(userSubject:string):Promise<StoredSupplementRecord[]>;
+  /** Toggles active/inactive (e.g. "stopped taking this") without losing the record. Must throw if the row does not exist or belongs to another subject. */
+  setSupplementRecordActive(userSubject:string,id:string,isActive:boolean):Promise<void>;
+  /** User-initiated forget, same semantics as `deleteMemoryFact`. */
+  deleteSupplementRecord(userSubject:string,id:string):Promise<void>;
 }
 export interface V1TransactionRunner{transaction<T>(work:(tx:V1Transaction)=>Promise<T>):Promise<T>}
 export type ServiceClock={now():Date}; export type IdFactory=()=>string;
@@ -577,4 +634,53 @@ export class V1MutationService{
   async upsertProfile(input:unknown):Promise<StoredProfile>{const x=ProfileUpsertV1.parse(input);const profile:StoredProfile={userSubject:this.subject,displayName:x.displayName,birthDate:x.birthDate,sexAtBirth:x.sexAtBirth,heightCm:x.heightCm,activityLevel:x.activityLevel,updatedAt:instant(this.clock.now())};return this.runner.transaction(async tx=>{await tx.upsertProfile(profile);return profile;});}
   async recordAssessmentSnapshot(input:unknown):Promise<StoredAssessmentSnapshot>{const x=AssessmentSnapshotPayloadV1.parse(input);const now=instant(this.clock.now());const snapshot:StoredAssessmentSnapshot={id:this.idFactory(),userSubject:this.subject,completedAt:now,payloadJson:canonicalJson(x),createdAt:now};return this.runner.transaction(async tx=>{await tx.insertAssessmentSnapshot(snapshot);return snapshot;});}
   async recordSafetyAcknowledgement(input:unknown):Promise<StoredSafetyAcknowledgement>{const x=SafetyAcknowledgementV1.parse(input);const now=instant(this.clock.now());const acknowledgement:StoredSafetyAcknowledgement={id:this.idFactory(),userSubject:this.subject,acknowledgementType:x.acknowledgementType,policyVersion:x.policyVersion,acknowledgedAt:now,createdAt:now};return this.runner.transaction(async tx=>{await tx.insertSafetyAcknowledgement(acknowledgement);return acknowledgement;});}
+
+  /** Records metadata for a lab document the caller has already written to `lib/media/storage.ts`. This service never sees the bytes. */
+  async recordLabDocument(input:unknown):Promise<StoredLabDocument>{
+    const x=LabDocumentInput.parse(input);
+    const document:StoredLabDocument={id:this.idFactory(),userSubject:this.subject,mimeType:x.mimeType,byteSize:x.byteSize,storageKey:x.storageKey,createdAt:instant(this.clock.now())};
+    return this.runner.transaction(async tx=>{await tx.insertLabDocument(document);return document;});
+  }
+  async getLabDocument(id:string):Promise<StoredLabDocument|null>{const parsed=Id.parse(id);return this.runner.transaction(async tx=>tx.getLabDocument(this.subject,parsed));}
+  async listLabDocuments():Promise<StoredLabDocument[]>{return this.runner.transaction(async tx=>tx.listLabDocuments(this.subject));}
+  /** User-initiated forget — see `V1Transaction.deleteLabDocument`'s doc comment. Callers are responsible for also deleting the underlying bytes via `lib/media/storage.ts`. */
+  async deleteLabDocument(id:string):Promise<void>{const parsed=Id.parse(id);await this.runner.transaction(async tx=>{await tx.deleteLabDocument(this.subject,parsed);});}
+
+  /** Records one or more AI-extracted (unreviewed) lab result rows in a single write. */
+  async recordLabResultEntries(labDocumentId:string|null,entries:unknown[]):Promise<StoredLabResultEntry[]>{
+    const parsedDocumentId=labDocumentId==null?null:Id.parse(labDocumentId);
+    const now=instant(this.clock.now());
+    const rows:StoredLabResultEntry[]=entries.map((entry)=>{
+      const x=LabExtractedEntryInput.parse(entry);
+      return {id:this.idFactory(),userSubject:this.subject,labDocumentId:parsedDocumentId,markerName:x.markerName,valueText:x.valueText,unitText:x.unitText,referenceRangeText:x.referenceRangeText,status:"extracted" as const,createdAt:now};
+    });
+    return this.runner.transaction(async tx=>{for(const row of rows) await tx.insertLabResultEntry(row);return rows;});
+  }
+  /** Records one manually-entered lab result row, already confirmed (the user typed it themselves — there is nothing to review). */
+  async recordManualLabResultEntry(input:unknown):Promise<StoredLabResultEntry>{
+    const x=LabResultEntryInput.parse(input);
+    const row:StoredLabResultEntry={id:this.idFactory(),userSubject:this.subject,labDocumentId:x.labDocumentId,markerName:x.markerName,valueText:x.valueText,unitText:x.unitText,referenceRangeText:x.referenceRangeText,status:"confirmed",createdAt:instant(this.clock.now())};
+    return this.runner.transaction(async tx=>{await tx.insertLabResultEntry(row);return row;});
+  }
+  async listLabResultEntries():Promise<StoredLabResultEntry[]>{return this.runner.transaction(async tx=>tx.listLabResultEntries(this.subject));}
+  /** Reviews and confirms an 'extracted' row, optionally with the user's own corrections to the transcribed text. */
+  async confirmLabResultEntry(id:string,edits:unknown):Promise<StoredLabResultEntry>{
+    const parsed=Id.parse(id);
+    const x=LabResultEntryUpdate.parse(edits);
+    return this.runner.transaction(async tx=>tx.confirmLabResultEntry(this.subject,parsed,x));
+  }
+  /** User-initiated forget — see `V1Transaction.deleteLabResultEntry`'s doc comment. */
+  async deleteLabResultEntry(id:string):Promise<void>{const parsed=Id.parse(id);await this.runner.transaction(async tx=>{await tx.deleteLabResultEntry(this.subject,parsed);});}
+
+  /** Adds one supplement record. Not a medication registry — see `StoredSupplementRecord`'s doc comment. */
+  async recordSupplement(input:unknown):Promise<StoredSupplementRecord>{
+    const x=SupplementRecordInput.parse(input);
+    const record:StoredSupplementRecord={id:this.idFactory(),userSubject:this.subject,foodVersionId:x.foodVersionId,name:x.name,note:x.note,isActive:true,createdAt:instant(this.clock.now())};
+    return this.runner.transaction(async tx=>{await tx.insertSupplementRecord(record);return record;});
+  }
+  async listSupplements():Promise<StoredSupplementRecord[]>{return this.runner.transaction(async tx=>tx.listSupplementRecords(this.subject));}
+  /** Marks a supplement active/inactive (e.g. "stopped taking this") without losing the record. */
+  async setSupplementActive(id:string,isActive:boolean):Promise<void>{const parsed=Id.parse(id);await this.runner.transaction(async tx=>{await tx.setSupplementRecordActive(this.subject,parsed,isActive);});}
+  /** User-initiated forget — see `V1Transaction.deleteSupplementRecord`'s doc comment. */
+  async deleteSupplement(id:string):Promise<void>{const parsed=Id.parse(id);await this.runner.transaction(async tx=>{await tx.deleteSupplementRecord(this.subject,parsed);});}
 }

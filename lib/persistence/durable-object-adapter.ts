@@ -10,12 +10,15 @@ import type {
   StoredVerifiedFoodImport,
   StoredMealPlanVersion,
   StoredMemoryFact,
+  StoredLabDocument,
+  StoredLabResultEntry,
   StoredNutritionEvent,
   StoredOutcome,
   StoredPhotoAsset,
   StoredProfile,
   StoredProposal,
   StoredSafetyAcknowledgement,
+  StoredSupplementRecord,
   StoredWeeklyInsightSnapshot,
   V1Transaction,
   V1TransactionRunner,
@@ -140,6 +143,23 @@ function mapWeeklyInsightSnapshot(row: Record<string, unknown>): StoredWeeklyIns
 }
 function mapPhotoAsset(row: Record<string, unknown>): StoredPhotoAsset {
   return { id: asString(row.id), userSubject: asString(row.user_subject), kind: asString(row.kind) as StoredPhotoAsset["kind"], mimeType: asString(row.mime_type) as StoredPhotoAsset["mimeType"], byteSize: Number(row.byte_size), storageKey: asString(row.storage_key), createdAt: asString(row.created_at) };
+}
+function mapLabDocument(row: Record<string, unknown>): StoredLabDocument {
+  return { id: asString(row.id), userSubject: asString(row.user_subject), mimeType: asString(row.mime_type) as StoredLabDocument["mimeType"], byteSize: Number(row.byte_size), storageKey: asString(row.storage_key), createdAt: asString(row.created_at) };
+}
+function mapLabResultEntry(row: Record<string, unknown>): StoredLabResultEntry {
+  return {
+    id: asString(row.id), userSubject: asString(row.user_subject), labDocumentId: asNullableString(row.lab_document_id),
+    markerName: asString(row.marker_name), valueText: asString(row.value_text),
+    unitText: asNullableString(row.unit_text), referenceRangeText: asNullableString(row.reference_range_text),
+    status: asString(row.status) as StoredLabResultEntry["status"], createdAt: asString(row.created_at),
+  };
+}
+function mapSupplementRecord(row: Record<string, unknown>): StoredSupplementRecord {
+  return {
+    id: asString(row.id), userSubject: asString(row.user_subject), foodVersionId: asNullableString(row.food_version_id),
+    name: asString(row.name), note: asNullableString(row.note), isActive: Number(row.is_active) === 1, createdAt: asString(row.created_at),
+  };
 }
 /** Keeps one row per `food_key` (the most recently verified), preserving first-seen order otherwise. */
 function dedupeByFoodKey(rows: Record<string, unknown>[]): Record<string, unknown>[] {
@@ -569,6 +589,72 @@ export class DurableObjectV1Transaction implements V1Transaction {
     this.sql.exec("DELETE FROM photo_assets WHERE id=? AND user_subject=?", id, userSubject);
   }
 
+  async insertLabDocument(document: StoredLabDocument): Promise<void> {
+    this.sql.exec(
+      "INSERT INTO lab_documents (id, user_subject, mime_type, byte_size, storage_key, created_at) VALUES (?,?,?,?,?,?)",
+      document.id, document.userSubject, document.mimeType, document.byteSize, document.storageKey, document.createdAt,
+    );
+  }
+
+  async getLabDocument(userSubject: string, id: string): Promise<StoredLabDocument | null> {
+    const row = this.sql.exec("SELECT * FROM lab_documents WHERE id=? AND user_subject=?", id, userSubject).one();
+    return row ? mapLabDocument(row) : null;
+  }
+
+  async listLabDocuments(userSubject: string): Promise<StoredLabDocument[]> {
+    return this.sql.exec("SELECT * FROM lab_documents WHERE user_subject=? ORDER BY created_at DESC", userSubject).toArray().map(mapLabDocument);
+  }
+
+  async deleteLabDocument(userSubject: string, id: string): Promise<void> {
+    this.sql.exec("DELETE FROM lab_documents WHERE id=? AND user_subject=?", id, userSubject);
+  }
+
+  async insertLabResultEntry(entry: StoredLabResultEntry): Promise<void> {
+    this.sql.exec(
+      "INSERT INTO lab_result_entries (id, user_subject, lab_document_id, marker_name, value_text, unit_text, reference_range_text, status, created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+      entry.id, entry.userSubject, entry.labDocumentId, entry.markerName, entry.valueText, entry.unitText, entry.referenceRangeText, entry.status, entry.createdAt,
+    );
+  }
+
+  async listLabResultEntries(userSubject: string): Promise<StoredLabResultEntry[]> {
+    return this.sql.exec("SELECT * FROM lab_result_entries WHERE user_subject=? ORDER BY created_at DESC", userSubject).toArray().map(mapLabResultEntry);
+  }
+
+  async confirmLabResultEntry(userSubject: string, id: string, edited: { markerName: string; valueText: string; unitText: string | null; referenceRangeText: string | null }): Promise<StoredLabResultEntry> {
+    this.sql.exec(
+      "UPDATE lab_result_entries SET marker_name=?, value_text=?, unit_text=?, reference_range_text=?, status='confirmed' WHERE id=? AND user_subject=?",
+      edited.markerName, edited.valueText, edited.unitText, edited.referenceRangeText, id, userSubject,
+    );
+    const row = this.sql.exec("SELECT * FROM lab_result_entries WHERE id=? AND user_subject=?", id, userSubject).one();
+    if (!row) throw new Error("Lab result entry not found");
+    return mapLabResultEntry(row);
+  }
+
+  async deleteLabResultEntry(userSubject: string, id: string): Promise<void> {
+    this.sql.exec("DELETE FROM lab_result_entries WHERE id=? AND user_subject=?", id, userSubject);
+  }
+
+  async insertSupplementRecord(record: StoredSupplementRecord): Promise<void> {
+    this.sql.exec(
+      "INSERT INTO supplement_records (id, user_subject, food_version_id, name, note, is_active, created_at) VALUES (?,?,?,?,?,?,?)",
+      record.id, record.userSubject, record.foodVersionId, record.name, record.note, record.isActive ? 1 : 0, record.createdAt,
+    );
+  }
+
+  async listSupplementRecords(userSubject: string): Promise<StoredSupplementRecord[]> {
+    return this.sql.exec("SELECT * FROM supplement_records WHERE user_subject=? ORDER BY created_at DESC", userSubject).toArray().map(mapSupplementRecord);
+  }
+
+  async setSupplementRecordActive(userSubject: string, id: string, isActive: boolean): Promise<void> {
+    this.sql.exec("UPDATE supplement_records SET is_active=? WHERE id=? AND user_subject=?", isActive ? 1 : 0, id, userSubject);
+    const row = this.sql.exec("SELECT id FROM supplement_records WHERE id=? AND user_subject=?", id, userSubject).one();
+    if (!row) throw new Error("Supplement record not found");
+  }
+
+  async deleteSupplementRecord(userSubject: string, id: string): Promise<void> {
+    this.sql.exec("DELETE FROM supplement_records WHERE id=? AND user_subject=?", id, userSubject);
+  }
+
   /**
    * Ordered deletes respecting the schema's mixed CASCADE/RESTRICT foreign keys
    * — see db/migrations/*.sql. Only touches this user's own Durable Object
@@ -586,10 +672,10 @@ export class DurableObjectV1Transaction implements V1Transaction {
    * real D1/DO topology needs to revisit that constraint (drop it, or track
    * ownership without a DB-level FK) — not addressed here.
    *
-   * Known follow-up: this also deletes `photo_assets` metadata rows, but not the photo bytes
-   * those rows pointed at in `lib/media/storage.ts` (R2/local file) — no account-delete flow
+   * Known follow-up: this also deletes `photo_assets`/`lab_documents` metadata rows, but not the
+   * bytes those rows pointed at in `lib/media/storage.ts` (R2/local file) — no account-delete flow
    * exists yet to wire that up (that's Phase 9 scope), so a full delete-account implementation
-   * will need to list a user's photo assets and delete their underlying objects first.
+   * will need to list a user's photo/lab documents and delete their underlying objects first.
    */
   async purgeAuthenticatedUser(userSubject: string): Promise<void> {
     this.sql.transactionSync(() => {
@@ -608,6 +694,9 @@ export class DurableObjectV1Transaction implements V1Transaction {
       this.sql.exec("DELETE FROM weekly_insight_snapshots WHERE user_subject=?", userSubject);
       this.sql.exec("DELETE FROM ai_memory_facts WHERE user_subject=?", userSubject);
       this.sql.exec("DELETE FROM photo_assets WHERE user_subject=?", userSubject);
+      this.sql.exec("DELETE FROM lab_result_entries WHERE user_subject=?", userSubject);
+      this.sql.exec("DELETE FROM lab_documents WHERE user_subject=?", userSubject);
+      this.sql.exec("DELETE FROM supplement_records WHERE user_subject=?", userSubject);
       this.sql.exec("DELETE FROM profiles WHERE user_subject=?", userSubject);
       this.sql.exec("DELETE FROM users WHERE subject=?", userSubject);
     });
