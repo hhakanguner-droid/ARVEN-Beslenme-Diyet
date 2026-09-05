@@ -24,8 +24,6 @@ export async function POST(request: Request) {
     const provider = getOptionalAiProvider();
 
     if (provider) {
-      // Fail closed before reading/storing the multipart body. A rejected consent request must not
-      // leave a sensitive lab image behind in storage.
       const declaredFlows = getFlowsForTrigger("lab-extraction");
       if (declaredFlows.length === 0 || declaredFlows.some((flow) => flow.consentMode !== "explicit-opt-in")) {
         return Response.json({ error: "lab-ai-data-flow-not-declared" }, { status: 503 });
@@ -47,9 +45,12 @@ export async function POST(request: Request) {
         imageBase64: toBase64(bytes),
         mimeType: document.mimeType,
       });
-      // Provider output is untrusted even after provider-level schema validation: validate every
-      // model-authored field against the health-safety policy before persistence/display.
-      const extraction = parseSafeLabExtraction(rawExtraction);
+      let extraction;
+      try {
+        extraction = parseSafeLabExtraction(rawExtraction);
+      } catch (error) {
+        throw new AiProviderError("invalid-reply", error instanceof Error ? error.message : "Unsafe or invalid lab extraction");
+      }
       const entries = await context.service.recordLabResultEntries(document.id, extraction.entries);
       return Response.json({ labDocumentId: document.id, entries, uncertainty: extraction.uncertainty, aiAvailable: true });
     } catch (error) {
