@@ -1,4 +1,7 @@
-import { parseArvenChatReply, parseWeeklyInsight, type ArvenChatReply, type WeeklyInsight } from "@/lib/ai/contracts";
+import {
+  parseArvenChatReply, parseMealPhotoEstimate, parseMenuAnalysis, parseProductPhotoIdentification, parseWeeklyInsight,
+  type ArvenChatReply, type MealPhotoEstimate, type MenuAnalysis, type ProductPhotoIdentification, type WeeklyInsight,
+} from "@/lib/ai/contracts";
 import type { WeeklyMetricsV1 } from "@/lib/nutrition/weekly-metrics";
 
 const DEFAULT_BASE_URL = "https://api.openai.com/v1";
@@ -29,6 +32,35 @@ const WEEKLY_INSIGHT_SCHEMA_HINT =
   "tekrar ETME — yalnızca genel eğilim ve gözlemlerden nitel olarak bahset. " +
   "Asla tıbbi teşhis koyma veya tedavi önerme.";
 
+const MEAL_PHOTO_SCHEMA_HINT =
+  "Sana bir yemek fotoğrafı gösterilecek. Yanıtını YALNIZCA şu alanları içeren tek bir JSON nesnesi olarak ver, " +
+  "başka hiçbir metin, açıklama veya kod bloğu işareti ekleme: " +
+  '{"schemaVersion":"MealPhotoEstimateV1","items":[{"foodQuery":"...",' +
+  '"portionHint":{"measure":"piece|slice|teaspoon|tablespoon|tea-glass|water-glass|cup|bowl|handful|palm|serving|package|bottle|can|ladle","quantity":sayı,"size"?:"small|medium|large","naturalLabel":"..."},' +
+  '"confidence":"high|medium|low"}],"overallConfidence":"high|medium|low","uncertainty":["..."]}. ' +
+  "Fotoğrafta gördüğün her ayrı besini ayrı bir öğe olarak listele. Hiçbir metin alanında sayı, yüzde veya " +
+  "besin/kalori/kilo miktarı belirtme — yalnızca doğal porsiyon ifadeleri (ör. '1 avuç', '1 dilim') kullan; " +
+  "kesin gram/kalori değerleri uygulamanın kendi verilen katalogundan gelecek. Emin olamadığın kısımları " +
+  "uncertainty alanında belirt.";
+
+const MENU_PHOTO_SCHEMA_HINT =
+  "Sana bir restoran menüsü fotoğrafı gösterilecek. Yanıtını YALNIZCA şu alanları içeren tek bir JSON nesnesi " +
+  "olarak ver, başka hiçbir metin, açıklama veya kod bloğu işareti ekleme: " +
+  '{"schemaVersion":"MenuAnalysisV1","rankedItems":[{"itemName":"...","rationale":"...",' +
+  '"fitsGoal"?:"good-fit|moderate-fit|less-fit"}],"uncertainty":["..."]}. ' +
+  "Menüdeki seçenekleri, kullanıcının hedefine ve kısıtlarına (varsa alerji/beslenme tercihi) göre en uygundan " +
+  "en az uyguna doğru sırala. rationale alanında ASLA sayı, yüzde veya kalori/besin miktarı belirtme, yalnızca " +
+  "nitel bir gerekçe ver. Alerjen veya kısıt çakışması varsa bunu rationale içinde açıkça belirt.";
+
+const PRODUCT_PHOTO_SCHEMA_HINT =
+  "Sana bir ürün ambalajı veya etiketi fotoğrafı gösterilecek. Yanıtını YALNIZCA şu alanları içeren tek bir JSON " +
+  "nesnesi olarak ver, başka hiçbir metin, açıklama veya kod bloğu işareti ekleme: " +
+  '{"schemaVersion":"ProductPhotoIdentificationV1","candidateProductName":"..."|null,"candidateBrand":"..."|null,' +
+  '"detectedBarcode":"..."|null,"confidence":"high|medium|low","uncertainty":["..."]}. ' +
+  "detectedBarcode yalnızca fotoğrafta net okunabilen 6-14 haneli bir barkod numarasıysa doldurulmalı, aksi halde " +
+  "null bırak. Bu alanlar yalnızca uygulamanın kendi doğrulanmış ürün kataloğunda arama yapmak için birer aday " +
+  "önerisidir — kesin besin değerlerini SEN üretme.";
+
 export type AiFetchResponse = { ok: boolean; status: number; json(): Promise<unknown> };
 export type AiFetch = (url: string, init: { method: string; headers: Record<string, string>; body: string }) => Promise<AiFetchResponse>;
 
@@ -51,9 +83,19 @@ export type ArvenChatRequest = {
   userMessage: string;
 };
 
+/** A photo-analysis request: a system prompt plus one base64-encoded image the model can look at. */
+export type ArvenPhotoRequest = {
+  systemPrompt: string;
+  imageBase64: string;
+  mimeType: string;
+};
+
 export type ArvenAiProvider = {
   generateChatReply: (request: ArvenChatRequest) => Promise<ArvenChatReply>;
   generateWeeklyInsight: (request: { systemPrompt: string; metrics: WeeklyMetricsV1 }) => Promise<WeeklyInsight>;
+  analyzeMealPhoto: (request: ArvenPhotoRequest) => Promise<MealPhotoEstimate>;
+  analyzeMenuPhoto: (request: ArvenPhotoRequest) => Promise<MenuAnalysis>;
+  identifyProductPhoto: (request: ArvenPhotoRequest) => Promise<ProductPhotoIdentification>;
 };
 
 export type OpenAiClientConfig = {
@@ -63,7 +105,8 @@ export type OpenAiClientConfig = {
   baseUrl?: string;
 };
 
-type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
+type ChatContentPart = { type: "text"; text: string } | { type: "image_url"; image_url: { url: string } };
+type ChatMessage = { role: "system" | "user" | "assistant"; content: string | ChatContentPart[] };
 
 async function performJsonCompletion(config: OpenAiClientConfig, messages: ChatMessage[]): Promise<unknown> {
   const baseUrl = config.baseUrl ?? DEFAULT_BASE_URL;
@@ -154,6 +197,62 @@ export async function generateWeeklyInsight(
   }
 }
 
+/** Builds the two-part user message (instruction text + the photo as a data: URL) shared by all three vision calls. */
+function buildPhotoUserMessage(instruction: string, request: ArvenPhotoRequest): ChatMessage {
+  return {
+    role: "user",
+    content: [
+      { type: "text", text: instruction },
+      { type: "image_url", image_url: { url: `data:${request.mimeType};base64,${request.imageBase64}` } },
+    ],
+  };
+}
+
+/** Pure core — one OpenAI vision chat-completion round trip, validated against MealPhotoEstimateV1. */
+export async function analyzeMealPhoto(config: OpenAiClientConfig, request: ArvenPhotoRequest): Promise<MealPhotoEstimate> {
+  const messages: ChatMessage[] = [
+    { role: "system", content: `${request.systemPrompt}\n\n${MEAL_PHOTO_SCHEMA_HINT}` },
+    buildPhotoUserMessage("Ekteki yemek fotoğrafını incele ve gördüğün besinleri belirt.", request),
+  ];
+  const body = await performJsonCompletion(config, messages);
+  const parsedJson = parseJsonContent(extractMessageContent(body));
+  try {
+    return parseMealPhotoEstimate(parsedJson);
+  } catch (error) {
+    throw new AiProviderError("invalid-reply", error instanceof Error ? error.message : "OpenAI meal photo estimate failed contract validation");
+  }
+}
+
+/** Pure core — one OpenAI vision chat-completion round trip, validated against MenuAnalysisV1. */
+export async function analyzeMenuPhoto(config: OpenAiClientConfig, request: ArvenPhotoRequest): Promise<MenuAnalysis> {
+  const messages: ChatMessage[] = [
+    { role: "system", content: `${request.systemPrompt}\n\n${MENU_PHOTO_SCHEMA_HINT}` },
+    buildPhotoUserMessage("Ekteki restoran menüsü fotoğrafını incele ve seçenekleri sırala.", request),
+  ];
+  const body = await performJsonCompletion(config, messages);
+  const parsedJson = parseJsonContent(extractMessageContent(body));
+  try {
+    return parseMenuAnalysis(parsedJson);
+  } catch (error) {
+    throw new AiProviderError("invalid-reply", error instanceof Error ? error.message : "OpenAI menu analysis failed contract validation");
+  }
+}
+
+/** Pure core — one OpenAI vision chat-completion round trip, validated against ProductPhotoIdentificationV1. */
+export async function identifyProductPhoto(config: OpenAiClientConfig, request: ArvenPhotoRequest): Promise<ProductPhotoIdentification> {
+  const messages: ChatMessage[] = [
+    { role: "system", content: `${request.systemPrompt}\n\n${PRODUCT_PHOTO_SCHEMA_HINT}` },
+    buildPhotoUserMessage("Ekteki ürün fotoğrafını incele ve ürünü tanımaya çalış.", request),
+  ];
+  const body = await performJsonCompletion(config, messages);
+  const parsedJson = parseJsonContent(extractMessageContent(body));
+  try {
+    return parseProductPhotoIdentification(parsedJson);
+  } catch (error) {
+    throw new AiProviderError("invalid-reply", error instanceof Error ? error.message : "OpenAI product photo identification failed contract validation");
+  }
+}
+
 /** Production wrapper: uses the global `fetch` and an env-configured API key/model. Throws if unset. */
 export function createOpenAiProvider(env?: { apiKey?: string; model?: string }): ArvenAiProvider {
   const apiKey = env?.apiKey ?? process.env.OPENAI_API_KEY;
@@ -165,6 +264,9 @@ export function createOpenAiProvider(env?: { apiKey?: string; model?: string }):
   return {
     generateChatReply: (request) => generateChatReply(config, request),
     generateWeeklyInsight: (request) => generateWeeklyInsight(config, request),
+    analyzeMealPhoto: (request) => analyzeMealPhoto(config, request),
+    analyzeMenuPhoto: (request) => analyzeMenuPhoto(config, request),
+    identifyProductPhoto: (request) => identifyProductPhoto(config, request),
   };
 }
 

@@ -9,7 +9,7 @@ def reject(conn,sql,params=()):
     except (sqlite3.IntegrityError,sqlite3.OperationalError): return
     raise AssertionError(f'expected rejection: {sql}')
 def main():
-    assert [Path(p).name for p in MIGRATIONS]==['0001_initial.sql','0002_phase2_identity.sql','0003_phase3_planning.sql','0004_phase4_ai.sql']
+    assert [Path(p).name for p in MIGRATIONS]==['0001_initial.sql','0002_phase2_identity.sql','0003_phase3_planning.sql','0004_phase4_ai.sql','0005_phase5_vision.sql']
     combined='\n'.join(Path(p).read_text(encoding='utf-8') for p in MIGRATIONS)
     assert 'CREATE TRIGGER' not in combined.upper()
     assert 'CREATE TABLE ai_actions' not in combined
@@ -47,5 +47,11 @@ def main():
     c.execute("DELETE FROM ai_memory_facts WHERE id='mf1'")
     reject(c,"INSERT INTO weekly_insight_snapshots(id,user_subject,week_start_local_date,metrics_json,narrative_json,created_at) VALUES('wi-bad','u1','2026-08-31','not-json',NULL,?)",(now,))
     c.execute("INSERT INTO weekly_insight_snapshots(id,user_subject,week_start_local_date,metrics_json,narrative_json,created_at) VALUES('wi1','u1','2026-08-31','{}',NULL,?)",(now,))
+    reject(c,"INSERT INTO photo_assets(id,user_subject,kind,mime_type,byte_size,storage_key,created_at) VALUES('ph-bad','u1','not-a-kind','image/jpeg',100,'u1/ph-bad',?)",(now,))
+    reject(c,"INSERT INTO photo_assets(id,user_subject,kind,mime_type,byte_size,storage_key,created_at) VALUES('ph-bad2','u1','meal-photo','image/gif',100,'u1/ph-bad2',?)",(now,))
+    reject(c,"INSERT INTO photo_assets(id,user_subject,kind,mime_type,byte_size,storage_key,created_at) VALUES('ph-bad3','u1','meal-photo','image/jpeg',0,'u1/ph-bad3',?)",(now,))
+    reject(c,"INSERT INTO photo_assets(id,user_subject,kind,mime_type,byte_size,storage_key,created_at) VALUES('ph-bad4','u1','meal-photo','image/jpeg',9000000,'u1/ph-bad4',?)",(now,))
+    c.execute("INSERT INTO photo_assets(id,user_subject,kind,mime_type,byte_size,storage_key,created_at) VALUES('ph1','u1','meal-photo','image/jpeg',12345,'u1/ph1',?)",(now,))
+    c.execute("DELETE FROM photo_assets WHERE id='ph1'")
     print('CLEAN_V1_MIGRATION_OK')
 if __name__=='__main__':main()

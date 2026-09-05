@@ -71,6 +71,16 @@ const MemoryFactInput = z.object({
 }).strict();
 export const MemoryFactRecordV1 = z.object({ schemaVersion:z.literal("MemoryFactRecordV1"), facts:z.array(MemoryFactInput).min(1).max(5) }).strict();
 
+/** Metadata for one privately-stored user photo (Phase 5 vision). The bytes themselves live in `lib/media/storage.ts`, never in this row — see `db/migrations/0005_phase5_vision.sql`. */
+const PHOTO_ASSET_KINDS=["meal-photo","menu-photo","product-photo"] as const;
+const PHOTO_ASSET_MIME_TYPES=["image/jpeg","image/png","image/webp"] as const;
+const PhotoAssetInput = z.object({
+  kind: z.enum(PHOTO_ASSET_KINDS),
+  mimeType: z.enum(PHOTO_ASSET_MIME_TYPES),
+  byteSize: z.number().int().min(1).max(8_000_000),
+  storageKey: z.string().trim().min(1).max(300),
+}).strict();
+
 export const RecipeIngredientV1 = MealItemBase.extend({ selection:z.union([HouseholdSelection,CustomGramSelection]) }).strict();
 export const RecipeFoodV1 = z.object({
   schemaVersion:z.literal("RecipeFoodV1"),
@@ -146,6 +156,9 @@ export type MemoryFactConfidence="high"|"medium"|"low";
 export type StoredMemoryFact={id:string;userSubject:string;factText:string;provenance:MemoryFactProvenance;confidence:MemoryFactConfidence;createdAt:string};
 /** `narrative` is null until a provider has actually produced a validated `WeeklyInsightV1` for this week — deterministic `metrics` are always available immediately. */
 export type StoredWeeklyInsightSnapshot={id:string;userSubject:string;weekStartLocalDate:string;metricsJson:string;narrativeJson:string|null;createdAt:string};
+export type PhotoAssetKind=typeof PHOTO_ASSET_KINDS[number];
+export type PhotoAssetMimeType=typeof PHOTO_ASSET_MIME_TYPES[number];
+export type StoredPhotoAsset={id:string;userSubject:string;kind:PhotoAssetKind;mimeType:PhotoAssetMimeType;byteSize:number;storageKey:string;createdAt:string};
 
 export interface V1Transaction {
   getUserContext(userSubject:string):Promise<AuthenticatedUserContext>;
@@ -220,6 +233,13 @@ export interface V1Transaction {
   insertWeeklyInsightSnapshot(snapshot:StoredWeeklyInsightSnapshot):Promise<void>;
   /** The most recently generated snapshot for this exact week, or null if none exists yet. */
   getLatestWeeklyInsightSnapshot(userSubject:string,weekStartLocalDate:string):Promise<StoredWeeklyInsightSnapshot|null>;
+  /** Records metadata for one already-stored photo (see `lib/media/storage.ts`); the adapter never touches the bytes themselves. */
+  insertPhotoAsset(asset:StoredPhotoAsset):Promise<void>;
+  getPhotoAsset(userSubject:string,id:string):Promise<StoredPhotoAsset|null>;
+  /** Every photo for this subject, most recent first. */
+  listPhotoAssets(userSubject:string):Promise<StoredPhotoAsset[]>;
+  /** User-initiated forget, same semantics as `deleteMemoryFact`: genuinely deleted, silently a no-op if already gone or owned by another subject. Callers are responsible for also deleting the underlying bytes via `lib/media/storage.ts`. */
+  deletePhotoAsset(userSubject:string,id:string):Promise<void>;
 }
 export interface V1TransactionRunner{transaction<T>(work:(tx:V1Transaction)=>Promise<T>):Promise<T>}
 export type ServiceClock={now():Date}; export type IdFactory=()=>string;
@@ -542,6 +562,16 @@ export class V1MutationService{
     const parsedDate=CanonicalWeekStartDate.parse(weekStartLocalDate);
     return this.runner.transaction(async tx=>tx.getLatestWeeklyInsightSnapshot(this.subject,parsedDate));
   }
+  /** Records metadata for a photo the caller has already written to `lib/media/storage.ts`. This service never sees the bytes. */
+  async recordPhotoAsset(input:unknown):Promise<StoredPhotoAsset>{
+    const x=PhotoAssetInput.parse(input);
+    const asset:StoredPhotoAsset={id:this.idFactory(),userSubject:this.subject,kind:x.kind,mimeType:x.mimeType,byteSize:x.byteSize,storageKey:x.storageKey,createdAt:instant(this.clock.now())};
+    return this.runner.transaction(async tx=>{await tx.insertPhotoAsset(asset);return asset;});
+  }
+  async getPhotoAsset(id:string):Promise<StoredPhotoAsset|null>{const parsed=Id.parse(id);return this.runner.transaction(async tx=>tx.getPhotoAsset(this.subject,parsed));}
+  async listPhotoAssets():Promise<StoredPhotoAsset[]>{return this.runner.transaction(async tx=>tx.listPhotoAssets(this.subject));}
+  /** User-initiated forget — see `V1Transaction.deletePhotoAsset`'s doc comment. Callers are responsible for also deleting the underlying bytes via `lib/media/storage.ts`. */
+  async deletePhotoAsset(id:string):Promise<void>{const parsed=Id.parse(id);await this.runner.transaction(async tx=>{await tx.deletePhotoAsset(this.subject,parsed);});}
   async deleteAccount():Promise<void>{await this.runner.transaction(async tx=>{await tx.purgeAuthenticatedUser(this.subject);});}
   async getOrCreateAuthenticatedUser(defaults:{timezone:string;locale:string}):Promise<AuthenticatedUserContext>{return this.runner.transaction(async tx=>tx.getOrCreateUser(this.subject,defaults));}
   async upsertProfile(input:unknown):Promise<StoredProfile>{const x=ProfileUpsertV1.parse(input);const profile:StoredProfile={userSubject:this.subject,displayName:x.displayName,birthDate:x.birthDate,sexAtBirth:x.sexAtBirth,heightCm:x.heightCm,activityLevel:x.activityLevel,updatedAt:instant(this.clock.now())};return this.runner.transaction(async tx=>{await tx.upsertProfile(profile);return profile;});}
