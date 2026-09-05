@@ -1,8 +1,8 @@
 PRAGMA foreign_keys = ON;
 
--- Preserve the exact AI extraction that the user reviewed, plus the corrected/confirmed value,
--- without changing the Phase 6 public API shape. The application may continue to project the
--- confirmed value from lab_result_entries, while this immutable ledger keeps the audit evidence.
+-- Preserve the exact AI extraction that the user reviewed, plus the corrected/confirmed value.
+-- The audit row is owned by the same subject and cascades with account/result deletion so a privacy
+-- purge cannot leave health data behind.
 CREATE TABLE lab_result_confirmations (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   lab_result_entry_id TEXT NOT NULL,
@@ -15,7 +15,9 @@ CREATE TABLE lab_result_confirmations (
   confirmed_value_text TEXT NOT NULL,
   confirmed_unit_text TEXT,
   confirmed_reference_range_text TEXT,
-  confirmed_at TEXT NOT NULL
+  confirmed_at TEXT NOT NULL,
+  FOREIGN KEY (lab_result_entry_id) REFERENCES lab_result_entries(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_subject) REFERENCES users(subject) ON DELETE CASCADE
 ) STRICT;
 CREATE UNIQUE INDEX lab_result_confirmations_entry_idx ON lab_result_confirmations(lab_result_entry_id);
 CREATE INDEX lab_result_confirmations_user_idx ON lab_result_confirmations(user_subject, confirmed_at);
@@ -37,8 +39,7 @@ BEGIN
   );
 END;
 
--- A confirmed lab reading is immutable. If the user wants a later correction, create a new entry
--- rather than rewriting the reviewed evidence and its confirmation ledger.
+-- A confirmed lab reading is immutable. A later correction must be a new entry so both facts remain auditable.
 CREATE TRIGGER lab_result_prevent_confirmed_rewrite
 BEFORE UPDATE OF marker_name, value_text, unit_text, reference_range_text, status ON lab_result_entries
 WHEN OLD.status = 'confirmed'
