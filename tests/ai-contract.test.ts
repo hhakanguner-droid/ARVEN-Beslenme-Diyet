@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  parseArvenChatReply, parseMealPhotoEstimate, parseMealSuggestion, parseMenuAnalysis,
+  parseArvenChatReply, parseLabResultExtraction, parseMealPhotoEstimate, parseMealSuggestion, parseMenuAnalysis,
   parseProductPhotoIdentification, parseWeeklyInsight,
 } from "../lib/ai/contracts";
 
@@ -266,4 +266,48 @@ test("product photo identification allows every candidate field to be null when 
 test("product photo identification rejects a barcode that is not 6 to 14 digits", () => {
   assert.throws(() => parseProductPhotoIdentification({ ...validProductPhotoIdentification, detectedBarcode: "12" }));
   assert.throws(() => parseProductPhotoIdentification({ ...validProductPhotoIdentification, detectedBarcode: "abc123456" }));
+});
+
+// Phase 6: lab result extraction. Unlike every contract above, numbers in valueText/unitText/
+// referenceRangeText are expected and never rejected — they are the user's own lab report, not an
+// AI-authored nutrition claim. Only the non-diagnostic health policy still applies.
+
+const validLabResultExtraction = {
+  schemaVersion: "LabResultExtractionV1",
+  entries: [{ markerName: "Glukoz", valueText: "95", unitText: "mg/dL", referenceRangeText: "70-100" }],
+  uncertainty: [],
+};
+
+test("lab result extraction accepts a well-formed transcription, numeric value and all", () => {
+  const parsed = parseLabResultExtraction(validLabResultExtraction);
+  assert.equal(parsed.entries[0]?.valueText, "95");
+  assert.equal(parsed.entries[0]?.unitText, "mg/dL");
+});
+
+test("lab result extraction allows unitText and referenceRangeText to be null when the photo did not show them", () => {
+  const parsed = parseLabResultExtraction({
+    ...validLabResultExtraction,
+    entries: [{ markerName: "TSH", valueText: "2.1", unitText: null, referenceRangeText: null }],
+  });
+  assert.equal(parsed.entries[0]?.unitText, null);
+});
+
+test("lab result extraction requires at least one entry and rejects a blank marker name or value", () => {
+  assert.throws(() => parseLabResultExtraction({ ...validLabResultExtraction, entries: [] }));
+  assert.throws(() => parseLabResultExtraction({
+    ...validLabResultExtraction,
+    entries: [{ markerName: "   ", valueText: "95", unitText: null, referenceRangeText: null }],
+  }));
+  assert.throws(() => parseLabResultExtraction({
+    ...validLabResultExtraction,
+    entries: [{ markerName: "Glukoz", valueText: "", unitText: null, referenceRangeText: null }],
+  }));
+});
+
+test("lab result extraction still enforces the non-diagnostic health policy on the marker name and uncertainty text", () => {
+  assert.throws(() => parseLabResultExtraction({
+    ...validLabResultExtraction,
+    entries: [{ markerName: "Diyabetsin", valueText: "95", unitText: null, referenceRangeText: null }],
+  }), /non-diagnostic health policy/);
+  assert.throws(() => parseLabResultExtraction({ ...validLabResultExtraction, uncertainty: ["İlacını bırak."] }), /non-diagnostic health policy/);
 });
