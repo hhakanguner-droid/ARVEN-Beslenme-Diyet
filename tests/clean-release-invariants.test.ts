@@ -117,6 +117,11 @@ class SafetyRaceTx implements V1Transaction {
   async getCurrentMealPlan(){ return null; }
   async deleteManualNutritionEvent(){ throw new Error("unused"); }
   async insertCustomFoodVersion(){ throw new Error("unused"); }
+  async insertMemoryFact(){ throw new Error("unused"); }
+  async listMemoryFacts(){ return []; }
+  async deleteMemoryFact(){ throw new Error("unused"); }
+  async insertWeeklyInsightSnapshot(){ throw new Error("unused"); }
+  async getLatestWeeklyInsightSnapshot(){ return null; }
 }
 class SafetyRaceRunner implements V1TransactionRunner {
   constructor(readonly tx = new SafetyRaceTx()) {}

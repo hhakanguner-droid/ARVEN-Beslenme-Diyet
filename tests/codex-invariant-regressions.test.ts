@@ -66,6 +66,11 @@ class Tx implements V1Transaction {
   async deleteManualNutritionEvent():Promise<void>{}
   async insertCustomFoodVersion():Promise<void>{}
   async purgeAuthenticatedUser(_s:string):Promise<void>{}
+  async insertMemoryFact():Promise<void>{}
+  async listMemoryFacts(){ return []; }
+  async deleteMemoryFact():Promise<void>{}
+  async insertWeeklyInsightSnapshot():Promise<void>{}
+  async getLatestWeeklyInsightSnapshot(){ return null; }
 }
 class Runner implements V1TransactionRunner { constructor(readonly tx=new Tx()){} async transaction<T>(work:(tx:V1Transaction)=>Promise<T>){ return work(this.tx); } }
 function ids(...values:string[]){ let i=0; return()=>values[i++]??`id-${i}`; }
