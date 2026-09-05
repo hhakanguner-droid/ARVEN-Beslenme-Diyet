@@ -59,6 +59,8 @@ class Tx implements V1Transaction {
   async listNutritionEventsForLocalDate():Promise<StoredNutritionEvent[]>{ return []; }
   async searchFoodVersions():Promise<VersionedFood[]>{ return []; }
   async findFoodVersionByBarcode():Promise<VersionedFood|null>{ return null; }
+  async getFoodVersionByFoodKey():Promise<VersionedFood|null>{ return null; }
+  async importVerifiedFoodVersion():Promise<void>{}
   async insertMealPlanVersionAndSetCurrent():Promise<void>{}
   async getCurrentMealPlan(){ return null; }
   async deleteManualNutritionEvent():Promise<void>{}
