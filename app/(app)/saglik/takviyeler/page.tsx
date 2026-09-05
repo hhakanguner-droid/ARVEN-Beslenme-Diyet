@@ -5,18 +5,12 @@ import { BrandWordmark } from "@/components/layout/AppShell";
 
 type Supplement = { id: string; foodVersionId: string | null; name: string; note: string | null; isActive: boolean; createdAt: string };
 
-/**
- * Takviye (vitamin/mineral vb.) kayıtları — bu bir ilaç takip modülü DEĞİLDİR: doz, saat veya
- * hatırlatma alanı yoktur, yalnızca "bunu kullanıyorum" bilgisini tutar. Bilinen bazı takviyeler
- * için ARVEN, yapay zekaya hiç danışmadan, sabit ve genel bir bilgi notu gösterir — bu bir tıbbi
- * tavsiye değildir.
- */
+/** Takviye kayıtları ilaç/doz/saat/not takibi değildir; yalnız curated bir takviyenin aktif/pasif durumunu tutar. */
 export default function SupplementsPage() {
   const [supplements, setSupplements] = useState<Supplement[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState("");
-  const [note, setNote] = useState("");
   const [adding, setAdding] = useState(false);
   const [notes, setNotes] = useState<Record<string, string>>({});
 
@@ -38,7 +32,7 @@ export default function SupplementsPage() {
       const data = (await res.json().catch(() => ({}))) as { note?: { note: string } | null };
       if (data.note) setNotes((prev) => ({ ...prev, [supplementName]: data.note!.note }));
     } catch {
-      // Reference notes are a nice-to-have; a failed lookup just means no note shows.
+      // Reference notes are optional deterministic information.
     }
   }
 
@@ -52,14 +46,13 @@ export default function SupplementsPage() {
       const res = await fetch("/api/supplements", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ foodVersionId: null, name, note: note || null }),
+        body: JSON.stringify({ foodVersionId: null, name }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error ?? "Eklenemedi");
       }
       setName("");
-      setNote("");
       await loadSupplements();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Eklenemedi");
@@ -99,15 +92,12 @@ export default function SupplementsPage() {
     <>
       <BrandWordmark />
       <h1 className="page-title">Takviyeler</h1>
-      <p className="page-subtitle">Beslenmeyle ilişkili takviyelerin kullanıcı tarafından yönetileceği alan; ilaç takibi değildir ve ARVEN tedavi veya doz talimatı vermez.</p>
+      <p className="page-subtitle">Beslenmeyle ilişkili takviyelerin aktif/pasif kaydı; ilaç, doz, saat, program veya serbest metin notu tutulmaz.</p>
 
       <section className="card">
         <h2 className="card-title">Takviye ekle</h2>
         <div className="food-picker-row">
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Takviye adı (ör. D Vitamini)" aria-label="Takviye adı" />
-        </div>
-        <div className="food-picker-row" style={{ marginTop: 6 }}>
-          <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Not (isteğe bağlı)" aria-label="Not" />
         </div>
         <div style={{ marginTop: 10 }}>
           <button type="button" className="primary-button" disabled={adding || !name.trim()} onClick={addSupplement}>
@@ -123,7 +113,6 @@ export default function SupplementsPage() {
           {active.map((supplement) => (
             <section key={supplement.id} className="card">
               <strong>{supplement.name}</strong>
-              {supplement.note && <p className="card-copy">{supplement.note}</p>}
               {notes[supplement.name] && <p className="card-copy">{notes[supplement.name]}</p>}
               <div className="food-picker-row" style={{ marginTop: 10 }}>
                 <button type="button" className="secondary-button" onClick={() => toggleActive(supplement)}>Kullanmayı bıraktım</button>
@@ -149,9 +138,7 @@ export default function SupplementsPage() {
         </>
       )}
 
-      {!loading && supplements.length === 0 && (
-        <p className="card-copy" style={{ marginTop: 16 }}>Henüz bir takviye kaydı yok.</p>
-      )}
+      {!loading && supplements.length === 0 && <p className="card-copy" style={{ marginTop: 16 }}>Henüz bir takviye kaydı yok.</p>}
     </>
   );
 }

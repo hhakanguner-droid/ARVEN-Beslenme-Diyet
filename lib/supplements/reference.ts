@@ -32,6 +32,12 @@ function normalize(name: string): string {
     .replace(/\s+/g, " ");
 }
 
+/** Only names explicitly present in the curated supplement reference are accepted as free text. */
+export function isKnownSupplementName(name: string): boolean {
+  const normalized = normalize(name);
+  return Object.keys(NOTES).some((key) => normalize(key) === normalized);
+}
+
 /**
  * Looks up a short, static informational note for a supplement name, or null when nothing matches
  * (an unrecognized or free-text name — the client should show nothing rather than guess). Never

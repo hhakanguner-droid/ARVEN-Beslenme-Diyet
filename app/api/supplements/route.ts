@@ -1,4 +1,5 @@
 import { resolveRouteContext, routeErrorResponse } from "@/lib/api/route-context";
+import { isKnownSupplementName } from "@/lib/supplements/reference";
 
 /** Every supplement record for the authenticated subject, most recent first — active and inactive alike. */
 export async function GET(request: Request) {
@@ -10,17 +11,21 @@ export async function GET(request: Request) {
   }
 }
 
-type SupplementRecordBody = { foodVersionId?: unknown; name?: unknown; note?: unknown };
+type SupplementRecordBody = { foodVersionId?: unknown; name?: unknown };
 
-/** Adds one supplement record. Not a medication registry — no dose or schedule field exists (see docs/ROADMAP.md's Phase 6 entry). */
+/** Adds one curated supplement record. Free-text note/dose/schedule storage is intentionally unsupported. */
 export async function POST(request: Request) {
   try {
     const context = await resolveRouteContext(request);
     const body = (await request.json().catch(() => ({}))) as SupplementRecordBody;
+    const name = typeof body.name === "string" ? body.name.trim() : "";
+    if (!name || !isKnownSupplementName(name)) {
+      return Response.json({ error: "unverified-supplement-name" }, { status: 400 });
+    }
     const supplement = await context.service.recordSupplement({
       foodVersionId: body.foodVersionId ?? null,
-      name: body.name,
-      note: body.note ?? null,
+      name,
+      note: null,
     });
     return Response.json({ supplement });
   } catch (error) {

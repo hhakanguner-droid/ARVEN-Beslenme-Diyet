@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { deriveCalculatedGoal, type MifflinStJeorV1Inputs } from "@/lib/goals/calculator";
 import { assertMealEnergyAllocations, type MealEnergyAllocation } from "@/lib/goals/types";
-import { assertNoAllergyConflict, assertNoDietaryExclusionConflict, type AllergenSafetyExclusion, type DietarySafetyExclusion } from "@/lib/health-safety/policy";
+import { assertNoAllergyConflict, assertNoDietaryExclusionConflict, assertNoMedicalOverreach, type AllergenSafetyExclusion, type DietarySafetyExclusion } from "@/lib/health-safety/policy";
+import { isKnownSupplementName } from "@/lib/supplements/reference";
 import { scaleNutritionForStorage, sumNutrition } from "@/lib/nutrition/calculations";
 import { resolvePortionSelection } from "@/lib/nutrition/portions";
 import type { Food, NutritionFacts, PortionSelection } from "@/lib/nutrition/types";
@@ -652,6 +653,8 @@ export class V1MutationService{
     const now=instant(this.clock.now());
     const rows:StoredLabResultEntry[]=entries.map((entry)=>{
       const x=LabExtractedEntryInput.parse(entry);
+      for(const value of [x.markerName,x.valueText,x.unitText,x.referenceRangeText]){if(value!=null)assertNoMedicalOverreach(value);}
+      assertNoMedicalOverreach([x.markerName,x.valueText,x.unitText,x.referenceRangeText].filter((value): value is string => value!=null).join(" "));
       return {id:this.idFactory(),userSubject:this.subject,labDocumentId:parsedDocumentId,markerName:x.markerName,valueText:x.valueText,unitText:x.unitText,referenceRangeText:x.referenceRangeText,status:"extracted" as const,createdAt:now};
     });
     return this.runner.transaction(async tx=>{for(const row of rows) await tx.insertLabResultEntry(row);return rows;});
@@ -675,7 +678,9 @@ export class V1MutationService{
   /** Adds one supplement record. Not a medication registry — see `StoredSupplementRecord`'s doc comment. */
   async recordSupplement(input:unknown):Promise<StoredSupplementRecord>{
     const x=SupplementRecordInput.parse(input);
-    const record:StoredSupplementRecord={id:this.idFactory(),userSubject:this.subject,foodVersionId:x.foodVersionId,name:x.name,note:x.note,isActive:true,createdAt:instant(this.clock.now())};
+    if(!isKnownSupplementName(x.name))throw new ApplicationRejectedError("unverified-supplement-name","Supplement name is not in the curated supplement reference");
+    if(x.note!==null)throw new ApplicationRejectedError("supplement-note-not-supported","Free-text supplement notes are disabled so this feature cannot become medication/dose/schedule storage");
+    const record:StoredSupplementRecord={id:this.idFactory(),userSubject:this.subject,foodVersionId:x.foodVersionId,name:x.name,note:null,isActive:true,createdAt:instant(this.clock.now())};
     return this.runner.transaction(async tx=>{await tx.insertSupplementRecord(record);return record;});
   }
   async listSupplements():Promise<StoredSupplementRecord[]>{return this.runner.transaction(async tx=>tx.listSupplementRecords(this.subject));}

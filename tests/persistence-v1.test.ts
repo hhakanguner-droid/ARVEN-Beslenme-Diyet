@@ -195,7 +195,7 @@ test("recordManualLabResultEntry stores an already-confirmed row with no AI extr
 test("recordSupplement adds an active record the owner can list, deactivate and delete, scoped to the authenticated subject",async()=>{
  const r=new MemoryRunner();
  const s=new V1MutationService("u1",r,ids("sup-1"));
- const record=await s.recordSupplement({foodVersionId:null,name:"D Vitamini",note:"Kahvaltıda"});
+ const record=await s.recordSupplement({foodVersionId:null,name:"D Vitamini",note:null});
  assert.equal(record.isActive,true);
  assert.equal((await s.listSupplements()).length,1);
 

@@ -12,22 +12,18 @@ type LabEntry = {
   status: "extracted" | "confirmed";
   createdAt: string;
 };
-type LabPhotoResponse = { labDocumentId: string; entries: LabEntry[]; uncertainty?: string[]; aiAvailable: boolean; error?: string };
+type LabPhotoResponse = { labDocumentId?: string; entries?: LabEntry[]; uncertainty?: string[]; aiAvailable?: boolean; localOnly?: boolean; error?: string };
 
 const emptyDraft = { markerName: "", valueText: "", unitText: "", referenceRangeText: "" };
 
-/**
- * Tahlil fotoğrafı yüklenince ARVEN gördüğü değerleri "okunmuş" (extracted) olarak listeler — bunlar
- * henüz kullanıcının onayladığı veri değildir. Kullanıcı her satırı düzenleyip onaylayana kadar
- * (confirmed) kesinleşmiş sayılmaz. ARVEN hiçbir zaman tanı koymaz veya yorum yapmaz; yalnızca
- * fotoğrafta yazılanı aktarır.
- */
 export default function LabResultsPage() {
   const [entries, setEntries] = useState<LabEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [aiUnavailableNotice, setAiUnavailableNotice] = useState(false);
+  const [uncertainty, setUncertainty] = useState<string[]>([]);
+  const [allowExternalAi, setAllowExternalAi] = useState(false);
   const [edits, setEdits] = useState<Record<string, typeof emptyDraft>>({});
   const [manualDraft, setManualDraft] = useState(emptyDraft);
   const [addingManual, setAddingManual] = useState(false);
@@ -51,17 +47,26 @@ export default function LabResultsPage() {
     setEdits((prev) => ({ ...prev, [id]: draft }));
   }
 
-  async function handleFile(file: File) {
+  async function handleFile(file: File, useExternalAi: boolean) {
+    if (useExternalAi && !allowExternalAi) {
+      setError("Otomatik tahlil okuması için fotoğrafın harici yapay zekâ sağlayıcısına gönderilmesine açıkça izin vermelisin.");
+      return;
+    }
     setUploading(true);
     setError(null);
+    setUncertainty([]);
     setAiUnavailableNotice(false);
     try {
       const form = new FormData();
       form.append("photo", file);
-      const res = await fetch("/api/vision/lab-photo", { method: "POST", body: form });
+      const headers: Record<string, string> = useExternalAi
+        ? { "x-arven-lab-ai-consent": "1" }
+        : { "x-arven-lab-ai-mode": "local" };
+      const res = await fetch("/api/vision/lab-photo", { method: "POST", headers, body: form });
       const data = (await res.json().catch(() => ({}))) as LabPhotoResponse;
-      if (!res.ok) throw new Error(data.error ?? "Tahlil fotoğrafı işlenemedi");
-      if (!data.aiAvailable) setAiUnavailableNotice(true);
+      if (!res.ok || data.error) throw new Error(data.error ?? "Tahlil fotoğrafı işlenemedi");
+      if (!useExternalAi || !data.aiAvailable) setAiUnavailableNotice(true);
+      setUncertainty(data.uncertainty ?? []);
       await loadEntries();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Tahlil fotoğrafı işlenemedi");
@@ -134,20 +139,40 @@ export default function LabResultsPage() {
 
       <section className="card">
         <h2 className="card-title">Tahlil fotoğrafı yükle</h2>
-        <p className="card-copy">ARVEN fotoğraftaki değerleri olduğu gibi okur ve aktarır; hiçbir zaman yorum yapmaz, tanı koymaz veya tedavi önerisi vermez. Okunan değerleri onaylamadan önce dilediğin gibi düzeltebilirsin.</p>
-        <div style={{ marginTop: 10 }}>
-          <label className="secondary-button" style={{ cursor: "pointer" }}>
-            {uploading ? "Yükleniyor…" : "Fotoğraf Seç"}
+        <p className="card-copy">Fotoğrafı yalnızca saklayıp değerleri elle girebilir veya açık izin vererek ARVEN'in harici yapay zekâ sağlayıcısıyla yalnızca metin çıkarımı yapmasını isteyebilirsin.</p>
+        <label className="card-copy" style={{ display: "flex", gap: 8, alignItems: "flex-start", marginTop: 12 }}>
+          <input type="checkbox" checked={allowExternalAi} onChange={(e) => setAllowExternalAi(e.target.checked)} />
+          <span>Tahlil fotoğrafımın yalnızca metin çıkarımı amacıyla harici yapay zekâ sağlayıcısına gönderilmesine izin veriyorum.</span>
+        </label>
+        <div className="food-picker-row" style={{ marginTop: 10 }}>
+          <label className="secondary-button" style={{ cursor: uploading ? "not-allowed" : "pointer" }}>
+            {uploading ? "Yükleniyor…" : "Sadece Kaydet"}
             <input
               type="file"
               accept="image/jpeg,image/png,image/webp"
               style={{ display: "none" }}
               disabled={uploading}
-              onChange={(e) => { const file = e.target.files?.[0]; if (file) handleFile(file); e.target.value = ""; }}
+              onChange={(e) => { const file = e.target.files?.[0]; if (file) handleFile(file, false); e.target.value = ""; }}
+            />
+          </label>
+          <label className="primary-button" style={{ cursor: allowExternalAi && !uploading ? "pointer" : "not-allowed", opacity: allowExternalAi ? 1 : 0.6 }}>
+            {uploading ? "Yükleniyor…" : "AI ile Oku"}
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              style={{ display: "none" }}
+              disabled={uploading || !allowExternalAi}
+              onChange={(e) => { const file = e.target.files?.[0]; if (file) handleFile(file, true); e.target.value = ""; }}
             />
           </label>
         </div>
-        {aiUnavailableNotice && <p className="card-copy" style={{ marginTop: 10 }}>Fotoğrafın kaydedildi, ancak yapay zeka bağlantısı henüz ayarlanmadığı için otomatik okuma yapılamadı. Değerleri aşağıdan elle ekleyebilirsin.</p>}
+        {aiUnavailableNotice && <p className="card-copy" style={{ marginTop: 10 }}>Fotoğrafın kaydedildi. Otomatik okuma yapılmadı; değerleri aşağıdan elle ekleyebilirsin.</p>}
+        {uncertainty.length > 0 && (
+          <div className="error-banner" style={{ marginTop: 10 }}>
+            <strong>Kontrol etmen gereken belirsizlikler:</strong>
+            <ul>{uncertainty.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}</ul>
+          </div>
+        )}
         {error && <p className="error-banner" style={{ marginTop: 10 }}>{error}</p>}
       </section>
 
@@ -209,9 +234,7 @@ export default function LabResultsPage() {
         </>
       )}
 
-      {!loading && entries.length === 0 && (
-        <p className="card-copy" style={{ marginTop: 16 }}>Henüz bir tahlil değeri yok.</p>
-      )}
+      {!loading && entries.length === 0 && <p className="card-copy" style={{ marginTop: 16 }}>Henüz bir tahlil değeri yok.</p>}
     </>
   );
 }

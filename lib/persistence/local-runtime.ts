@@ -3,6 +3,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { USER_DURABLE_OBJECT_SCHEMA_V1 } from "@/db/migrations/durable-object/0001_user_schema";
+import { USER_DURABLE_OBJECT_PHASE6_HARDENING } from "@/db/migrations/durable-object/0002_phase6_health_hardening";
 import {
   DurableObjectV1Transaction,
   DurableObjectV1TransactionRunner,
@@ -116,7 +117,6 @@ CREATE INDEX IF NOT EXISTS portion_versions_food_idx ON portion_versions(food_ve
 `;
 
 type SeedPortion = { measure: string; label: string; gramsPerUnit: number };
-/** amount + unit only — completeness is always "complete" for these hand-entered reference figures. */
 type SeedNutrient = { mg?: number; mcg?: number };
 type SeedFood = {
   key: string;
@@ -127,7 +127,6 @@ type SeedFood = {
   carbsG: number;
   fatG: number;
   fiberG?: number;
-  /** A handful of well-known per-100g vitamin/mineral figures — illustrative dev-seed data, not a full micronutrient profile. */
   extended?: Record<string, SeedNutrient>;
   portions: SeedPortion[];
 };
@@ -142,7 +141,6 @@ function nutrientJson(extended?: Record<string, SeedNutrient>): string {
   return JSON.stringify(result);
 }
 
-/** A modest set of common Turkish foods so search/quick-add works out of the box in a fresh dev environment. */
 const SEED_FOODS: SeedFood[] = [
   { key: "elma", name: "Elma", energyKcal: 52, proteinG: 0.3, carbsG: 14, fatG: 0.2, fiberG: 2.4, extended: { "vitamin-c": { mg: 4.6 }, potassium: { mg: 107 } }, portions: [{ measure: "piece", label: "1 orta boy elma", gramsPerUnit: 180 }] },
   { key: "yogurt-suzme", name: "Süzme yoğurt", energyKcal: 97, proteinG: 9, carbsG: 4, fatG: 5, extended: { calcium: { mg: 110 }, sodium: { mg: 36 } }, portions: [{ measure: "bowl", label: "1 kase", gramsPerUnit: 200 }] },
@@ -210,6 +208,7 @@ function getUserDb(subject: string): DatabaseSync {
   const db = new DatabaseSync(path.join(DATA_DIR, `user-${safeName}.db`));
   db.exec("PRAGMA foreign_keys = ON;");
   db.exec(USER_DURABLE_OBJECT_SCHEMA_V1);
+  db.exec(USER_DURABLE_OBJECT_PHASE6_HARDENING);
   userDbs.set(subject, db);
   return db;
 }
