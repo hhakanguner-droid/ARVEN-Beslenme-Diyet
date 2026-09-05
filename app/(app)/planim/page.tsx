@@ -22,6 +22,9 @@ export default function PlanimPage() {
   const [draftSlots, setDraftSlots] = useState<DraftSlot[]>([]);
   const [activeMealType, setActiveMealType] = useState<string>(MEAL_TYPE_OPTIONS[0].value);
   const [saving, setSaving] = useState(false);
+  const [replacingSlotIndex, setReplacingSlotIndex] = useState<number | null>(null);
+  const [replacementItems, setReplacementItems] = useState<DraftItem[]>([]);
+  const [loggingSlotIndex, setLoggingSlotIndex] = useState<number | null>(null);
 
   async function refresh() {
     try {
@@ -87,28 +90,55 @@ export default function PlanimPage() {
     }
   }
 
-  async function markEaten(slot: PlanSlot) {
+  async function logMealItems(slotIndex: number, mealType: string, items: { foodVersionId: string; selection: PickedFoodItem["selection"] | { kind: "custom-grams"; grams: number } }[], label: string) {
+    setLoggingSlotIndex(slotIndex);
     try {
-      // The plan stores a resolved snapshot (grams, not the original household portion pick), so
-      // "yedim" replays it as an exact custom-grams entry — a valid `appendManualMeal` selection —
-      // rather than trying to reconstruct the portion the user originally chose.
       const res = await fetch("/api/meals", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          mealType: slot.mealType,
-          items: slot.items.map((item) => ({
-            foodVersionId: item.foodVersionId,
-            selection: { kind: "custom-grams", grams: item.grams },
-          })),
-        }),
+        body: JSON.stringify({ mealType, items }),
       });
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? "Öğün kaydedilemedi");
       setError(null);
-      setStatus(`${mealTypeLabel(slot.mealType)} bugüne yendi olarak kaydedildi.`);
+      setStatus(`${mealTypeLabel(mealType)} bugüne ${label} olarak kaydedildi.`);
+      setReplacingSlotIndex(null);
+      setReplacementItems([]);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Öğün kaydedilemedi");
+    } finally {
+      setLoggingSlotIndex(null);
     }
+  }
+
+  function markEaten(slot: PlanSlot, slotIndex: number) {
+    // The plan stores a resolved snapshot (grams, not the original household portion pick), so
+    // "yedim" replays it as an exact custom-grams entry — a valid `appendManualMeal` selection —
+    // rather than trying to reconstruct the portion the user originally chose.
+    return logMealItems(
+      slotIndex,
+      slot.mealType,
+      slot.items.map((item) => ({ foodVersionId: item.foodVersionId, selection: { kind: "custom-grams", grams: item.grams } })),
+      "yendi",
+    );
+  }
+
+  function startReplacing(slotIndex: number) {
+    setReplacingSlotIndex(slotIndex);
+    setReplacementItems([]);
+    setError(null);
+  }
+
+  function confirmReplacement(slot: PlanSlot, slotIndex: number) {
+    if (replacementItems.length === 0) {
+      setError("Önce yerine ne yediğini eklemelisin.");
+      return;
+    }
+    return logMealItems(
+      slotIndex,
+      slot.mealType,
+      replacementItems.map((item) => ({ foodVersionId: item.foodVersionId, selection: item.selection })),
+      "farklı bir şeyle güncellendi",
+    );
   }
 
   return (
@@ -135,7 +165,38 @@ export default function PlanimPage() {
                       <li key={itemIndex}>{item.foodName} — {item.portion?.label ?? `${item.grams} g`} ({Math.round(item.nutrition.energyKcal)} kcal)</li>
                     ))}
                   </ul>
-                  <button type="button" className="secondary-button" style={{ marginTop: 10 }} onClick={() => markEaten(slot)}>Bu öğünü yedim</button>
+                  {replacingSlotIndex !== index ? (
+                    <div className="food-picker-row" style={{ marginTop: 10 }}>
+                      <button type="button" className="secondary-button" disabled={loggingSlotIndex === index} onClick={() => markEaten(slot, index)}>
+                        {loggingSlotIndex === index ? "Kaydediliyor…" : "Bu öğünü yedim"}
+                      </button>
+                      <button type="button" className="link-button" onClick={() => startReplacing(index)}>Farklı bir şey yedim</button>
+                    </div>
+                  ) : (
+                    <div style={{ marginTop: 10 }}>
+                      <p className="card-copy">Bu öğün yerine ne yedin?</p>
+                      <FoodPicker
+                        addLabel="Ekle"
+                        onAdd={(item) => setReplacementItems((current) => [...current, { label: item.label, foodVersionId: item.foodVersionId, selection: item.selection }])}
+                      />
+                      {replacementItems.length > 0 && (
+                        <ul className="draft-slot-list">
+                          {replacementItems.map((item, itemIndex) => (
+                            <li key={itemIndex}>
+                              <span>{item.label}</span>
+                              <button type="button" className="link-button" onClick={() => setReplacementItems((current) => current.filter((_, i) => i !== itemIndex))}>Kaldır</button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                      <div className="food-picker-row" style={{ marginTop: 8 }}>
+                        <button type="button" className="secondary-button" onClick={() => { setReplacingSlotIndex(null); setReplacementItems([]); }} disabled={loggingSlotIndex === index}>Vazgeç</button>
+                        <button type="button" className="primary-button" onClick={() => confirmReplacement(slot, index)} disabled={loggingSlotIndex === index}>
+                          {loggingSlotIndex === index ? "Kaydediliyor…" : "Bunu yedim olarak kaydet"}
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))}
               <button type="button" className="link-button" onClick={startEditing}>Planı güncelle</button>
