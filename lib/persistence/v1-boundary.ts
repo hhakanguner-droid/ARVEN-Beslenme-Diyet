@@ -677,6 +677,7 @@ export class V1MutationService{
   /** Adds one supplement record. Not a medication registry — see `StoredSupplementRecord`'s doc comment. */
   async recordSupplement(input:unknown):Promise<StoredSupplementRecord>{
     const x=SupplementRecordInput.parse(input);
+    if(!isKnownSupplementName(x.name))throw new ApplicationRejectedError("unverified-supplement-name","Supplement name is not in the curated supplement reference");
     const record:StoredSupplementRecord={id:this.idFactory(),userSubject:this.subject,foodVersionId:x.foodVersionId,name:x.name,note:x.note,isActive:true,createdAt:instant(this.clock.now())};
     return this.runner.transaction(async tx=>{await tx.insertSupplementRecord(record);return record;});
   }
