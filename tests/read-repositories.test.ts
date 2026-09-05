@@ -73,7 +73,10 @@ test("V1NutritionReadRepository.getDailySnapshot reports empty-day with zero tar
   assert.equal(snapshot.targets, null);
   assert.equal(snapshot.consumptionCoverage, "empty-day");
   assert.equal(snapshot.waterMl, 0);
-  assert.deepEqual(snapshot.consumed, { energyKcal: 0, proteinG: 0, carbsG: 0, fatG: 0, fiberG: 0 });
+  // sumNutrition([]) explicitly sets `extended: undefined` (no items means no vitamin/mineral data to
+  // report), and Node's assert.deepEqual/deepStrictEqual treats a key present-but-undefined as
+  // different from the key being absent — so that has to be spelled out here too.
+  assert.deepEqual(snapshot.consumed, { energyKcal: 0, proteinG: 0, carbsG: 0, fatG: 0, fiberG: 0, extended: undefined });
 });
 
 test("V1NutritionReadRepository.getDailySnapshot sums water and meal-logged nutrition for the local date, against the active goal", async () => {

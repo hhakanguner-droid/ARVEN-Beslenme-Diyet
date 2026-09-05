@@ -61,6 +61,8 @@ class Tx implements V1Transaction {
   async findFoodVersionByBarcode():Promise<VersionedFood|null>{ return null; }
   async insertMealPlanVersionAndSetCurrent():Promise<void>{}
   async getCurrentMealPlan(){ return null; }
+  async deleteManualNutritionEvent():Promise<void>{}
+  async insertCustomFoodVersion():Promise<void>{}
   async purgeAuthenticatedUser(_s:string):Promise<void>{}
 }
 class Runner implements V1TransactionRunner { constructor(readonly tx=new Tx()){} async transaction<T>(work:(tx:V1Transaction)=>Promise<T>){ return work(this.tx); } }
