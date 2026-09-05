@@ -19,7 +19,18 @@ const SafeLabEntry = z.object({
   valueText: safeText(80),
   unitText: safeText(40).nullable(),
   referenceRangeText: safeText(80).nullable(),
-}).strict();
+}).strict().superRefine((entry, ctx) => {
+  // Fields are rendered together in the product, so validate the composed representation too.
+  // This prevents hostile output from splitting a diagnosis/treatment sentence across schema fields.
+  const combined = [entry.markerName, entry.valueText, entry.unitText, entry.referenceRangeText]
+    .filter((value): value is string => Boolean(value))
+    .join(" ");
+  try {
+    assertNoMedicalOverreach(combined);
+  } catch {
+    ctx.addIssue({ code: "custom", message: "Combined AI-authored lab entry violates ARVEN non-diagnostic health policy" });
+  }
+});
 
 const SafeLabExtraction = z.object({
   entries: z.array(SafeLabEntry).max(200),
