@@ -6,6 +6,7 @@ import type {
   StoredAssessmentSnapshot,
   StoredDecision,
   StoredGoalVersion,
+  StoredCustomFoodVersion,
   StoredMealPlanVersion,
   StoredNutritionEvent,
   StoredOutcome,
@@ -41,6 +42,7 @@ function asString(value: unknown): string { return String(value); }
 function asNullableString(value: unknown): string | null { return value == null ? null : String(value); }
 function asNumber(value: unknown): number { return Number(value); }
 function asBool(value: unknown): boolean { return Number(value) === 1; }
+function normalizeFoodName(value: string): string { return value.toLocaleLowerCase("tr-TR").trim(); }
 
 function mapUserContext(row: Record<string, unknown>): AuthenticatedUserContext {
   return { timezone: asString(row.timezone), nutritionDayStartMinutes: asNumber(row.nutrition_day_start_minutes) };
@@ -126,6 +128,19 @@ function mapGoalVersion(row: Record<string, unknown>): StoredGoalVersion {
 function mapMealPlanVersion(row: Record<string, unknown>): StoredMealPlanVersion {
   return { id: asString(row.id), userSubject: asString(row.user_subject), slotsJson: asString(row.slots_json), createdAt: asString(row.created_at) };
 }
+/** Keeps one row per `food_key` (the most recently verified), preserving first-seen order otherwise. */
+function dedupeByFoodKey(rows: Record<string, unknown>[]): Record<string, unknown>[] {
+  const byKey = new Map<string, Record<string, unknown>>();
+  const order: string[] = [];
+  for (const row of rows) {
+    const key = asString(row.food_key);
+    const existing = byKey.get(key);
+    if (!existing) order.push(key);
+    if (!existing || asString(row.verified_at) > asString(existing.verified_at)) byKey.set(key, row);
+  }
+  return order.map((key) => byKey.get(key)!);
+}
+
 function mapScientificReference(row: Record<string, unknown>): ScientificReferenceSnapshot {
   const snapshot: ScientificReferenceSnapshot = { id: asString(row.id), title: asString(row.title), citation: asString(row.citation) };
   if (row.evidence_url != null) snapshot.evidenceUrl = asString(row.evidence_url);
@@ -386,11 +401,15 @@ export class DurableObjectV1Transaction implements V1Transaction {
 
   async searchFoodVersions(userSubject: string, query: string, limit: number): Promise<VersionedFood[]> {
     const normalized = `%${query.trim().toLocaleLowerCase("tr-TR")}%`;
+    // Multiple verified sources (Open Food Facts, USDA, TürKomp, a user's own custom entry, …) can each
+    // contribute a row sharing the same `food_key` — fetch a wider pool than `limit` so deduping down to
+    // one row per food_key (the most recently verified) still leaves enough distinct foods to fill a page.
     const rows = await this.catalog(
       "SELECT * FROM food_versions WHERE (owner_subject IS NULL OR owner_subject=?) AND normalized_name LIKE ? ORDER BY name LIMIT ?",
-      [userSubject, normalized, limit],
+      [userSubject, normalized, limit * 5],
     );
-    return Promise.all(rows.map((row) => this.hydrateFoodVersion(row)));
+    const deduped = dedupeByFoodKey(rows).slice(0, limit);
+    return Promise.all(deduped.map((row) => this.hydrateFoodVersion(row)));
   }
 
   async findFoodVersionByBarcode(userSubject: string, barcode: string): Promise<VersionedFood | null> {
@@ -422,6 +441,39 @@ export class DurableObjectV1Transaction implements V1Transaction {
       userSubject,
     ).one();
     return row ? mapMealPlanVersion(row) : null;
+  }
+
+  async deleteManualNutritionEvent(userSubject: string, eventId: string): Promise<void> {
+    const existing = this.sql.exec("SELECT id FROM nutrition_events WHERE id=? AND user_subject=?", eventId, userSubject).one();
+    if (!existing) throw new Error("Nutrition event not found");
+    try {
+      this.sql.exec("DELETE FROM nutrition_events WHERE id=? AND user_subject=?", eventId, userSubject);
+    } catch {
+      // The `ai_action_outcomes.result_event_id` foreign key (`ON DELETE RESTRICT`) is what actually
+      // protects a confirmed AI action's history — this just turns that low-level failure into a
+      // message the mutation service/route layer can surface as a normal 400.
+      throw new Error("Cannot delete a nutrition event created by a confirmed AI action");
+    }
+  }
+
+  async insertCustomFoodVersion(food: StoredCustomFoodVersion): Promise<void> {
+    await this.catalog(
+      `INSERT INTO food_versions (id, food_key, version, owner_subject, name, normalized_name, brand, barcode, is_liquid, energy_kcal_100g, protein_g_100g, carbs_g_100g, fat_g_100g, fiber_g_100g, extended_nutrition_json, allergen_data_status, allergen_ids_json, dietary_safety_data_status, dietary_conflict_rule_ids_json, source_provider, source_external_id, source_evidence_url, source_license_id, verified_at, created_at)
+       VALUES (?,?,1,?,?,?,NULL,NULL,?,?,?,?,?,?,'{}',?,?,?,?,'manual-verified',NULL,NULL,NULL,?,?)`,
+      [
+        food.id, food.foodKey, food.ownerSubject, food.name, normalizeFoodName(food.name), food.isLiquid ? 1 : 0,
+        food.energyKcal, food.proteinG, food.carbsG, food.fatG, food.fiberG,
+        food.allergenDataStatus, JSON.stringify(food.allergenIds), food.dietarySafetyDataStatus, JSON.stringify(food.dietaryConflictRuleIds),
+        food.verifiedAt, food.createdAt,
+      ],
+    );
+    for (const portion of food.portions) {
+      await this.catalog(
+        `INSERT INTO portion_versions (id, portion_key, version, food_version_id, measure, size, label, grams_per_unit, source_provider, source_external_id, source_evidence_url, source_license_id, verified_at, created_at)
+         VALUES (?,?,1,?,?,NULL,?,?,'manual-verified',NULL,NULL,NULL,?,?)`,
+        [portion.id, portion.id, food.id, portion.measure, portion.label, portion.gramsPerUnit, food.verifiedAt, food.createdAt],
+      );
+    }
   }
 
   /**

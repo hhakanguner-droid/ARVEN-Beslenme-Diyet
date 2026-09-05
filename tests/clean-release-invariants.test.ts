@@ -113,6 +113,8 @@ class SafetyRaceTx implements V1Transaction {
   async findFoodVersionByBarcode(): Promise<VersionedFood|null>{ return null; }
   async insertMealPlanVersionAndSetCurrent(){ throw new Error("unused"); }
   async getCurrentMealPlan(){ return null; }
+  async deleteManualNutritionEvent(){ throw new Error("unused"); }
+  async insertCustomFoodVersion(){ throw new Error("unused"); }
 }
 class SafetyRaceRunner implements V1TransactionRunner {
   constructor(readonly tx = new SafetyRaceTx()) {}

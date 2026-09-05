@@ -2,15 +2,21 @@
 
 import { useEffect, useState } from "react";
 import { BrandWordmark } from "@/components/layout/AppShell";
+import { CustomFoodBuilder } from "@/components/nutrition/CustomFoodBuilder";
 import { FoodPicker, type PickedFoodItem } from "@/components/nutrition/FoodPicker";
-import { MEAL_TYPE_OPTIONS } from "@/components/nutrition/meal-types";
+import { MEAL_TYPE_OPTIONS, mealTypeLabel } from "@/components/nutrition/meal-types";
+import { MicronutrientList, type NutrientValueLike } from "@/components/nutrition/MicronutrientList";
+import { RecentFoods } from "@/components/nutrition/RecentFoods";
+
+type TodayEvent = { id: string; type: "meal-log" | "water-log"; occurredAt: string; mealType?: string; summary: string };
 
 type DailySnapshot = {
   date: string;
   targets: { energyKcal: number; proteinG: number; carbsG: number; fatG: number; fiberG?: number; waterMl?: number } | null;
-  consumed: { energyKcal: number; proteinG: number; carbsG: number; fatG: number; fiberG?: number };
+  consumed: { energyKcal: number; proteinG: number; carbsG: number; fatG: number; fiberG?: number; extended?: Record<string, NutrientValueLike> };
   consumptionCoverage: "logged-foods" | "empty-day";
   waterMl: number;
+  events: TodayEvent[];
 };
 
 const quickStarts = [
@@ -26,6 +32,11 @@ function round(value: number): string {
   return Math.round(value).toString();
 }
 
+function formatTime(iso: string): string {
+  try { return new Date(iso).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }); }
+  catch { return ""; }
+}
+
 export default function BugunPage() {
   const [snapshot, setSnapshot] = useState<DailySnapshot | null>(null);
   const [loading, setLoading] = useState(true);
@@ -33,6 +44,7 @@ export default function BugunPage() {
   const [mealType, setMealType] = useState<string>(MEAL_TYPE_OPTIONS[0].value);
   const [status, setStatus] = useState<string | null>(null);
   const [waterBusy, setWaterBusy] = useState(false);
+  const [deletingEventId, setDeletingEventId] = useState<string | null>(null);
 
   async function refresh() {
     try {
@@ -77,6 +89,21 @@ export default function BugunPage() {
       setStatus(`Eklendi: ${item.label}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Yemek eklenemedi");
+    }
+  }
+
+  async function undoEvent(eventId: string) {
+    setDeletingEventId(eventId);
+    try {
+      const res = await fetch(`/api/today?eventId=${encodeURIComponent(eventId)}`, { method: "DELETE" });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? "Kayıt silinemedi");
+      setSnapshot(await res.json());
+      setError(null);
+      setStatus("Kayıt geri alındı.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Kayıt silinemedi");
+    } finally {
+      setDeletingEventId(null);
     }
   }
 
@@ -128,6 +155,32 @@ export default function BugunPage() {
         {error && <p className="error-banner">{error}</p>}
       </section>
 
+      {!loading && snapshot && snapshot.events.length > 0 && (
+        <>
+          <h2 className="section-heading">Bugün kaydettiklerim</h2>
+          <section className="card">
+            <ul className="today-event-list">
+              {snapshot.events.map((event) => (
+                <li key={event.id} className="today-event-row">
+                  <div>
+                    <strong>{event.type === "meal-log" ? mealTypeLabel(event.mealType ?? "custom") : "Su"}</strong>
+                    <span className="card-copy"> — {event.summary} · {formatTime(event.occurredAt)}</span>
+                  </div>
+                  <button
+                    type="button"
+                    className="link-button"
+                    disabled={deletingEventId === event.id}
+                    onClick={() => undoEvent(event.id)}
+                  >
+                    {deletingEventId === event.id ? "Siliniyor…" : "Yemedim / geri al"}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        </>
+      )}
+
       <h2 className="section-heading">Hızlı ekle</h2>
       <section className="card">
         <label className="card-copy" htmlFor="meal-type-select">Hangi öğüne ekleyelim?</label>
@@ -138,7 +191,16 @@ export default function BugunPage() {
             ))}
           </select>
         </div>
+        <RecentFoods onAdd={addMealItem} />
         <FoodPicker onAdd={addMealItem} addLabel="Bugüne ekle" />
+        <div style={{ marginTop: 12 }}>
+          <CustomFoodBuilder />
+        </div>
+      </section>
+
+      <h2 className="section-heading">Vitamin ve mineraller (bugün)</h2>
+      <section className="card">
+        <MicronutrientList extended={consumed?.extended} />
       </section>
 
       <h2 className="section-heading">ARVEN ile hızlı başla</h2>

@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { DurableObjectV1Transaction, type D1LikeQuery, type SyncSqlStorage } from "../lib/persistence/durable-object-adapter";
-import type { StoredGoalVersion, StoredNutritionEvent, StoredOutcome, StoredProposal } from "../lib/persistence/v1-boundary";
+import type { StoredCustomFoodVersion, StoredGoalVersion, StoredNutritionEvent, StoredOutcome, StoredProposal } from "../lib/persistence/v1-boundary";
 
 const MIGRATIONS = ["0001_initial.sql", "0002_phase2_identity.sql", "0003_phase3_planning.sql"].map(
   (name) => fileURLToPath(new URL(`../db/migrations/${name}`, import.meta.url)),
@@ -212,4 +212,86 @@ test("purgeAuthenticatedUser removes every row for that subject across all owned
   }
   assert.equal((db.prepare("SELECT count(*) as n FROM users WHERE subject='u2'").get() as { n: number }).n, 1, "u2 must be untouched");
   assert.equal((db.prepare("SELECT count(*) as n FROM profiles WHERE user_subject='u2'").get() as { n: number }).n, 1, "u2's profile must be untouched");
+});
+
+test("deleteManualNutritionEvent removes a manually-logged event but is blocked by the DB itself for a confirmed AI-outcome event", async () => {
+  const db = freshDatabase();
+  insertUser(db, "u1");
+  const tx = new DurableObjectV1Transaction(wrapDatabase(db), emptyCatalog);
+
+  // Plain manual event: nothing references it, so deletion just succeeds.
+  await tx.insertNutritionEvent({ id: "manual-1", userSubject: "u1", eventType: "water-log", occurredAt: "2026-09-04T08:00:00.000Z", localDate: "2026-09-04", payloadJson: "{}", createdAt: "2026-09-04T08:00:00.000Z" });
+  await tx.deleteManualNutritionEvent("u1", "manual-1");
+  assert.equal(await tx.getNutritionEvent("u1", "manual-1"), null);
+
+  // Deleting something that was never there (or already gone) is reported clearly rather than silently no-op'd.
+  await assert.rejects(() => tx.deleteManualNutritionEvent("u1", "does-not-exist"), /Nutrition event not found/);
+
+  // An AI-confirmed event has a row in ai_action_outcomes pointing at it via
+  // result_event_id (ON DELETE RESTRICT) — the real SQLite foreign key must be
+  // what blocks this, not application logic re-checking the same thing.
+  await tx.insertProposalIfAbsent({ id: "a1", userSubject: "u1", actionType: "water-log", schemaVersion: "WaterLogActionV1", payloadJson: "{}", payloadSha256: "a".repeat(64), idempotencyKey: "k1", createdAt: "2026-09-04T00:00:00.000Z" });
+  await tx.insertDecision({ actionId: "a1", userSubject: "u1", decision: "confirmed", decidedAt: "2026-09-04T00:00:00.000Z" });
+  const aiEvent: StoredNutritionEvent = { id: "ai-1", userSubject: "u1", eventType: "water-log", occurredAt: "2026-09-04T09:00:00.000Z", localDate: "2026-09-04", payloadJson: "{}", createdAt: "2026-09-04T09:00:00.000Z" };
+  const outcome: StoredOutcome = { actionId: "a1", userSubject: "u1", actionType: "water-log", confirmationMarker: "confirmed", outcome: "applied", resultEventId: "ai-1", failureCode: null, recordedAt: "2026-09-04T09:00:00.000Z" };
+  await tx.insertNutritionEventWithOutcome(aiEvent, outcome);
+
+  await assert.rejects(() => tx.deleteManualNutritionEvent("u1", "ai-1"), /Cannot delete a nutrition event created by a confirmed AI action/);
+  assert.ok(await tx.getNutritionEvent("u1", "ai-1"), "the AI-confirmed event must still be there — the delete must not have partially applied");
+});
+
+test("insertCustomFoodVersion writes a food and its portions that searchFoodVersions/getFoodVersion/findFoodVersionByBarcode can read back, scoped to its owner", async () => {
+  const db = freshDatabase();
+  insertUser(db, "u1");
+  insertUser(db, "u2");
+  const catalog = (sql: string, params: unknown[]) => Promise.resolve(db.prepare(sql).all(...(params as never[])) as Record<string, unknown>[]);
+  const tx1 = new DurableObjectV1Transaction(wrapDatabase(db), catalog);
+  const tx2 = new DurableObjectV1Transaction(wrapDatabase(db), catalog);
+
+  const food: StoredCustomFoodVersion = {
+    id: "custom-1",
+    foodKey: "custom-1",
+    ownerSubject: "u1",
+    name: "Ev Yapımı Mercimek Köftesi",
+    isLiquid: false,
+    energyKcal: 180,
+    proteinG: 6,
+    carbsG: 30,
+    fatG: 4,
+    fiberG: 5,
+    allergenDataStatus: "unknown",
+    allergenIds: [],
+    dietarySafetyDataStatus: "unknown",
+    dietaryConflictRuleIds: [],
+    verifiedAt: "2026-09-04T00:00:00.000Z",
+    createdAt: "2026-09-04T00:00:00.000Z",
+    portions: [{ id: "portion-1", measure: "piece", label: "1 adet", gramsPerUnit: 40 }],
+  };
+  await tx1.insertCustomFoodVersion(food);
+
+  const resolved = await tx1.getFoodVersion("u1", "custom-1");
+  assert.equal(resolved?.name, "Ev Yapımı Mercimek Köftesi");
+  assert.equal(resolved?.nutrition.energyKcal, 180);
+  assert.equal(resolved?.nutrition.fiberG, 5);
+  assert.deepEqual((resolved?.portionOptions ?? []).map((p) => ({ measure: p.measure, label: p.label, gramsPerUnit: p.gramsPerUnit })), [{ measure: "piece", label: "1 adet", gramsPerUnit: 40 }]);
+
+  const bySearch = await tx1.searchFoodVersions("u1", "mercimek köftesi", 10);
+  assert.deepEqual(bySearch.map((f) => f.id), ["custom-1"]);
+
+  // Another user must never resolve, search, or barcode-match someone else's private custom food.
+  assert.equal(await tx2.getFoodVersion("u2", "custom-1"), null);
+  assert.equal((await tx2.searchFoodVersions("u2", "mercimek köftesi", 10)).length, 0);
+});
+
+test("searchFoodVersions collapses multiple catalog sources sharing one food_key down to the most recently verified row", async () => {
+  const db = freshDatabase();
+  insertUser(db, "u1");
+  const older = "2026-01-01T00:00:00.000Z";
+  const newer = "2026-06-01T00:00:00.000Z";
+  db.prepare("INSERT INTO food_versions (id, food_key, version, owner_subject, name, normalized_name, energy_kcal_100g, protein_g_100g, carbs_g_100g, fat_g_100g, allergen_data_status, dietary_safety_data_status, source_provider, source_external_id, verified_at, created_at) VALUES ('f-old','elma',1,NULL,'Elma (Eski Kaynak)','elma',50,0.2,13,0.1,'unknown','unknown','open-food-facts','off-1',?,?)").run(older, older);
+  db.prepare("INSERT INTO food_versions (id, food_key, version, owner_subject, name, normalized_name, energy_kcal_100g, protein_g_100g, carbs_g_100g, fat_g_100g, allergen_data_status, dietary_safety_data_status, source_provider, source_external_id, verified_at, created_at) VALUES ('f-new','elma',2,NULL,'Elma','elma',52,0.3,14,0.2,'unknown','unknown','manual-verified',NULL,?,?)").run(newer, newer);
+  const tx = new DurableObjectV1Transaction(wrapDatabase(db), (sql, params) => Promise.resolve(db.prepare(sql).all(...(params as never[])) as Record<string, unknown>[]));
+
+  const results = await tx.searchFoodVersions("u1", "elma", 10);
+  assert.deepEqual(results.map((f) => f.id), ["f-new"], "only the most recently verified source for this food_key should be returned");
 });

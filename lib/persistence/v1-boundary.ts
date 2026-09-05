@@ -2,7 +2,7 @@ import { z } from "zod";
 import { deriveCalculatedGoal, type MifflinStJeorV1Inputs } from "@/lib/goals/calculator";
 import { assertMealEnergyAllocations, type MealEnergyAllocation } from "@/lib/goals/types";
 import { assertNoAllergyConflict, assertNoDietaryExclusionConflict, type AllergenSafetyExclusion, type DietarySafetyExclusion } from "@/lib/health-safety/policy";
-import { scaleNutritionForStorage } from "@/lib/nutrition/calculations";
+import { scaleNutritionForStorage, sumNutrition } from "@/lib/nutrition/calculations";
 import { resolvePortionSelection } from "@/lib/nutrition/portions";
 import type { Food, NutritionFacts, PortionSelection } from "@/lib/nutrition/types";
 import { assertCanonicalLocalDate, assertCanonicalUtcInstant, previousLocalDate } from "@/lib/time/canonical";
@@ -26,6 +26,28 @@ export const WaterLogActionV1 = z.object({ schemaVersion:z.literal("WaterLogActi
 const ManualMealItem = MealItemBase.extend({ selection:z.union([HouseholdSelection,CustomGramSelection]) }).strict();
 export const MealPlanSlotV1 = z.object({ mealType:MealType, items:z.array(ManualMealItem).min(1).max(40) }).strict();
 export const MealPlanVersionV1 = z.object({ schemaVersion:z.literal("MealPlanVersionV1"), slots:z.array(MealPlanSlotV1).min(1).max(12) }).strict();
+
+const PortionMeasureZ = z.enum(["piece","slice","teaspoon","tablespoon","tea-glass","water-glass","cup","bowl","handful","palm","serving","package","bottle","can","ladle"]);
+const CustomPortionInputV1 = z.object({ measure:PortionMeasureZ, label:z.string().trim().min(1).max(80), gramsPerUnit:z.number().finite().min(0.1).max(100000) }).strict();
+export const CustomFoodV1 = z.object({
+  schemaVersion:z.literal("CustomFoodV1"),
+  name:z.string().trim().min(1).max(120),
+  isLiquid:z.boolean().optional(),
+  energyKcal:z.number().finite().min(0).max(10000),
+  proteinG:z.number().finite().min(0).max(1000),
+  carbsG:z.number().finite().min(0).max(1000),
+  fatG:z.number().finite().min(0).max(1000),
+  fiberG:z.number().finite().min(0).max(1000).optional(),
+  portions:z.array(CustomPortionInputV1).min(1).max(10),
+}).strict();
+export const RecipeIngredientV1 = MealItemBase.extend({ selection:z.union([HouseholdSelection,CustomGramSelection]) }).strict();
+export const RecipeFoodV1 = z.object({
+  schemaVersion:z.literal("RecipeFoodV1"),
+  name:z.string().trim().min(1).max(120),
+  servings:z.number().finite().min(1).max(100),
+  servingLabel:z.string().trim().min(1).max(80).optional(),
+  ingredients:z.array(RecipeIngredientV1).min(1).max(40),
+}).strict();
 
 const CanonicalLocalDate = z.string().superRefine((value, ctx) => {
   try { assertCanonicalLocalDate(value, "birthDate"); }
@@ -69,6 +91,14 @@ export type StoredProfile={userSubject:string;displayName:string|null;birthDate:
 export type StoredAssessmentSnapshot={id:string;userSubject:string;completedAt:string;payloadJson:string;createdAt:string};
 export type StoredSafetyAcknowledgement={id:string;userSubject:string;acknowledgementType:typeof SAFETY_ACKNOWLEDGEMENT_TYPES[number];policyVersion:string;acknowledgedAt:string;createdAt:string};
 export type StoredMealPlanVersion={id:string;userSubject:string;slotsJson:string;createdAt:string};
+export type StoredCustomPortion={id:string;measure:string;label:string;gramsPerUnit:number};
+export type StoredCustomFoodVersion={
+  id:string;foodKey:string;ownerSubject:string;name:string;isLiquid:boolean;
+  energyKcal:number;proteinG:number;carbsG:number;fatG:number;fiberG:number|null;
+  allergenDataStatus:"verified"|"unknown"|"not-applicable";allergenIds:string[];
+  dietarySafetyDataStatus:"verified"|"unknown"|"not-applicable";dietaryConflictRuleIds:string[];
+  verifiedAt:string;createdAt:string;portions:StoredCustomPortion[];
+};
 
 export interface V1Transaction {
   getUserContext(userSubject:string):Promise<AuthenticatedUserContext>;
@@ -117,6 +147,16 @@ export interface V1Transaction {
   insertMealPlanVersionAndSetCurrent(plan:StoredMealPlanVersion,selectedAt:string):Promise<void>;
   /** The authenticated subject's currently-selected meal plan ("Planım"), or null before one has ever been created. */
   getCurrentMealPlan(userSubject:string):Promise<StoredMealPlanVersion|null>;
+  /**
+   * Deletes one manually-logged nutrition event, for a correction ("yanlış eklemişim") or an
+   * explicit "yemedim" undo. Must refuse (throw) when the event is the immutable result of a
+   * confirmed AI action — production enforces this at the storage layer via the
+   * `ai_action_outcomes.result_event_id` foreign key (`ON DELETE RESTRICT`), so a correct adapter
+   * only needs to translate that failure into a clear error, not duplicate the check itself.
+   */
+  deleteManualNutritionEvent(userSubject:string,eventId:string):Promise<void>;
+  /** Writes a new user-owned custom food (plain manual entry or a summed recipe) into the shared catalog, scoped by owner_subject exactly like every other private row there. */
+  insertCustomFoodVersion(food:StoredCustomFoodVersion):Promise<void>;
   /** Delete the authenticated account and all dependent lifecycle rows in one transaction, in dependency-safe order. */
   purgeAuthenticatedUser(userSubject:string):Promise<void>;
 }
@@ -152,6 +192,17 @@ async function assertProposalIntegrity(proposal:StoredProposal):Promise<void>{co
 function instant(date:Date):string{if(!Number.isFinite(date.getTime()))throw new Error("Invalid service clock instant");return date.toISOString();}
 export function deriveNutritionLocalDate(occurredAt:string,timezone:string,dayStart:number):string{assertCanonicalUtcInstant(occurredAt,"occurredAt");if(!Number.isInteger(dayStart)||dayStart<0||dayStart>1439)throw new Error("nutritionDayStartMinutes must be 0..1439");let f:Intl.DateTimeFormat;try{f=new Intl.DateTimeFormat("en-CA",{timeZone:timezone,year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hourCycle:"h23"});}catch{throw new Error("Authenticated profile contains an invalid IANA timezone");}const p=Object.fromEntries(f.formatToParts(new Date(occurredAt)).filter(x=>x.type!=="literal").map(x=>[x.type,x.value]));const date=`${p.year}-${p.month}-${p.day}`;const mins=Number(p.hour)*60+Number(p.minute);if(!Number.isInteger(mins))throw new Error("Unable to derive local nutrition time");return mins<dayStart?previousLocalDate(date):date;}
 function safety(food:VersionedFood){return{allergens:[{foodId:food.foodKey,foodName:food.name,allergenDataStatus:food.allergenDataStatus??"unknown" as const,allergenIds:food.allergenIds??[]}],dietary:[{foodId:food.foodKey,foodName:food.name,dietarySafetyDataStatus:food.dietarySafetyDataStatus??"unknown" as const,dietaryConflictRuleIds:food.dietaryConflictRuleIds??[]}]};}
+function round6(value:number):number{return Math.round((value+Number.EPSILON)*1e6)/1e6;}
+/** A recipe/custom food inherits its ingredients' allergen and dietary-conflict ids so later logging still safety-checks correctly; status is only "verified" when every ingredient's own data was. */
+function aggregateIngredientSafety(foods:VersionedFood[]):{allergenDataStatus:"verified"|"unknown"|"not-applicable";allergenIds:string[];dietarySafetyDataStatus:"verified"|"unknown"|"not-applicable";dietaryConflictRuleIds:string[]}{
+  const isSafe=(status:string|undefined)=>status==="verified"||status==="not-applicable";
+  return{
+    allergenDataStatus:foods.every(f=>isSafe(f.allergenDataStatus))?"verified":"unknown",
+    allergenIds:Array.from(new Set(foods.flatMap(f=>f.allergenIds??[]))),
+    dietarySafetyDataStatus:foods.every(f=>isSafe(f.dietarySafetyDataStatus))?"verified":"unknown",
+    dietaryConflictRuleIds:Array.from(new Set(foods.flatMap(f=>f.dietaryConflictRuleIds??[]))),
+  };
+}
 async function mealPayload(tx:V1Transaction,subject:string,mealType:z.infer<typeof MealType>,items:Array<z.infer<typeof ManualMealItem>>):Promise<Record<string,unknown>>{
   const resolvedFoods:VersionedFood[]=await Promise.all(items.map(async(item)=>{
     const food=await tx.getFoodVersion(subject,item.foodVersionId);
@@ -306,6 +357,73 @@ export class V1MutationService{
     });
   }
   async getCurrentMealPlan():Promise<StoredMealPlanVersion|null>{return this.runner.transaction(async tx=>tx.getCurrentMealPlan(this.subject));}
+  /**
+   * Undo/correction for a manually-logged meal or water entry ("yemedim" / yanlış su ekledim).
+   * Refuses to delete an event that is the immutable result of a confirmed AI action — the adapter
+   * enforces this itself (see `V1Transaction.deleteManualNutritionEvent`'s doc comment).
+   */
+  async deleteManualNutritionEvent(eventId:string):Promise<void>{
+    const id=Id.parse(eventId);
+    await this.runner.transaction(async tx=>{
+      try{await tx.deleteManualNutritionEvent(this.subject,id);}
+      catch(error){rejectApplication("nutrition-event-delete-failed",error);}
+    });
+  }
+  /** "Kendi yemeğini oluştur": a plain manually-entered food, private to this user, usable everywhere a verified food is (search, meal log, plan). */
+  async createCustomFood(input:unknown):Promise<VersionedFood>{
+    const x=CustomFoodV1.parse(input);
+    const now=instant(this.clock.now());
+    const id=this.idFactory();
+    const food:StoredCustomFoodVersion={
+      id,foodKey:`custom-${id}`,ownerSubject:this.subject,name:x.name,isLiquid:!!x.isLiquid,
+      energyKcal:x.energyKcal,proteinG:x.proteinG,carbsG:x.carbsG,fatG:x.fatG,fiberG:x.fiberG??null,
+      allergenDataStatus:"unknown",allergenIds:[],dietarySafetyDataStatus:"unknown",dietaryConflictRuleIds:[],
+      verifiedAt:now,createdAt:now,
+      portions:x.portions.map((p)=>({id:this.idFactory(),measure:p.measure,label:p.label,gramsPerUnit:p.gramsPerUnit})),
+    };
+    return this.runner.transaction(async tx=>{
+      await tx.insertCustomFoodVersion(food);
+      const stored=await tx.getFoodVersion(this.subject,id);
+      if(!stored)throw new Error("Custom food insert did not become visible");
+      return stored;
+    });
+  }
+  /** "Tarif oluşturucu": sums verified ingredients (each resolved/safety-scaled exactly like a meal log) into one new reusable custom food, per serving. */
+  async createRecipeFood(input:unknown):Promise<VersionedFood>{
+    const x=RecipeFoodV1.parse(input);
+    return this.runner.transaction(async tx=>{
+      const resolved=await Promise.all(x.ingredients.map(async(item)=>{
+        const food=await tx.getFoodVersion(this.subject,item.foodVersionId);
+        if(!food)throw new ApplicationRejectedError("food-version-unavailable",`Verified food version ${item.foodVersionId} is unavailable to this user`);
+        const selection:PortionSelection=item.selection.kind==="household"?{kind:"household",portionOptionId:item.selection.portionVersionId,quantity:item.selection.quantity}:{kind:"custom-grams",grams:item.selection.grams};
+        let portion;
+        try{portion=resolvePortionSelection(food,selection);}catch(error){rejectApplication("portion-resolution-failed",error);}
+        let nutrition:NutritionFacts;
+        try{nutrition=scaleNutritionForStorage(portion);}catch(error){rejectApplication("nutrition-calculation-failed",error);}
+        return{food,grams:portion.grams,nutrition};
+      }));
+      const totalGrams=resolved.reduce((sum,r)=>sum+r.grams,0);
+      if(totalGrams<=0)throw new ApplicationRejectedError("recipe-empty","Recipe must resolve to a positive total weight");
+      const totals=sumNutrition(resolved.map((r)=>r.nutrition));
+      const ratio=100/totalGrams;
+      const ingredientSafety=aggregateIngredientSafety(resolved.map((r)=>r.food));
+      const now=instant(this.clock.now());
+      const id=this.idFactory();
+      const servingGrams=Math.round((totalGrams/x.servings)*10)/10;
+      const food:StoredCustomFoodVersion={
+        id,foodKey:`recipe-${id}`,ownerSubject:this.subject,name:x.name,isLiquid:false,
+        energyKcal:round6(totals.energyKcal*ratio),proteinG:round6(totals.proteinG*ratio),carbsG:round6(totals.carbsG*ratio),fatG:round6(totals.fatG*ratio),
+        fiberG:totals.fiberG==null?null:round6(totals.fiberG*ratio),
+        ...ingredientSafety,
+        verifiedAt:now,createdAt:now,
+        portions:[{id:this.idFactory(),measure:"serving",label:x.servingLabel??"1 porsiyon",gramsPerUnit:servingGrams}],
+      };
+      await tx.insertCustomFoodVersion(food);
+      const stored=await tx.getFoodVersion(this.subject,id);
+      if(!stored)throw new Error("Recipe food insert did not become visible");
+      return stored;
+    });
+  }
   async deleteAccount():Promise<void>{await this.runner.transaction(async tx=>{await tx.purgeAuthenticatedUser(this.subject);});}
   async getOrCreateAuthenticatedUser(defaults:{timezone:string;locale:string}):Promise<AuthenticatedUserContext>{return this.runner.transaction(async tx=>tx.getOrCreateUser(this.subject,defaults));}
   async upsertProfile(input:unknown):Promise<StoredProfile>{const x=ProfileUpsertV1.parse(input);const profile:StoredProfile={userSubject:this.subject,displayName:x.displayName,birthDate:x.birthDate,sexAtBirth:x.sexAtBirth,heightCm:x.heightCm,activityLevel:x.activityLevel,updatedAt:instant(this.clock.now())};return this.runner.transaction(async tx=>{await tx.upsertProfile(profile);return profile;});}
