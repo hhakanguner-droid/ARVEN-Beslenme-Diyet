@@ -654,6 +654,7 @@ export class V1MutationService{
     const rows:StoredLabResultEntry[]=entries.map((entry)=>{
       const x=LabExtractedEntryInput.parse(entry);
       for(const value of [x.markerName,x.valueText,x.unitText,x.referenceRangeText]){if(value!=null)assertNoMedicalOverreach(value);}
+      assertNoMedicalOverreach([x.markerName,x.valueText,x.unitText,x.referenceRangeText].filter((value): value is string => value!=null).join(" "));
       return {id:this.idFactory(),userSubject:this.subject,labDocumentId:parsedDocumentId,markerName:x.markerName,valueText:x.valueText,unitText:x.unitText,referenceRangeText:x.referenceRangeText,status:"extracted" as const,createdAt:now};
     });
     return this.runner.transaction(async tx=>{for(const row of rows) await tx.insertLabResultEntry(row);return rows;});
@@ -678,7 +679,8 @@ export class V1MutationService{
   async recordSupplement(input:unknown):Promise<StoredSupplementRecord>{
     const x=SupplementRecordInput.parse(input);
     if(!isKnownSupplementName(x.name))throw new ApplicationRejectedError("unverified-supplement-name","Supplement name is not in the curated supplement reference");
-    const record:StoredSupplementRecord={id:this.idFactory(),userSubject:this.subject,foodVersionId:x.foodVersionId,name:x.name,note:x.note,isActive:true,createdAt:instant(this.clock.now())};
+    if(x.note!==null)throw new ApplicationRejectedError("supplement-note-not-supported","Free-text supplement notes are disabled so this feature cannot become medication/dose/schedule storage");
+    const record:StoredSupplementRecord={id:this.idFactory(),userSubject:this.subject,foodVersionId:x.foodVersionId,name:x.name,note:null,isActive:true,createdAt:instant(this.clock.now())};
     return this.runner.transaction(async tx=>{await tx.insertSupplementRecord(record);return record;});
   }
   async listSupplements():Promise<StoredSupplementRecord[]>{return this.runner.transaction(async tx=>tx.listSupplementRecords(this.subject));}
