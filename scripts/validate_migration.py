@@ -9,7 +9,7 @@ def reject(conn,sql,params=()):
     except (sqlite3.IntegrityError,sqlite3.OperationalError): return
     raise AssertionError(f'expected rejection: {sql}')
 def main():
-    assert [Path(p).name for p in MIGRATIONS]==['0001_initial.sql','0002_phase2_identity.sql','0003_phase3_planning.sql']
+    assert [Path(p).name for p in MIGRATIONS]==['0001_initial.sql','0002_phase2_identity.sql','0003_phase3_planning.sql','0004_phase4_ai.sql']
     combined='\n'.join(Path(p).read_text(encoding='utf-8') for p in MIGRATIONS)
     assert 'CREATE TRIGGER' not in combined.upper()
     assert 'CREATE TABLE ai_actions' not in combined
@@ -41,5 +41,11 @@ def main():
     c.execute("INSERT INTO meal_plan_versions(id,user_subject,slots_json,created_at) VALUES('mp1','u1','[]',?)",(now,))
     reject(c,"INSERT INTO user_current_meal_plan(user_subject,meal_plan_version_id,selected_at) VALUES('u2','mp1',?)",(now,))
     c.execute("INSERT INTO user_current_meal_plan(user_subject,meal_plan_version_id,selected_at) VALUES('u1','mp1',?)",(now,))
+    reject(c,"INSERT INTO ai_memory_facts(id,user_subject,fact_text,provenance,confidence,created_at) VALUES('mf-bad','u1','x','not-a-provenance','high',?)",(now,))
+    reject(c,"INSERT INTO ai_memory_facts(id,user_subject,fact_text,provenance,confidence,created_at) VALUES('mf-bad2','u1','x','ai-inferred','certain',?)",(now,))
+    c.execute("INSERT INTO ai_memory_facts(id,user_subject,fact_text,provenance,confidence,created_at) VALUES('mf1','u1','Kahvaltıda genelde yumurta tercih ediyor.','ai-inferred','medium',?)",(now,))
+    c.execute("DELETE FROM ai_memory_facts WHERE id='mf1'")
+    reject(c,"INSERT INTO weekly_insight_snapshots(id,user_subject,week_start_local_date,metrics_json,narrative_json,created_at) VALUES('wi-bad','u1','2026-08-31','not-json',NULL,?)",(now,))
+    c.execute("INSERT INTO weekly_insight_snapshots(id,user_subject,week_start_local_date,metrics_json,narrative_json,created_at) VALUES('wi1','u1','2026-08-31','{}',NULL,?)",(now,))
     print('CLEAN_V1_MIGRATION_OK')
 if __name__=='__main__':main()

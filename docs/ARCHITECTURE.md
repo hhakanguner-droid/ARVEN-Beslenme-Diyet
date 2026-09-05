@@ -78,6 +78,14 @@ There is no mutable AI `status` column.
 
 `MealLogActionV1` permits only verified household portion-version references and the supported `nutrition-v1` calculation version. AI cannot smuggle a custom gram conversion into the mutation payload. `WaterLogActionV1` accepts only a finite bounded milliliter amount and canonical occurrence instant.
 
+## ARVEN AI (chat, memory, weekly insight)
+
+`lib/ai/context-engine.ts` assembles a deterministic per-request context (today's remaining targets, active allergen/dietary exclusions, recent ARVEN memory facts) and renders it into a compact Turkish system prompt. The prompt states *whether* numeric context exists but never embeds a specific figure, so the model has no number to echo back incorrectly.
+
+`lib/ai/provider.ts` is a thin, injectable-fetch OpenAI chat-completion adapter (mirroring `lib/nutrition/providers/open-food-facts.ts`'s pattern), validating every response against `ArvenChatReplyV1` or `WeeklyInsightV1` from `lib/ai/contracts.ts` before it reaches a route. `getOptionalAiProvider` returns `null` when `OPENAI_API_KEY` is unset so `/api/ai/chat` and `/api/ai/weekly-insight` degrade to an informational-only reply instead of failing.
+
+Chat-proposed water logging reuses the existing AI proposal lifecycle above unchanged (`createAiProposal`/`decideAiAction`/`applyConfirmedAiAction` with `water-log`); meal suggestions from chat remain informational only in this phase, actioned manually through the existing food search/log UI. ARVEN memory (`ai_memory_facts`) is the one AI-adjacent table that is directly user-deletable rather than an append-only ledger, since it is a live personalization input, not an audit record. Weekly insight snapshots (`weekly_insight_snapshots`) pair one `metrics_json` (from `lib/nutrition/weekly-metrics.ts`, computed the same way `Bugün` computes a single day, over a rolling 7-day window) with a nullable `narrative_json`; a snapshot is immutable once written, so a past week's exact wording and the exact numbers it was grounded in are never silently rewritten later. `weeklyNarrative`'s numeric-claim guard is what actually keeps the narrative number-free; the system prompt only asks nicely.
+
 ## Safety
 
 Allergies and explicit dietary safety exclusions are hard blocks. Immediately before a meal event is persisted, the transaction reloads the authenticated user's active exclusions and checks the exact immutable food versions. Relevant unknown safety evidence fails closed.

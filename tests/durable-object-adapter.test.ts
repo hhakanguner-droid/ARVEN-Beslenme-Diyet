@@ -4,9 +4,9 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { DurableObjectV1Transaction, type D1LikeQuery, type SyncSqlStorage } from "../lib/persistence/durable-object-adapter";
-import type { StoredCustomFoodVersion, StoredGoalVersion, StoredNutritionEvent, StoredOutcome, StoredProposal, StoredVerifiedFoodImport } from "../lib/persistence/v1-boundary";
+import type { StoredCustomFoodVersion, StoredGoalVersion, StoredMemoryFact, StoredNutritionEvent, StoredOutcome, StoredProposal, StoredVerifiedFoodImport, StoredWeeklyInsightSnapshot } from "../lib/persistence/v1-boundary";
 
-const MIGRATIONS = ["0001_initial.sql", "0002_phase2_identity.sql", "0003_phase3_planning.sql"].map(
+const MIGRATIONS = ["0001_initial.sql", "0002_phase2_identity.sql", "0003_phase3_planning.sql", "0004_phase4_ai.sql"].map(
   (name) => fileURLToPath(new URL(`../db/migrations/${name}`, import.meta.url)),
 );
 
@@ -337,4 +337,47 @@ test("importVerifiedFoodVersion inserts a new global catalog row that getFoodVer
   assert.deepEqual(bySearch.map((f) => f.id), ["off-1"]);
 
   assert.equal(await tx.getFoodVersionByFoodKey("u1", "off-does-not-exist"), null);
+});
+
+test("insertMemoryFact/listMemoryFacts/deleteMemoryFact scope strictly to the owning subject", async () => {
+  const db = freshDatabase();
+  insertUser(db, "u1");
+  insertUser(db, "u2");
+  const tx1 = new DurableObjectV1Transaction(wrapDatabase(db), emptyCatalog);
+  const tx2 = new DurableObjectV1Transaction(wrapDatabase(db), emptyCatalog);
+
+  const fact1: StoredMemoryFact = { id: "f1", userSubject: "u1", factText: "Kahvaltıda genelde yumurta tercih ediyor.", provenance: "ai-inferred", confidence: "medium", createdAt: "2026-09-04T00:00:00.000Z" };
+  const fact2: StoredMemoryFact = { id: "f2", userSubject: "u1", factText: "Süt alerjisi olduğunu belirtti.", provenance: "user-stated", confidence: "high", createdAt: "2026-09-04T00:01:00.000Z" };
+  await tx1.insertMemoryFact(fact1);
+  await tx1.insertMemoryFact(fact2);
+
+  const listed = await tx1.listMemoryFacts("u1");
+  assert.deepEqual(listed.map((f) => f.id), ["f2", "f1"], "most recent first");
+  assert.equal(await tx2.listMemoryFacts("u2").then((r) => r.length), 0);
+
+  // Deleting another user's fact id (or one that never existed) must be a silent no-op, never an error.
+  await tx2.deleteMemoryFact("u2", "f1");
+  assert.equal((await tx1.listMemoryFacts("u1")).length, 2, "u2 must not be able to delete u1's fact");
+  await tx1.deleteMemoryFact("u1", "f1");
+  assert.deepEqual((await tx1.listMemoryFacts("u1")).map((f) => f.id), ["f2"]);
+});
+
+test("insertWeeklyInsightSnapshot/getLatestWeeklyInsightSnapshot returns the most recently generated snapshot for an exact week", async () => {
+  const db = freshDatabase();
+  insertUser(db, "u1");
+  const tx = new DurableObjectV1Transaction(wrapDatabase(db), emptyCatalog);
+
+  assert.equal(await tx.getLatestWeeklyInsightSnapshot("u1", "2026-08-31"), null);
+
+  const withoutNarrative: StoredWeeklyInsightSnapshot = { id: "wi-1", userSubject: "u1", weekStartLocalDate: "2026-08-31", metricsJson: '{"averageEnergyKcal":1950}', narrativeJson: null, createdAt: "2026-09-04T00:00:00.000Z" };
+  await tx.insertWeeklyInsightSnapshot(withoutNarrative);
+  assert.equal((await tx.getLatestWeeklyInsightSnapshot("u1", "2026-08-31"))?.id, "wi-1");
+
+  const withNarrative: StoredWeeklyInsightSnapshot = { id: "wi-2", userSubject: "u1", weekStartLocalDate: "2026-08-31", metricsJson: '{"averageEnergyKcal":1950}', narrativeJson: '{"schemaVersion":"WeeklyInsightV1","summary":"Bu hafta düzenli bir ritim oluştu."}', createdAt: "2026-09-04T00:01:00.000Z" };
+  await tx.insertWeeklyInsightSnapshot(withNarrative);
+  const latest = await tx.getLatestWeeklyInsightSnapshot("u1", "2026-08-31");
+  assert.equal(latest?.id, "wi-2", "the most recently generated snapshot for this week must win");
+  assert.ok(latest?.narrativeJson?.includes("WeeklyInsightV1"));
+
+  assert.equal(await tx.getLatestWeeklyInsightSnapshot("u1", "2026-09-07"), null, "a different week must not match");
 });

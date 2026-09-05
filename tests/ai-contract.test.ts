@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseMealSuggestion, parseWeeklyInsight } from "../lib/ai/contracts";
+import { parseArvenChatReply, parseMealSuggestion, parseWeeklyInsight } from "../lib/ai/contracts";
 
 const validSuggestion = {
   schemaVersion: "MealSuggestionV1",
   title: "Dengeli öğün",
   rationale: "Protein ve sebze ağırlıklı bir alternatif.",
-  ingredients: [{ foodQuery: "ızgara tavuk göğsü", portionHint: { measure: "palm", quantity: 1, naturalLabel: "1 avuç içi" } }],
+  ingredients: [{ foodQuery: "ızgara tavuk göğüşü", portionHint: { measure: "palm", quantity: 1, naturalLabel: "1 avuç içi" } }],
   preparation: ["Izgarada pişir."],
   uncertainty: [],
 };
@@ -54,7 +54,7 @@ test("all user-facing meal text rejects numeric deterministic claims", () => {
     { ...validSuggestion, rationale: "Bu öğün 430 kcal içerir." },
     { ...validSuggestion, rationale: "Bu öğün ４３０ kcal içerir." },
     { ...validSuggestion, rationale: "Bu öğün ٤٣٠ kcal içerir." },
-    { ...validSuggestion, rationale: "Bu öğün ४३० kcal içerir." },
+    { ...validSuggestion, rationale: "Bu öğün ४४४ kcal içerir." },
     { ...validSuggestion, rationale: "Bu öğünde kalori 430, protein 30." },
     { ...validSuggestion, rationale: "Kalori: bir." },
     { ...validSuggestion, rationale: "Calories: one." },
@@ -85,7 +85,7 @@ test("all user-facing meal text rejects numeric deterministic claims", () => {
 
 test("food queries cannot be blank, smuggle quantities, or contain medical-management vocabulary", () => {
   for (const foodQuery of [
-    "   ", "120 g tavuk", "４３０ kcal tavuk", "٤٣٠ kcal tavuk", "४३० kcal tavuk", "400 kcal yoğurt", "kalori 430 yoğurt",
+    "   ", "120 g tavuk", "４３０ kcal tavuk", "٤٣٠ kcal tavuk", "४४४ kcal tavuk", "400 kcal yoğurt", "kalori 430 yoğurt",
     "iki miligram sodyum", "iki kilokalori yoğurt", "2 litre su", "iki mililitre süt",
     "1e3 kcal yoğurt", "1e3 calories chicken", "900 kilocalories yogurt", "800 kilojoules soup",
     "medication", "prescription", "ilaç", "reçete",
@@ -141,4 +141,52 @@ test("weekly insight parser enforces the same health policy on all narrative arr
   assert.throws(() => parseWeeklyInsight({ ...base, summary: "Çölyaksın." }), /non-diagnostic health policy/);
   assert.throws(() => parseWeeklyInsight({ ...base, suggestions: ["İlacını kes."] }), /non-diagnostic health policy/);
   assert.throws(() => parseWeeklyInsight({ ...base, suggestions: ["İnsülin kullanman gerekiyor."] }), /non-diagnostic health policy/);
+});
+
+const validChatReply = {
+  schemaVersion: "ArvenChatReplyV1",
+  reply: "Elbette, sana yardımcı olabilirim.",
+  uncertainty: [],
+};
+
+test("ARVEN chat reply contract accepts a plain reply with no optional fields", () => {
+  const parsed = parseArvenChatReply(validChatReply);
+  assert.equal(parsed.reply, validChatReply.reply);
+  assert.equal(parsed.mealSuggestion, undefined);
+  assert.equal(parsed.proposedWaterAction, undefined);
+});
+
+test("ARVEN chat reply accepts an embedded meal suggestion, proposed water action, and memory updates", () => {
+  const parsed = parseArvenChatReply({
+    ...validChatReply,
+    mealSuggestion: validSuggestion,
+    proposedWaterAction: { kind: "water-log", milliliters: 250 },
+    memoryUpdates: [{ factText: "Kahvaltıda genelde yumurta tercih ediyor.", provenance: "ai-inferred", confidence: "medium" }],
+  });
+  assert.equal(parsed.mealSuggestion?.title, validSuggestion.title);
+  assert.equal(parsed.proposedWaterAction?.milliliters, 250);
+  assert.equal(parsed.memoryUpdates?.[0]?.confidence, "medium");
+});
+
+test("ARVEN chat reply rejects numeric nutrition claims in the reply text", () => {
+  assert.throws(
+    () => parseArvenChatReply({ ...validChatReply, reply: "Bugün 1900 kcal aldın." }),
+    /numeric nutrition\/weight\/adherence/,
+  );
+});
+
+test("ARVEN chat reply enforces the non-diagnostic health policy on the reply text", () => {
+  assert.throws(() => parseArvenChatReply({ ...validChatReply, reply: "Diyabetsin." }), /non-diagnostic health policy/);
+});
+
+test("ARVEN chat reply rejects an out-of-range proposed water action", () => {
+  assert.throws(() => parseArvenChatReply({ ...validChatReply, proposedWaterAction: { kind: "water-log", milliliters: 0 } }));
+  assert.throws(() => parseArvenChatReply({ ...validChatReply, proposedWaterAction: { kind: "water-log", milliliters: 10000 } }));
+});
+
+test("ARVEN chat reply rejects a memory update whose fact text smuggles a numeric nutrition claim", () => {
+  assert.throws(() => parseArvenChatReply({
+    ...validChatReply,
+    memoryUpdates: [{ factText: "Günde 1900 kcal hedefliyor.", provenance: "user-stated", confidence: "high" }],
+  }));
 });
