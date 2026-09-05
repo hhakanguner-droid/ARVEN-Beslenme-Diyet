@@ -1,0 +1,38 @@
+name: Phase6 Final Boundary Fix
+on:
+  push:
+    paths:
+      - '.github/workflows/phase6-final-boundary-fix.yml'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/phase6-security-hardening
+      - name: Patch V1 mutation boundary
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('lib/persistence/v1-boundary.ts')
+          s=p.read_text()
+          old='''      for(const value of [x.markerName,x.valueText,x.unitText,x.referenceRangeText]){if(value!=null)assertNoMedicalOverreach(value);}\n      return {id:this.idFactory(),userSubject:this.subject,labDocumentId:parsedDocumentId,markerName:x.markerName,valueText:x.valueText,unitText:x.unitText,referenceRangeText:x.referenceRangeText,status:"extracted" as const,createdAt:now};'''
+          new='''      for(const value of [x.markerName,x.valueText,x.unitText,x.referenceRangeText]){if(value!=null)assertNoMedicalOverreach(value);}\n      assertNoMedicalOverreach([x.markerName,x.valueText,x.unitText,x.referenceRangeText].filter((value): value is string => value!=null).join(" "));\n      return {id:this.idFactory(),userSubject:this.subject,labDocumentId:parsedDocumentId,markerName:x.markerName,valueText:x.valueText,unitText:x.unitText,referenceRangeText:x.referenceRangeText,status:"extracted" as const,createdAt:now};'''
+          if old not in s: raise SystemExit('lab boundary target not found')
+          s=s.replace(old,new,1)
+          old2='''    if(!isKnownSupplementName(x.name))throw new ApplicationRejectedError("unverified-supplement-name","Supplement name is not in the curated supplement reference");\n    const record:StoredSupplementRecord={id:this.idFactory(),userSubject:this.subject,foodVersionId:x.foodVersionId,name:x.name,note:x.note,isActive:true,createdAt:instant(this.clock.now())};'''
+          new2='''    if(!isKnownSupplementName(x.name))throw new ApplicationRejectedError("unverified-supplement-name","Supplement name is not in the curated supplement reference");\n    if(x.note!==null)throw new ApplicationRejectedError("supplement-note-not-supported","Free-text supplement notes are disabled so this feature cannot become medication/dose/schedule storage");\n    const record:StoredSupplementRecord={id:this.idFactory(),userSubject:this.subject,foodVersionId:x.foodVersionId,name:x.name,note:null,isActive:true,createdAt:instant(this.clock.now())};'''
+          if old2 not in s: raise SystemExit('supplement boundary target not found')
+          s=s.replace(old2,new2,1)
+          p.write_text(s)
+          PY
+      - name: Remove one-shot workflow and commit
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/workflows/phase6-final-boundary-fix.yml
+          git add lib/persistence/v1-boundary.ts
+          git commit -m 'Close final Phase 6 mutation-boundary findings'
+          git push origin HEAD:fix/phase6-security-hardening
