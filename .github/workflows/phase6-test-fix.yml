@@ -1,0 +1,36 @@
+name: Phase6 Test Alignment
+on:
+  push:
+    paths:
+      - '.github/workflows/phase6-test-fix.yml'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/phase6-security-hardening
+      - name: Align supplement persistence test with no-note policy
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('tests/persistence-v1.test.ts')
+          s=p.read_text()
+          old='const record=await s.recordSupplement({foodVersionId:null,name:"D Vitamini",note:"Kahvaltıda"});'
+          new='const record=await s.recordSupplement({foodVersionId:null,name:"D Vitamini",note:null});'
+          if old not in s:
+              raise SystemExit('target test line not found')
+          p.write_text(s.replace(old,new,1))
+          PY
+      - name: Remove one-shot workflow and commit
+        shell: bash
+        run: |
+          rm .github/workflows/phase6-test-fix.yml
+          git config user.name "hhakanguner-droid"
+          git config user.email "hhakanguner@gmail.com"
+          git add tests/persistence-v1.test.ts .github/workflows/phase6-test-fix.yml
+          git commit -m "Align supplement persistence test with Phase 6 safety policy"
+          git push origin HEAD:fix/phase6-security-hardening
