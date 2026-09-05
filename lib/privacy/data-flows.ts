@@ -55,6 +55,15 @@ export const EXTERNAL_DATA_FLOWS: readonly ExternalDataFlow[] = [
     purpose: "Barkoddan ürün kaydı bulmak.",
     policyUrl: "https://world.openfoodfacts.org/terms-of-use",
   },
+  {
+    id: "openai-lab-extraction",
+    destinationLabel: "OpenAI",
+    trigger: "lab-extraction",
+    categories: ["lab-file", "app-language", "ai-model-name"],
+    consentMode: "explicit-opt-in",
+    purpose: "Kullanıcının açık onayıyla tahlil belgesindeki ölçüm metinlerini inceleme adayı olarak çıkarmak; sonuçlar kullanıcı doğrulayana kadar kesin veri sayılmaz.",
+    policyUrl: "https://openai.com/policies/privacy-policy/",
+  },
 ] as const;
 
 export function validateExternalDataFlows(flows: readonly ExternalDataFlow[]): void {
