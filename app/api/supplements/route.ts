@@ -11,12 +11,9 @@ export async function GET(request: Request) {
   }
 }
 
-type SupplementRecordBody = { foodVersionId?: unknown; name?: unknown; note?: unknown };
+type SupplementRecordBody = { foodVersionId?: unknown; name?: unknown };
 
-/**
- * Adds one supplement record. Free-text names are deliberately restricted to the curated
- * supplement reference so this endpoint cannot silently become a medication registry/tracker.
- */
+/** Adds one curated supplement record. Free-text note/dose/schedule storage is intentionally unsupported. */
 export async function POST(request: Request) {
   try {
     const context = await resolveRouteContext(request);
@@ -28,7 +25,7 @@ export async function POST(request: Request) {
     const supplement = await context.service.recordSupplement({
       foodVersionId: body.foodVersionId ?? null,
       name,
-      note: body.note ?? null,
+      note: null,
     });
     return Response.json({ supplement });
   } catch (error) {
