@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { DurableObjectV1Transaction, type D1LikeQuery, type SyncSqlStorage } from "../lib/persistence/durable-object-adapter";
-import type { StoredCustomFoodVersion, StoredGoalVersion, StoredNutritionEvent, StoredOutcome, StoredProposal } from "../lib/persistence/v1-boundary";
+import type { StoredCustomFoodVersion, StoredGoalVersion, StoredNutritionEvent, StoredOutcome, StoredProposal, StoredVerifiedFoodImport } from "../lib/persistence/v1-boundary";
 
 const MIGRATIONS = ["0001_initial.sql", "0002_phase2_identity.sql", "0003_phase3_planning.sql"].map(
   (name) => fileURLToPath(new URL(`../db/migrations/${name}`, import.meta.url)),
@@ -294,4 +294,47 @@ test("searchFoodVersions collapses multiple catalog sources sharing one food_key
 
   const results = await tx.searchFoodVersions("u1", "elma", 10);
   assert.deepEqual(results.map((f) => f.id), ["f-new"], "only the most recently verified source for this food_key should be returned");
+});
+
+test("importVerifiedFoodVersion inserts a new global catalog row that getFoodVersionByFoodKey/findFoodVersionByBarcode/searchFoodVersions can read back", async () => {
+  const db = freshDatabase();
+  insertUser(db, "u1");
+  const catalog = (sql: string, params: unknown[]) => Promise.resolve(db.prepare(sql).all(...(params as never[])) as Record<string, unknown>[]);
+  const tx = new DurableObjectV1Transaction(wrapDatabase(db), catalog);
+
+  const imported: StoredVerifiedFoodImport = {
+    id: "off-1",
+    foodKey: "off-3017620422003",
+    name: "Nutella",
+    brand: "Ferrero",
+    barcode: "3017620422003",
+    isLiquid: false,
+    energyKcal: 539,
+    proteinG: 6.3,
+    carbsG: 57.5,
+    fatG: 30.9,
+    fiberG: null,
+    sourceProvider: "open-food-facts",
+    sourceExternalId: "3017620422003",
+    sourceEvidenceUrl: "https://world.openfoodfacts.org/api/v2/product/3017620422003.json",
+    verifiedAt: "2026-09-04T00:00:00.000Z",
+    createdAt: "2026-09-04T00:00:00.000Z",
+  };
+  await tx.importVerifiedFoodVersion(imported);
+
+  const byFoodKey = await tx.getFoodVersionByFoodKey("u1", "off-3017620422003");
+  assert.equal(byFoodKey?.name, "Nutella");
+  assert.equal(byFoodKey?.nutrition.energyKcal, 539);
+  assert.equal(byFoodKey?.nutrition.fiberG, undefined, "OFF's real payloads frequently omit fiber — must round-trip as absent, not 0");
+  assert.equal(byFoodKey?.source.provider, "open-food-facts");
+  assert.equal(byFoodKey?.source.externalId, "3017620422003");
+  assert.deepEqual(byFoodKey?.portionOptions, [], "OFF imports carry no household portions — the app logs these by exact grams instead");
+
+  const byBarcode = await tx.findFoodVersionByBarcode("u1", "3017620422003");
+  assert.equal(byBarcode?.id, "off-1");
+
+  const bySearch = await tx.searchFoodVersions("u1", "nutella", 10);
+  assert.deepEqual(bySearch.map((f) => f.id), ["off-1"]);
+
+  assert.equal(await tx.getFoodVersionByFoodKey("u1", "off-does-not-exist"), null);
 });
