@@ -9,9 +9,8 @@ def reject(conn,sql,params=()):
     except (sqlite3.IntegrityError,sqlite3.OperationalError): return
     raise AssertionError(f'expected rejection: {sql}')
 def main():
-    assert [Path(p).name for p in MIGRATIONS]==['0001_initial.sql','0002_phase2_identity.sql','0003_phase3_planning.sql','0004_phase4_ai.sql','0005_phase5_vision.sql','0006_phase6_health.sql']
+    assert [Path(p).name for p in MIGRATIONS]==['0001_initial.sql','0002_phase2_identity.sql','0003_phase3_planning.sql','0004_phase4_ai.sql','0005_phase5_vision.sql','0006_phase6_health.sql','0007_phase6_health_hardening.sql']
     combined='\n'.join(Path(p).read_text(encoding='utf-8') for p in MIGRATIONS)
-    assert 'CREATE TRIGGER' not in combined.upper()
     assert 'CREATE TABLE ai_actions' not in combined
     assert 'meal_entry_items' not in combined
     c=sqlite3.connect(':memory:');c.execute('PRAGMA foreign_keys=ON')
@@ -57,10 +56,14 @@ def main():
     c.execute("INSERT INTO lab_documents(id,user_subject,mime_type,byte_size,storage_key,created_at) VALUES('ld1','u1','image/jpeg',12345,'u1/ld1',?)",(now,))
     reject(c,"INSERT INTO lab_result_entries(id,user_subject,lab_document_id,marker_name,value_text,unit_text,reference_range_text,status,created_at) VALUES('lr-bad','u1','ld1','Glukoz','95','mg/dL','70-100','pending',?)",(now,))
     c.execute("INSERT INTO lab_result_entries(id,user_subject,lab_document_id,marker_name,value_text,unit_text,reference_range_text,status,created_at) VALUES('lr1','u1','ld1','Glukoz','95','mg/dL','70-100','extracted',?)",(now,))
-    c.execute("UPDATE lab_result_entries SET status='confirmed' WHERE id='lr1'")
+    c.execute("UPDATE lab_result_entries SET marker_name='Glukoz',value_text='96',unit_text='mg/dL',reference_range_text='70-100',status='confirmed' WHERE id='lr1'")
+    audit=c.execute("SELECT extracted_value_text,confirmed_value_text FROM lab_result_confirmations WHERE lab_result_entry_id='lr1'").fetchone()
+    assert audit==('95','96')
+    reject(c,"UPDATE lab_result_entries SET value_text='97' WHERE id='lr1'")
     c.execute("DELETE FROM lab_documents WHERE id='ld1'")
     assert c.execute("SELECT lab_document_id FROM lab_result_entries WHERE id='lr1'").fetchone()[0] is None
     c.execute("DELETE FROM lab_result_entries WHERE id='lr1'")
+    assert c.execute("SELECT count(*) FROM lab_result_confirmations WHERE lab_result_entry_id='lr1'").fetchone()[0] == 0
     reject(c,"INSERT INTO supplement_records(id,user_subject,food_version_id,name,note,is_active,created_at) VALUES('sr-bad','u1',NULL,'  ',NULL,1,?)",(now,))
     c.execute("INSERT INTO supplement_records(id,user_subject,food_version_id,name,note,is_active,created_at) VALUES('sr1','u1',NULL,'D Vitamini',NULL,1,?)",(now,))
     c.execute("UPDATE supplement_records SET is_active=0 WHERE id='sr1'")
