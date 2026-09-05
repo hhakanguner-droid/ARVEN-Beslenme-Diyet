@@ -4,6 +4,7 @@ import {
   AiProviderError,
   analyzeMealPhoto,
   analyzeMenuPhoto,
+  extractLabResult,
   generateChatReply,
   generateWeeklyInsight,
   identifyProductPhoto,
@@ -238,6 +239,42 @@ test("identifyProductPhoto throws invalid-reply when the model's JSON fails Prod
   })));
   await assert.rejects(
     () => identifyProductPhoto(config(fetchImpl), photoRequest),
+    (error: unknown) => error instanceof AiProviderError && error.code === "invalid-reply",
+  );
+});
+
+test("extractLabResult sends the photo as an image_url part and validates the reply against LabResultExtractionV1, numbers and all", async () => {
+  let sentMessages: { role: string; content: unknown }[] = [];
+  const fetchImpl = fakeFetch((_url, init) => {
+    sentMessages = JSON.parse(init.body).messages;
+    return jsonResponse(chatCompletionEnvelope({
+      schemaVersion: "LabResultExtractionV1",
+      entries: [{ markerName: "Glukoz", valueText: "95", unitText: "mg/dL", referenceRangeText: "70-100" }],
+      uncertainty: [],
+    }));
+  });
+  const extraction = await extractLabResult(config(fetchImpl), photoRequest);
+  const imagePart = lastUserMessage(sentMessages).content.find((part) => part.type === "image_url");
+  assert.equal(imagePart?.image_url?.url, `data:${photoRequest.mimeType};base64,${photoRequest.imageBase64}`);
+  assert.equal(extraction.entries[0]?.valueText, "95");
+});
+
+test("extractLabResult throws invalid-reply when the model's JSON fails LabResultExtractionV1 validation", async () => {
+  const fetchImpl = fakeFetch(() => jsonResponse(chatCompletionEnvelope({ schemaVersion: "LabResultExtractionV1", entries: [], uncertainty: [] })));
+  await assert.rejects(
+    () => extractLabResult(config(fetchImpl), photoRequest),
+    (error: unknown) => error instanceof AiProviderError && error.code === "invalid-reply",
+  );
+});
+
+test("extractLabResult rejects a diagnostic assertion smuggled into a marker name", async () => {
+  const fetchImpl = fakeFetch(() => jsonResponse(chatCompletionEnvelope({
+    schemaVersion: "LabResultExtractionV1",
+    entries: [{ markerName: "Diyabetsin", valueText: "95", unitText: null, referenceRangeText: null }],
+    uncertainty: [],
+  })));
+  await assert.rejects(
+    () => extractLabResult(config(fetchImpl), photoRequest),
     (error: unknown) => error instanceof AiProviderError && error.code === "invalid-reply",
   );
 });

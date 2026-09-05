@@ -225,4 +225,46 @@ CREATE TABLE IF NOT EXISTS photo_assets (
   created_at TEXT NOT NULL
 ) STRICT, WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS photo_assets_user_idx ON photo_assets(user_subject, created_at);
+
+-- Phase 6: health context — lab documents/results and supplement records (see
+-- db/migrations/0006_phase6_health.sql for the full rationale).
+CREATE TABLE IF NOT EXISTS lab_documents (
+  id TEXT PRIMARY KEY NOT NULL CHECK (length(trim(id)) > 0),
+  user_subject TEXT NOT NULL REFERENCES users(subject) ON DELETE CASCADE,
+  mime_type TEXT NOT NULL CHECK (mime_type IN ('image/jpeg', 'image/png', 'image/webp')),
+  byte_size INTEGER NOT NULL CHECK (byte_size > 0 AND byte_size <= 8000000),
+  storage_key TEXT NOT NULL CHECK (length(trim(storage_key)) > 0),
+  created_at TEXT NOT NULL
+) STRICT, WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS lab_documents_user_idx ON lab_documents(user_subject, created_at);
+
+CREATE TABLE IF NOT EXISTS lab_result_entries (
+  id TEXT PRIMARY KEY NOT NULL CHECK (length(trim(id)) > 0),
+  user_subject TEXT NOT NULL REFERENCES users(subject) ON DELETE CASCADE,
+  lab_document_id TEXT REFERENCES lab_documents(id) ON DELETE SET NULL,
+  marker_name TEXT NOT NULL CHECK (length(trim(marker_name)) > 0 AND length(marker_name) <= 160),
+  value_text TEXT NOT NULL CHECK (length(trim(value_text)) > 0 AND length(value_text) <= 80),
+  unit_text TEXT CHECK (unit_text IS NULL OR length(trim(unit_text)) <= 40),
+  reference_range_text TEXT CHECK (reference_range_text IS NULL OR length(trim(reference_range_text)) <= 80),
+  status TEXT NOT NULL CHECK (status IN ('extracted', 'confirmed')),
+  created_at TEXT NOT NULL
+) STRICT, WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS lab_result_entries_user_idx ON lab_result_entries(user_subject, created_at);
+
+-- food_version_id intentionally has NO foreign key here (unlike db/migrations/0006_phase6_health.sql's
+-- copy): food_versions lives in the shared D1 catalog, a genuinely separate database instance from
+-- this per-user Durable Object in production, and SQLite cannot enforce a foreign key across two
+-- separate database connections — the same cross-database limitation already documented on
+-- food_versions.owner_subject's REFERENCES users(subject) in lib/persistence/durable-object-adapter.ts's
+-- purgeAuthenticatedUser doc comment.
+CREATE TABLE IF NOT EXISTS supplement_records (
+  id TEXT PRIMARY KEY NOT NULL CHECK (length(trim(id)) > 0),
+  user_subject TEXT NOT NULL REFERENCES users(subject) ON DELETE CASCADE,
+  food_version_id TEXT,
+  name TEXT NOT NULL CHECK (length(trim(name)) > 0 AND length(name) <= 160),
+  note TEXT CHECK (note IS NULL OR length(note) <= 300),
+  is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
+  created_at TEXT NOT NULL
+) STRICT, WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS supplement_records_user_idx ON supplement_records(user_subject, is_active, created_at);
 `;

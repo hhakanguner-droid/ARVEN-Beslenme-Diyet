@@ -79,6 +79,18 @@ class FakeTx implements V1Transaction {
   async getPhotoAsset(): Promise<null> { return null; }
   async listPhotoAssets(): Promise<never[]> { return []; }
   async deletePhotoAsset(): Promise<void> { throw new Error("unused"); }
+  async insertLabDocument(): Promise<void> { throw new Error("unused"); }
+  async getLabDocument(): Promise<null> { return null; }
+  async listLabDocuments(): Promise<never[]> { return []; }
+  async deleteLabDocument(): Promise<void> { throw new Error("unused"); }
+  async insertLabResultEntry(): Promise<void> { throw new Error("unused"); }
+  async listLabResultEntries(): Promise<never[]> { return []; }
+  async confirmLabResultEntry(): Promise<never> { throw new Error("unused"); }
+  async deleteLabResultEntry(): Promise<void> { throw new Error("unused"); }
+  async insertSupplementRecord(): Promise<void> { throw new Error("unused"); }
+  async listSupplementRecords(): Promise<never[]> { return []; }
+  async setSupplementRecordActive(): Promise<void> { throw new Error("unused"); }
+  async deleteSupplementRecord(): Promise<void> { throw new Error("unused"); }
 }
 
 class FakeRunner implements V1TransactionRunner {

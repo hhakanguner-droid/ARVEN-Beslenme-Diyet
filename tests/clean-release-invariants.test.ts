@@ -126,6 +126,18 @@ class SafetyRaceTx implements V1Transaction {
   async getPhotoAsset(){ return null; }
   async listPhotoAssets(){ return []; }
   async deletePhotoAsset(){ throw new Error("unused"); }
+  async insertLabDocument(){ throw new Error("unused"); }
+  async getLabDocument(){ return null; }
+  async listLabDocuments(){ return []; }
+  async deleteLabDocument(){ throw new Error("unused"); }
+  async insertLabResultEntry(){ throw new Error("unused"); }
+  async listLabResultEntries(){ return []; }
+  async confirmLabResultEntry(): Promise<never> { throw new Error("unused"); }
+  async deleteLabResultEntry(){ throw new Error("unused"); }
+  async insertSupplementRecord(){ throw new Error("unused"); }
+  async listSupplementRecords(){ return []; }
+  async setSupplementRecordActive(){ throw new Error("unused"); }
+  async deleteSupplementRecord(){ throw new Error("unused"); }
 }
 class SafetyRaceRunner implements V1TransactionRunner {
   constructor(readonly tx = new SafetyRaceTx()) {}
