@@ -212,4 +212,17 @@ CREATE TABLE IF NOT EXISTS weekly_insight_snapshots (
   created_at TEXT NOT NULL
 ) STRICT, WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS weekly_insight_snapshots_user_idx ON weekly_insight_snapshots(user_subject, week_start_local_date, created_at);
+
+-- Phase 5: vision — private photo metadata only; actual bytes live outside this database (see
+-- db/migrations/0005_phase5_vision.sql for the full rationale).
+CREATE TABLE IF NOT EXISTS photo_assets (
+  id TEXT PRIMARY KEY NOT NULL CHECK (length(trim(id)) > 0),
+  user_subject TEXT NOT NULL REFERENCES users(subject) ON DELETE CASCADE,
+  kind TEXT NOT NULL CHECK (kind IN ('meal-photo', 'menu-photo', 'product-photo')),
+  mime_type TEXT NOT NULL CHECK (mime_type IN ('image/jpeg', 'image/png', 'image/webp')),
+  byte_size INTEGER NOT NULL CHECK (byte_size > 0 AND byte_size <= 8000000),
+  storage_key TEXT NOT NULL CHECK (length(trim(storage_key)) > 0),
+  created_at TEXT NOT NULL
+) STRICT, WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS photo_assets_user_idx ON photo_assets(user_subject, created_at);
 `;

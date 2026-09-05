@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { AllergenSafetyExclusion, DietarySafetyExclusion } from "@/lib/health-safety/policy";
-import { V1MutationService,deriveNutritionLocalDate,type AuthenticatedUserContext,type ScientificReferenceSnapshot,type StoredAssessmentSnapshot,type StoredCustomFoodVersion,type StoredDecision,type StoredGoalVersion,type StoredMealPlanVersion,type StoredMemoryFact,type StoredNutritionEvent,type StoredOutcome,type StoredProfile,type StoredProposal,type StoredSafetyAcknowledgement,type StoredVerifiedFoodImport,type StoredWeeklyInsightSnapshot,type V1Transaction,type V1TransactionRunner,type VersionedFood } from "@/lib/persistence/v1-boundary";
+import { V1MutationService,deriveNutritionLocalDate,type AuthenticatedUserContext,type ScientificReferenceSnapshot,type StoredAssessmentSnapshot,type StoredCustomFoodVersion,type StoredDecision,type StoredGoalVersion,type StoredMealPlanVersion,type StoredMemoryFact,type StoredNutritionEvent,type StoredOutcome,type StoredPhotoAsset,type StoredProfile,type StoredProposal,type StoredSafetyAcknowledgement,type StoredVerifiedFoodImport,type StoredWeeklyInsightSnapshot,type V1Transaction,type V1TransactionRunner,type VersionedFood } from "@/lib/persistence/v1-boundary";
 class MemoryTx implements V1Transaction{
- context:AuthenticatedUserContext={timezone:"Europe/Istanbul",nutritionDayStartMinutes:0};proposals=new Map<string,StoredProposal>();decisions=new Map<string,StoredDecision>();outcomes=new Map<string,StoredOutcome>();events=new Map<string,StoredNutritionEvent>();foods=new Map<string,VersionedFood>();allergens:AllergenSafetyExclusion[]=[];exclusions:DietarySafetyExclusion[]=[];refs=new Map<string,ScientificReferenceSnapshot>();goals=new Map<string,StoredGoalVersion>();currentGoal:string|null=null;purgedSubjects:string[]=[];users=new Map<string,AuthenticatedUserContext>();profiles=new Map<string,StoredProfile>();assessments=new Map<string,StoredAssessmentSnapshot>();acknowledgements=new Map<string,StoredSafetyAcknowledgement>();mealPlans=new Map<string,StoredMealPlanVersion>();currentMealPlan:string|null=null;customFoods=new Map<string,StoredCustomFoodVersion>();memoryFacts=new Map<string,StoredMemoryFact>();weeklyInsights:StoredWeeklyInsightSnapshot[]=[];
+ context:AuthenticatedUserContext={timezone:"Europe/Istanbul",nutritionDayStartMinutes:0};proposals=new Map<string,StoredProposal>();decisions=new Map<string,StoredDecision>();outcomes=new Map<string,StoredOutcome>();events=new Map<string,StoredNutritionEvent>();foods=new Map<string,VersionedFood>();allergens:AllergenSafetyExclusion[]=[];exclusions:DietarySafetyExclusion[]=[];refs=new Map<string,ScientificReferenceSnapshot>();goals=new Map<string,StoredGoalVersion>();currentGoal:string|null=null;purgedSubjects:string[]=[];users=new Map<string,AuthenticatedUserContext>();profiles=new Map<string,StoredProfile>();assessments=new Map<string,StoredAssessmentSnapshot>();acknowledgements=new Map<string,StoredSafetyAcknowledgement>();mealPlans=new Map<string,StoredMealPlanVersion>();currentMealPlan:string|null=null;customFoods=new Map<string,StoredCustomFoodVersion>();memoryFacts=new Map<string,StoredMemoryFact>();weeklyInsights:StoredWeeklyInsightSnapshot[]=[];photoAssets=new Map<string,StoredPhotoAsset>();
+ async insertPhotoAsset(asset:StoredPhotoAsset){this.photoAssets.set(asset.id,asset)}
+ async getPhotoAsset(s:string,id:string){const v=this.photoAssets.get(id);return v?.userSubject===s?v:null}
+ async listPhotoAssets(s:string){return [...this.photoAssets.values()].filter(p=>p.userSubject===s).sort((a,b)=>b.createdAt.localeCompare(a.createdAt))}
+ async deletePhotoAsset(s:string,id:string){const p=this.photoAssets.get(id);if(p&&p.userSubject===s)this.photoAssets.delete(id)}
  async insertMemoryFact(fact:StoredMemoryFact){this.memoryFacts.set(fact.id,fact)}
  async listMemoryFacts(s:string){return [...this.memoryFacts.values()].filter(f=>f.userSubject===s).sort((a,b)=>b.createdAt.localeCompare(a.createdAt))}
  async deleteMemoryFact(s:string,id:string){const f=this.memoryFacts.get(id);if(f&&f.userSubject===s)this.memoryFacts.delete(id)}
@@ -80,3 +84,29 @@ test("recordMemoryFacts rejects an empty batch and an out-of-range confidence",a
 test("deleteMemoryFact scoped to the authenticated subject cannot remove another user's fact",async()=>{const r=new MemoryRunner();r.tx.memoryFacts.set("other-fact",{id:"other-fact",userSubject:"u2",factText:"Başka kullanıcının notu.",provenance:"ai-inferred",confidence:"low",createdAt:"2026-09-02T20:00:00Z"});const s=new V1MutationService("u1",r);await s.deleteMemoryFact("other-fact");assert.equal(r.tx.memoryFacts.has("other-fact"),true)});
 test("recordWeeklyInsightSnapshot stores deterministic metrics immediately and the narrative once generated, retrievable by exact week",async()=>{const r=new MemoryRunner();let tick=0;const s=new V1MutationService("u1",r,ids("wi-1","wi-2"),{now:()=>new Date(Date.parse("2026-09-02T20:00:00Z")+(tick++)*1000)});const withoutNarrative=await s.recordWeeklyInsightSnapshot("2026-08-31",{averageEnergyKcal:1950},null);assert.equal(withoutNarrative.narrativeJson,null);const withNarrative=await s.recordWeeklyInsightSnapshot("2026-08-31",{averageEnergyKcal:1950},{schemaVersion:"WeeklyInsightV1",summary:"Bu hafta düzenli bir ritim oluştu.",positives:[],areasForImprovement:[],suggestions:[],uncertainty:[]});assert.ok(withNarrative.narrativeJson?.includes("WeeklyInsightV1"));const latest=await s.getWeeklyInsightSnapshot("2026-08-31");assert.equal(latest?.id,withNarrative.id);assert.equal(await s.getWeeklyInsightSnapshot("2026-09-07"),null)});
 test("recordWeeklyInsightSnapshot rejects a malformed week start date",async()=>{const s=new V1MutationService("u1",new MemoryRunner());await assert.rejects(()=>s.recordWeeklyInsightSnapshot("31-08-2026",{},null))});
+test("recordPhotoAsset stores metadata the owner can later list and delete, scoped to the authenticated subject",async()=>{
+ const r=new MemoryRunner();
+ let tick=0;
+ const s=new V1MutationService("u1",r,ids("photo-1","photo-2"),{now:()=>new Date(Date.parse("2026-09-02T20:00:00Z")+(tick++)*1000)});
+ const first=await s.recordPhotoAsset({kind:"meal-photo",mimeType:"image/jpeg",byteSize:12345,storageKey:"u1/photo-1"});
+ assert.equal(first.id,"photo-1");
+ const second=await s.recordPhotoAsset({kind:"menu-photo",mimeType:"image/png",byteSize:54321,storageKey:"u1/photo-2"});
+ const listed=await s.listPhotoAssets();
+ assert.equal(listed.length,2);
+ assert.equal(listed[0]?.id,second.id);
+ const fetched=await s.getPhotoAsset(first.id);
+ assert.equal(fetched?.storageKey,"u1/photo-1");
+ const other=new V1MutationService("u2",r);
+ assert.equal(await other.getPhotoAsset(first.id),null);
+ await other.deletePhotoAsset(first.id);
+ assert.equal((await s.listPhotoAssets()).length,2,"another user's delete must not remove this user's photo");
+ await s.deletePhotoAsset(first.id);
+ const remaining=await s.listPhotoAssets();
+ assert.equal(remaining.length,1);
+ assert.equal(remaining[0]?.id,second.id);
+});
+test("recordPhotoAsset rejects an unsupported mime type and an oversized byte count",async()=>{
+ const s=new V1MutationService("u1",new MemoryRunner());
+ await assert.rejects(()=>s.recordPhotoAsset({kind:"meal-photo",mimeType:"image/gif",byteSize:100,storageKey:"u1/x"}));
+ await assert.rejects(()=>s.recordPhotoAsset({kind:"meal-photo",mimeType:"image/jpeg",byteSize:9_000_000,storageKey:"u1/x"}));
+});

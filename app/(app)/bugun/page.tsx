@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { BrandWordmark } from "@/components/layout/AppShell";
 import { CustomFoodBuilder } from "@/components/nutrition/CustomFoodBuilder";
 import { FoodPicker, type PickedFoodItem } from "@/components/nutrition/FoodPicker";
@@ -20,10 +21,10 @@ type DailySnapshot = {
 };
 
 const quickStarts = [
-  { icon: "🥗", label: "Öğün önerisi" },
-  { icon: "⌕", label: "Yemek analizi" },
-  { icon: "🍽", label: "Restoran seçimi" },
-  { icon: "▤", label: "Tahlil yorumu" },
+  { icon: "🥗", label: "Öğün önerisi", href: "/arven" },
+  { icon: "⌕", label: "Yemek analizi", href: "/analiz/ogun" },
+  { icon: "🍽", label: "Restoran seçimi", href: "/analiz/menu" },
+  { icon: "▤", label: "Tahlil yorumu", href: null },
 ] as const;
 
 const WATER_QUICK_AMOUNTS = [200, 250, 500] as const;
@@ -205,13 +206,20 @@ export default function BugunPage() {
 
       <h2 className="section-heading">ARVEN ile hızlı başla</h2>
       <div className="quick-grid">
-        {quickStarts.map((item) => (
-          <button key={item.label} className="quick-card unavailable" type="button" disabled>
-            <span className="quick-icon" aria-hidden="true">{item.icon}</span>
-            <strong>{item.label}</strong>
-            <span className="coming-soon">Yakında</span>
-          </button>
-        ))}
+        {quickStarts.map((item) =>
+          item.href ? (
+            <Link key={item.label} href={item.href} className="quick-card">
+              <span className="quick-icon" aria-hidden="true">{item.icon}</span>
+              <strong>{item.label}</strong>
+            </Link>
+          ) : (
+            <button key={item.label} className="quick-card unavailable" type="button" disabled>
+              <span className="quick-icon" aria-hidden="true">{item.icon}</span>
+              <strong>{item.label}</strong>
+              <span className="coming-soon">Yakında</span>
+            </button>
+          ),
+        )}
       </div>
     </>
   );

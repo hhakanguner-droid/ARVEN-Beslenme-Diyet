@@ -8,6 +8,8 @@ const menu = [
   ["Tahlillerim", "/saglik/tahliller"],
   ["Takviyeler", "/saglik/takviyeler"],
   ["ARVEN hafızası", "/arven/hafiza"],
+  ["Öğün fotoğrafı analizi", "/analiz/ogun"],
+  ["Menü analizi", "/analiz/menu"],
   ["Başarılarım", "/basarilarim"],
   ["Bildirimler", "/ayarlar/bildirimler"],
 ] as const;

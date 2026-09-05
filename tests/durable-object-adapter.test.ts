@@ -4,9 +4,9 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { DurableObjectV1Transaction, type D1LikeQuery, type SyncSqlStorage } from "../lib/persistence/durable-object-adapter";
-import type { StoredCustomFoodVersion, StoredGoalVersion, StoredMemoryFact, StoredNutritionEvent, StoredOutcome, StoredProposal, StoredVerifiedFoodImport, StoredWeeklyInsightSnapshot } from "../lib/persistence/v1-boundary";
+import type { StoredCustomFoodVersion, StoredGoalVersion, StoredMemoryFact, StoredNutritionEvent, StoredOutcome, StoredPhotoAsset, StoredProposal, StoredVerifiedFoodImport, StoredWeeklyInsightSnapshot } from "../lib/persistence/v1-boundary";
 
-const MIGRATIONS = ["0001_initial.sql", "0002_phase2_identity.sql", "0003_phase3_planning.sql", "0004_phase4_ai.sql"].map(
+const MIGRATIONS = ["0001_initial.sql", "0002_phase2_identity.sql", "0003_phase3_planning.sql", "0004_phase4_ai.sql", "0005_phase5_vision.sql"].map(
   (name) => fileURLToPath(new URL(`../db/migrations/${name}`, import.meta.url)),
 );
 
@@ -203,10 +203,11 @@ test("purgeAuthenticatedUser removes every row for that subject across all owned
   // actually split — tracked as follow-up D1-side work, not fixed here.
   db.prepare("INSERT INTO food_versions (id, food_key, version, owner_subject, name, normalized_name, energy_kcal_100g, protein_g_100g, carbs_g_100g, fat_g_100g, allergen_data_status, dietary_safety_data_status, source_provider, verified_at, created_at) VALUES ('f1','custom-food',1,'u1','Custom','custom',100,1,1,1,'unknown','unknown','manual-verified','2026-09-04T00:00:00.000Z','2026-09-04T00:00:00.000Z')").run();
   await tx1.insertMealPlanVersionAndSetCurrent({ id: "mp1", userSubject: "u1", slotsJson: "[]", createdAt: "2026-09-04T00:00:00.000Z" }, "2026-09-04T00:00:00.000Z");
+  await tx1.insertPhotoAsset({ id: "ph1", userSubject: "u1", kind: "meal-photo", mimeType: "image/jpeg", byteSize: 12345, storageKey: "u1/ph1", createdAt: "2026-09-04T00:00:00.000Z" });
 
   await assert.doesNotReject(() => tx1.purgeAuthenticatedUser("u1"));
 
-  for (const table of ["users", "profiles", "ai_action_proposals", "ai_action_decisions", "ai_action_outcomes", "nutrition_events", "goal_versions", "user_current_goal", "assessment_snapshots", "safety_acknowledgements", "meal_plan_versions", "user_current_meal_plan"]) {
+  for (const table of ["users", "profiles", "ai_action_proposals", "ai_action_decisions", "ai_action_outcomes", "nutrition_events", "goal_versions", "user_current_goal", "assessment_snapshots", "safety_acknowledgements", "meal_plan_versions", "user_current_meal_plan", "photo_assets"]) {
     const count = (db.prepare(`SELECT count(*) as n FROM ${table} WHERE ${table === "users" ? "subject" : "user_subject"}='u1'`).get() as { n: number }).n;
     assert.equal(count, 0, `${table} should have no rows left for u1`);
   }
@@ -380,4 +381,29 @@ test("insertWeeklyInsightSnapshot/getLatestWeeklyInsightSnapshot returns the mos
   assert.ok(latest?.narrativeJson?.includes("WeeklyInsightV1"));
 
   assert.equal(await tx.getLatestWeeklyInsightSnapshot("u1", "2026-09-07"), null, "a different week must not match");
+});
+
+test("insertPhotoAsset/getPhotoAsset/listPhotoAssets/deletePhotoAsset scope strictly to the owning subject", async () => {
+  const db = freshDatabase();
+  insertUser(db, "u1");
+  insertUser(db, "u2");
+  const tx1 = new DurableObjectV1Transaction(wrapDatabase(db), emptyCatalog);
+  const tx2 = new DurableObjectV1Transaction(wrapDatabase(db), emptyCatalog);
+
+  const photo1: StoredPhotoAsset = { id: "p1", userSubject: "u1", kind: "meal-photo", mimeType: "image/jpeg", byteSize: 12345, storageKey: "u1/p1", createdAt: "2026-09-04T00:00:00.000Z" };
+  const photo2: StoredPhotoAsset = { id: "p2", userSubject: "u1", kind: "menu-photo", mimeType: "image/png", byteSize: 54321, storageKey: "u1/p2", createdAt: "2026-09-04T00:01:00.000Z" };
+  await tx1.insertPhotoAsset(photo1);
+  await tx1.insertPhotoAsset(photo2);
+
+  const listed = await tx1.listPhotoAssets("u1");
+  assert.deepEqual(listed.map((p) => p.id), ["p2", "p1"], "most recent first");
+  assert.equal((await tx2.listPhotoAssets("u2")).length, 0);
+  assert.equal(await tx2.getPhotoAsset("u2", "p1"), null, "u2 must not be able to read u1's photo");
+  assert.equal((await tx1.getPhotoAsset("u1", "p1"))?.storageKey, "u1/p1");
+
+  // Deleting another user's photo id (or one that never existed) must be a silent no-op, never an error.
+  await tx2.deletePhotoAsset("u2", "p1");
+  assert.equal((await tx1.listPhotoAssets("u1")).length, 2, "u2 must not be able to delete u1's photo");
+  await tx1.deletePhotoAsset("u1", "p1");
+  assert.deepEqual((await tx1.listPhotoAssets("u1")).map((p) => p.id), ["p2"]);
 });

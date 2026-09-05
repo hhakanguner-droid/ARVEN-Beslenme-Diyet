@@ -75,6 +75,10 @@ class FakeTx implements V1Transaction {
   async deleteMemoryFact(): Promise<void> { throw new Error("unused"); }
   async insertWeeklyInsightSnapshot(): Promise<void> { throw new Error("unused"); }
   async getLatestWeeklyInsightSnapshot(): Promise<StoredWeeklyInsightSnapshot | null> { return null; }
+  async insertPhotoAsset(): Promise<void> { throw new Error("unused"); }
+  async getPhotoAsset(): Promise<null> { return null; }
+  async listPhotoAssets(): Promise<never[]> { return []; }
+  async deletePhotoAsset(): Promise<void> { throw new Error("unused"); }
 }
 
 class FakeRunner implements V1TransactionRunner {

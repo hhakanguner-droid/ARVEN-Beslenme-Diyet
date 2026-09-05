@@ -16,6 +16,17 @@
     }
   ],
 
+  // Phase 5 vision: private photo bytes (see lib/media/storage.ts). Not yet bound to any route —
+  // real Next.js request handling on the Worker isn't wired up yet either (see custom-worker.ts),
+  // so this is scaffolding for when both land together, exactly like ARVEN_CATALOG_DB/USER_DO were
+  // before Phase 1's routes could actually reach them.
+  "r2_buckets": [
+    {
+      "binding": "ARVEN_MEDIA",
+      "bucket_name": "arven-beslenme-diyet-media"
+    }
+  ],
+
   "durable_objects": {
     "bindings": [
       {

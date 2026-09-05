@@ -12,6 +12,7 @@ import type {
   StoredMemoryFact,
   StoredNutritionEvent,
   StoredOutcome,
+  StoredPhotoAsset,
   StoredProfile,
   StoredProposal,
   StoredSafetyAcknowledgement,
@@ -136,6 +137,9 @@ function mapMemoryFact(row: Record<string, unknown>): StoredMemoryFact {
 }
 function mapWeeklyInsightSnapshot(row: Record<string, unknown>): StoredWeeklyInsightSnapshot {
   return { id: asString(row.id), userSubject: asString(row.user_subject), weekStartLocalDate: asString(row.week_start_local_date), metricsJson: asString(row.metrics_json), narrativeJson: asNullableString(row.narrative_json), createdAt: asString(row.created_at) };
+}
+function mapPhotoAsset(row: Record<string, unknown>): StoredPhotoAsset {
+  return { id: asString(row.id), userSubject: asString(row.user_subject), kind: asString(row.kind) as StoredPhotoAsset["kind"], mimeType: asString(row.mime_type) as StoredPhotoAsset["mimeType"], byteSize: Number(row.byte_size), storageKey: asString(row.storage_key), createdAt: asString(row.created_at) };
 }
 /** Keeps one row per `food_key` (the most recently verified), preserving first-seen order otherwise. */
 function dedupeByFoodKey(rows: Record<string, unknown>[]): Record<string, unknown>[] {
@@ -545,6 +549,26 @@ export class DurableObjectV1Transaction implements V1Transaction {
     return row ? mapWeeklyInsightSnapshot(row) : null;
   }
 
+  async insertPhotoAsset(asset: StoredPhotoAsset): Promise<void> {
+    this.sql.exec(
+      "INSERT INTO photo_assets (id, user_subject, kind, mime_type, byte_size, storage_key, created_at) VALUES (?,?,?,?,?,?,?)",
+      asset.id, asset.userSubject, asset.kind, asset.mimeType, asset.byteSize, asset.storageKey, asset.createdAt,
+    );
+  }
+
+  async getPhotoAsset(userSubject: string, id: string): Promise<StoredPhotoAsset | null> {
+    const row = this.sql.exec("SELECT * FROM photo_assets WHERE id=? AND user_subject=?", id, userSubject).one();
+    return row ? mapPhotoAsset(row) : null;
+  }
+
+  async listPhotoAssets(userSubject: string): Promise<StoredPhotoAsset[]> {
+    return this.sql.exec("SELECT * FROM photo_assets WHERE user_subject=? ORDER BY created_at DESC", userSubject).toArray().map(mapPhotoAsset);
+  }
+
+  async deletePhotoAsset(userSubject: string, id: string): Promise<void> {
+    this.sql.exec("DELETE FROM photo_assets WHERE id=? AND user_subject=?", id, userSubject);
+  }
+
   /**
    * Ordered deletes respecting the schema's mixed CASCADE/RESTRICT foreign keys
    * — see db/migrations/*.sql. Only touches this user's own Durable Object
@@ -561,6 +585,11 @@ export class DurableObjectV1Transaction implements V1Transaction {
    * a foreign key across them at all. Whoever splits the migrations for the
    * real D1/DO topology needs to revisit that constraint (drop it, or track
    * ownership without a DB-level FK) — not addressed here.
+   *
+   * Known follow-up: this also deletes `photo_assets` metadata rows, but not the photo bytes
+   * those rows pointed at in `lib/media/storage.ts` (R2/local file) — no account-delete flow
+   * exists yet to wire that up (that's Phase 9 scope), so a full delete-account implementation
+   * will need to list a user's photo assets and delete their underlying objects first.
    */
   async purgeAuthenticatedUser(userSubject: string): Promise<void> {
     this.sql.transactionSync(() => {
@@ -578,6 +607,7 @@ export class DurableObjectV1Transaction implements V1Transaction {
       this.sql.exec("DELETE FROM user_ui_preferences WHERE user_subject=?", userSubject);
       this.sql.exec("DELETE FROM weekly_insight_snapshots WHERE user_subject=?", userSubject);
       this.sql.exec("DELETE FROM ai_memory_facts WHERE user_subject=?", userSubject);
+      this.sql.exec("DELETE FROM photo_assets WHERE user_subject=?", userSubject);
       this.sql.exec("DELETE FROM profiles WHERE user_subject=?", userSubject);
       this.sql.exec("DELETE FROM users WHERE subject=?", userSubject);
     });

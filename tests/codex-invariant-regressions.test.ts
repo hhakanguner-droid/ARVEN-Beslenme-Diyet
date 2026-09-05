@@ -71,6 +71,10 @@ class Tx implements V1Transaction {
   async deleteMemoryFact():Promise<void>{}
   async insertWeeklyInsightSnapshot():Promise<void>{}
   async getLatestWeeklyInsightSnapshot(){ return null; }
+  async insertPhotoAsset(){}
+  async getPhotoAsset(){ return null; }
+  async listPhotoAssets(){ return []; }
+  async deletePhotoAsset(){}
 }
 class Runner implements V1TransactionRunner { constructor(readonly tx=new Tx()){} async transaction<T>(work:(tx:V1Transaction)=>Promise<T>){ return work(this.tx); } }
 function ids(...values:string[]){ let i=0; return()=>values[i++]??`id-${i}`; }

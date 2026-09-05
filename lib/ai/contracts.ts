@@ -169,3 +169,60 @@ export const ArvenChatReplyV1 = z.object({
 }).strict();
 export type ArvenChatReply = z.infer<typeof ArvenChatReplyV1>;
 export function parseArvenChatReply(input: unknown): ArvenChatReply { return ArvenChatReplyV1.parse(input); }
+
+// Phase 5: vision. A photo is never a source of numeric nutrition truth any more than free-form
+// chat or a text meal suggestion is — every guard from mealNarrative/FoodQuery/PortionHint above
+// applies unchanged; the only thing genuinely new here is a per-item/per-photo confidence label,
+// since a photo estimate is inherently less certain than a food the user typed or scanned.
+const PhotoConfidence = z.enum(["high", "medium", "low"]);
+const PhotoEstimatedIngredient = z.object({
+  foodQuery: FoodQuery,
+  portionHint: PortionHint,
+  confidence: PhotoConfidence,
+}).strict();
+export const MealPhotoEstimateV1 = z.object({
+  schemaVersion: z.literal("MealPhotoEstimateV1"),
+  items: z.array(PhotoEstimatedIngredient).min(1).max(15),
+  overallConfidence: PhotoConfidence,
+  uncertainty: z.array(mealNarrative(240)).max(8),
+}).strict();
+export type MealPhotoEstimate = z.infer<typeof MealPhotoEstimateV1>;
+export function parseMealPhotoEstimate(input: unknown): MealPhotoEstimate { return MealPhotoEstimateV1.parse(input); }
+
+// Menu ranking is an ordinal judgement call ("this one fits your goal better than that one"), not
+// a numeric claim, so it is allowed to differ from "no numbers" the way a plain preference order
+// would — `fitsGoal` is a three-way qualitative label, never a score, and `rationale` still goes
+// through the same numeric-claim guard as every other narrative field.
+const MenuItemFit = z.enum(["good-fit", "moderate-fit", "less-fit"]);
+const RankedMenuItem = z.object({
+  itemName: z.string().trim().min(1).max(160)
+    .refine((value) => !containsDigitNutritionClaim(value) && !containsSpelledNutritionClaim(value),
+      "Menu item names must not contain AI-authored nutrition quantities")
+    .refine(assertSafeNarrative, "Menu item name violates ARVEN non-diagnostic health policy"),
+  rationale: mealNarrative(300),
+  fitsGoal: MenuItemFit.optional(),
+}).strict();
+export const MenuAnalysisV1 = z.object({
+  schemaVersion: z.literal("MenuAnalysisV1"),
+  rankedItems: z.array(RankedMenuItem).min(1).max(30),
+  uncertainty: z.array(mealNarrative(240)).max(8),
+}).strict();
+export type MenuAnalysis = z.infer<typeof MenuAnalysisV1>;
+export function parseMenuAnalysis(input: unknown): MenuAnalysis { return MenuAnalysisV1.parse(input); }
+
+// Barcode/photo-assisted product discovery: the model only ever proposes a *candidate* identity
+// (a name/brand to search for, or a barcode to look up) — it never supplies nutrition figures
+// itself. The existing verified catalog / Open Food Facts search (lib/nutrition/providers/
+// open-food-facts.ts, already built in Phase 3) is what the client feeds this candidate into, and
+// that lookup — not the model — is the only source of the actual numbers.
+const CandidateBarcode = z.string().trim().regex(/^[0-9]{6,14}$/, "detectedBarcode must be 6 to 14 digits").nullable();
+export const ProductPhotoIdentificationV1 = z.object({
+  schemaVersion: z.literal("ProductPhotoIdentificationV1"),
+  candidateProductName: FoodQuery.nullable(),
+  candidateBrand: z.string().trim().min(1).max(120).nullable(),
+  detectedBarcode: CandidateBarcode,
+  confidence: PhotoConfidence,
+  uncertainty: z.array(mealNarrative(240)).max(4),
+}).strict();
+export type ProductPhotoIdentification = z.infer<typeof ProductPhotoIdentificationV1>;
+export function parseProductPhotoIdentification(input: unknown): ProductPhotoIdentification { return ProductPhotoIdentificationV1.parse(input); }

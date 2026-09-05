@@ -40,8 +40,20 @@ const BARCODE_FORMATS = ["ean_13", "ean_8", "upc_a", "upc_e", "code_128"];
  * manual entry always works). Either path hits `/api/foods/barcode`, which transparently imports a
  * new Open Food Facts product into the shared catalog on a local miss.
  */
-export function FoodPicker({ onAdd, addLabel = "Ekle" }: { onAdd: (item: PickedFoodItem) => void; addLabel?: string }) {
-  const [query, setQuery] = useState("");
+export function FoodPicker({
+  onAdd,
+  addLabel = "Ekle",
+  initialQuery,
+  initialBarcode,
+}: {
+  onAdd: (item: PickedFoodItem) => void;
+  addLabel?: string;
+  /** Prefills the search box — e.g. from a vision photo estimate's `foodQuery`. Re-applies whenever it changes. */
+  initialQuery?: string;
+  /** Prefills the barcode field and triggers a lookup — e.g. from a vision photo's `detectedBarcode`. Re-applies whenever it changes. */
+  initialBarcode?: string;
+}) {
+  const [query, setQuery] = useState(initialQuery ?? "");
   const [results, setResults] = useState<SearchFood[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedFood, setSelectedFood] = useState<SearchFood | null>(null);
@@ -75,6 +87,17 @@ export function FoodPicker({ onAdd, addLabel = "Ekle" }: { onAdd: (item: PickedF
 
   // Stop the camera and any pending detection loop if the component unmounts mid-scan.
   useEffect(() => stopScanning, []);
+
+  // Re-applies whenever the parent passes a new prefill value (e.g. the next item in a photo estimate's list).
+  useEffect(() => {
+    if (initialQuery !== undefined) setQuery(initialQuery);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialQuery]);
+
+  useEffect(() => {
+    if (initialBarcode) { setBarcodeInput(initialBarcode); lookupBarcode(initialBarcode); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialBarcode]);
 
   function pickFood(food: SearchFood) {
     setSelectedFood(food);
