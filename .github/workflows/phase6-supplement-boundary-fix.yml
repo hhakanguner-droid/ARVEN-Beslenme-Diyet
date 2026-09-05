@@ -1,0 +1,39 @@
+name: Phase6 Supplement Boundary Fix
+
+on:
+  push:
+    branches:
+      - fix/phase6-security-hardening
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/phase6-security-hardening
+          fetch-depth: 0
+      - name: Enforce curated supplements in mutation service
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('lib/persistence/v1-boundary.ts')
+          s=p.read_text()
+          needle='''  async recordSupplement(input:unknown):Promise<StoredSupplementRecord>{\n    const x=SupplementRecordInput.parse(input);\n    const record:StoredSupplementRecord={id:this.idFactory(),userSubject:this.subject,foodVersionId:x.foodVersionId,name:x.name,note:x.note,isActive:true,createdAt:instant(this.clock.now())};'''
+          replacement='''  async recordSupplement(input:unknown):Promise<StoredSupplementRecord>{\n    const x=SupplementRecordInput.parse(input);\n    if(!isKnownSupplementName(x.name))throw new ApplicationRejectedError("unverified-supplement-name","Supplement name is not in the curated supplement reference");\n    const record:StoredSupplementRecord={id:this.idFactory(),userSubject:this.subject,foodVersionId:x.foodVersionId,name:x.name,note:x.note,isActive:true,createdAt:instant(this.clock.now())};'''
+          if needle not in s:
+            raise SystemExit('recordSupplement target not found')
+          p.write_text(s.replace(needle,replacement,1))
+          Path('.github/workflows/phase6-supplement-boundary-fix.yml').unlink()
+          PY
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Enforce supplement allowlist at mutation boundary"
+          git push origin HEAD:fix/phase6-security-hardening
