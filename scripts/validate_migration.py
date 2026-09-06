@@ -9,7 +9,7 @@ def reject(conn,sql,params=()):
     except (sqlite3.IntegrityError,sqlite3.OperationalError): return
     raise AssertionError(f'expected rejection: {sql}')
 def main():
-    assert [Path(p).name for p in MIGRATIONS]==['0001_initial.sql','0002_phase2_identity.sql','0003_phase3_planning.sql','0004_phase4_ai.sql','0005_phase5_vision.sql','0006_phase6_health.sql','0007_phase6_health_hardening.sql','0008_phase7_planning.sql']
+    assert [Path(p).name for p in MIGRATIONS]==['0001_initial.sql','0002_phase2_identity.sql','0003_phase3_planning.sql','0004_phase4_ai.sql','0005_phase5_vision.sql','0006_phase6_health.sql','0007_phase6_health_hardening.sql','0008_phase7_planning.sql','0009_phase8_progress.sql']
     combined='\n'.join(Path(p).read_text(encoding='utf-8') for p in MIGRATIONS)
     assert 'CREATE TABLE ai_actions' not in combined
     assert 'meal_entry_items' not in combined
@@ -89,5 +89,18 @@ def main():
     c.execute("INSERT INTO week_prep_preferences(user_subject,enabled,prep_day_of_week,prep_local_time,updated_at) VALUES('u1',1,6,'09:30',?)",(now,))
     reject(c,"INSERT INTO week_prep_status(user_subject,week_start_local_date,is_completed,updated_at) VALUES('u1','2026-08-31',2,?)",(now,))
     c.execute("INSERT INTO week_prep_status(user_subject,week_start_local_date,is_completed,updated_at) VALUES('u1','2026-08-31',1,?)",(now,))
+    reject(c,"INSERT INTO body_measurements(id,user_subject,local_date,weight_kg,created_at) VALUES('bm-bad','u1','2026-08-31',NULL,?)",(now,))
+    reject(c,"INSERT INTO body_measurements(id,user_subject,local_date,weight_kg,created_at) VALUES('bm-bad2','u1','2026-08-31',500,?)",(now,))
+    c.execute("INSERT INTO body_measurements(id,user_subject,local_date,weight_kg,created_at) VALUES('bm1','u1','2026-08-31',80.5,?)",(now,))
+    c.execute("DELETE FROM body_measurements WHERE id='bm1'")
+    reject(c,"INSERT INTO body_photo_sets(id,user_subject,local_date,angle,mime_type,byte_size,storage_key,created_at) VALUES('bp-bad','u1','2026-08-31','diagonal','image/jpeg',100,'u1/bp-bad',?)",(now,))
+    c.execute("INSERT INTO body_photo_sets(id,user_subject,local_date,angle,mime_type,byte_size,storage_key,created_at) VALUES('bp1','u1','2026-08-31','front','image/jpeg',12345,'u1/bp1',?)",(now,))
+    c.execute("DELETE FROM body_photo_sets WHERE id='bp1'")
+    c.execute("INSERT INTO progress_milestones(id,user_subject,milestone_key,achieved_at) VALUES('pm1','u1','first-measurement-logged',?)",(now,))
+    reject(c,"INSERT INTO progress_milestones(id,user_subject,milestone_key,achieved_at) VALUES('pm2','u1','first-measurement-logged',?)",(now,))
+    c.execute("DELETE FROM progress_milestones WHERE id='pm1'")
+    reject(c,"INSERT INTO progress_report_exports(id,user_subject,report_type,period_local_date,mime_type,byte_size,storage_key,created_at) VALUES('pr-bad','u1','monthly','2026-08-31','application/pdf',100,'u1/pr-bad',?)",(now,))
+    c.execute("INSERT INTO progress_report_exports(id,user_subject,report_type,period_local_date,mime_type,byte_size,storage_key,created_at) VALUES('pr1','u1','daily','2026-08-31','application/pdf',12345,'u1/pr1',?)",(now,))
+    c.execute("DELETE FROM progress_report_exports WHERE id='pr1'")
     print('CLEAN_V1_MIGRATION_OK')
 if __name__=='__main__':main()
