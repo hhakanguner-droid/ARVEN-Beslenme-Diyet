@@ -155,6 +155,20 @@ class SafetyRaceTx implements V1Transaction {
   async upsertWeekPrepPreferences(){ throw new Error("unused"); }
   async getWeekPrepStatus(){ return null; }
   async upsertWeekPrepStatus(){ throw new Error("unused"); }
+  async insertBodyMeasurement(){ throw new Error("unused"); }
+  async listBodyMeasurements(){ return []; }
+  async deleteBodyMeasurement(){ throw new Error("unused"); }
+  async insertBodyPhotoSet(){ throw new Error("unused"); }
+  async getBodyPhotoSet(){ return null; }
+  async listBodyPhotoSets(){ return []; }
+  async deleteBodyPhotoSet(){ throw new Error("unused"); }
+  async hasProgressMilestone(){ return false; }
+  async insertProgressMilestone(){ throw new Error("unused"); }
+  async listProgressMilestones(){ return []; }
+  async insertProgressReportExport(){ throw new Error("unused"); }
+  async getProgressReportExport(){ return null; }
+  async listProgressReportExports(){ return []; }
+  async deleteProgressReportExport(){ throw new Error("unused"); }
 }
 class SafetyRaceRunner implements V1TransactionRunner {
   constructor(readonly tx = new SafetyRaceTx()) {}
