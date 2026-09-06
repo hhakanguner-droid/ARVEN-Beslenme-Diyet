@@ -90,6 +90,23 @@ class FakeTx implements V1Transaction {
   async listSupplementRecords(): Promise<never[]> { return []; }
   async setSupplementRecordActive(): Promise<void> { throw new Error("unused"); }
   async deleteSupplementRecord(): Promise<void> { throw new Error("unused"); }
+  async insertRecipe(): Promise<void> { throw new Error("unused"); }
+  async listRecipes(): Promise<never[]> { return []; }
+  async getRecipe(): Promise<null> { return null; }
+  async deleteRecipe(): Promise<void> { throw new Error("unused"); }
+  async insertWeeklyPlanVersionAndSetCurrent(): Promise<void> { throw new Error("unused"); }
+  async getCurrentWeeklyPlan(): Promise<null> { return null; }
+  async insertPantryItem(): Promise<void> { throw new Error("unused"); }
+  async listPantryItems(): Promise<never[]> { return []; }
+  async updatePantryItem(): Promise<never> { throw new Error("unused"); }
+  async deletePantryItem(): Promise<void> { throw new Error("unused"); }
+  async replaceShoppingListItems(): Promise<void> { throw new Error("unused"); }
+  async listShoppingListItems(): Promise<never[]> { return []; }
+  async setShoppingListItemChecked(): Promise<void> { throw new Error("unused"); }
+  async getWeekPrepPreferences(): Promise<null> { return null; }
+  async upsertWeekPrepPreferences(): Promise<void> { throw new Error("unused"); }
+  async getWeekPrepStatus(): Promise<null> { return null; }
+  async upsertWeekPrepStatus(): Promise<void> { throw new Error("unused"); }
 }
 
 class FakeRunner implements V1TransactionRunner {
