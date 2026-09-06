@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { AllergenSafetyExclusion, DietarySafetyExclusion } from "../lib/health-safety/policy";
+import { assertNoMedicalOverreach, type AllergenSafetyExclusion, type DietarySafetyExclusion } from "../lib/health-safety/policy";
 import { remainingTargets } from "../lib/nutrition/calculations";
 import { resolvePortionSelection } from "../lib/nutrition/portions";
 import type { Food } from "../lib/nutrition/types";
