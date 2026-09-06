@@ -498,6 +498,14 @@ export class DurableObjectV1Transaction implements V1Transaction {
     ).toArray().map(mapNutritionEvent);
   }
 
+  /** Every nutrition event this subject has ever recorded, oldest first (Faz 9: full-history export/backup — every other nutrition read in this app is deliberately scoped to one local day). */
+  async listNutritionEvents(userSubject: string): Promise<StoredNutritionEvent[]> {
+    return this.sql.exec(
+      "SELECT * FROM nutrition_events WHERE user_subject=? ORDER BY occurred_at",
+      userSubject,
+    ).toArray().map(mapNutritionEvent);
+  }
+
   async searchFoodVersions(userSubject: string, query: string, limit: number): Promise<VersionedFood[]> {
     const normalized = `%${query.trim().toLocaleLowerCase("tr-TR")}%`;
     // Multiple verified sources (Open Food Facts, USDA, TürKomp, a user's own custom entry, …) can each
@@ -603,6 +611,43 @@ export class DurableObjectV1Transaction implements V1Transaction {
         [portion.id, portion.id, food.id, portion.measure, portion.label, portion.gramsPerUnit, food.verifiedAt, food.createdAt],
       );
     }
+  }
+
+  /**
+   * Every custom food (plain manual entry or a summed recipe, see `insertCustomFoodVersion`) this
+   * subject owns, most recently verified first — Faz 9 export/backup only; every other custom-food
+   * read path goes through `searchFoodVersions`/`getFoodVersion` instead, scoped by query/id rather
+   * than "give me all of them".
+   */
+  async listCustomFoodVersions(userSubject: string): Promise<StoredCustomFoodVersion[]> {
+    const foodRows = await this.catalog(
+      "SELECT * FROM food_versions WHERE owner_subject=? ORDER BY verified_at DESC",
+      [userSubject],
+    );
+    const result: StoredCustomFoodVersion[] = [];
+    for (const food of foodRows) {
+      const portionRows = await this.catalog("SELECT * FROM portion_versions WHERE food_version_id=?", [asString(food.id)]);
+      result.push({
+        id: asString(food.id),
+        foodKey: asString(food.food_key),
+        ownerSubject: asString(food.owner_subject),
+        name: asString(food.name),
+        isLiquid: asBool(food.is_liquid),
+        energyKcal: asNumber(food.energy_kcal_100g),
+        proteinG: asNumber(food.protein_g_100g),
+        carbsG: asNumber(food.carbs_g_100g),
+        fatG: asNumber(food.fat_g_100g),
+        fiberG: food.fiber_g_100g == null ? null : asNumber(food.fiber_g_100g),
+        allergenDataStatus: asString(food.allergen_data_status) as StoredCustomFoodVersion["allergenDataStatus"],
+        allergenIds: JSON.parse(asString(food.allergen_ids_json ?? "[]")),
+        dietarySafetyDataStatus: asString(food.dietary_safety_data_status) as StoredCustomFoodVersion["dietarySafetyDataStatus"],
+        dietaryConflictRuleIds: JSON.parse(asString(food.dietary_conflict_rule_ids_json ?? "[]")),
+        verifiedAt: asString(food.verified_at),
+        createdAt: asString(food.created_at),
+        portions: portionRows.map((p) => ({ id: asString(p.id), measure: asString(p.measure), label: asString(p.label), gramsPerUnit: asNumber(p.grams_per_unit) })),
+      });
+    }
+    return result;
   }
 
   async insertMemoryFact(fact: StoredMemoryFact): Promise<void> {

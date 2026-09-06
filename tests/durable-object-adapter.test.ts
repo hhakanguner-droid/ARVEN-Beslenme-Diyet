@@ -145,6 +145,18 @@ test("listNutritionEventsForLocalDate scopes to one authenticated subject and on
   assert.deepEqual(events.map((e) => e.id), ["e1"]);
 });
 
+test("listNutritionEvents returns every event ever recorded for one subject, oldest first, never another subject's rows (Faz 9 export)", async () => {
+  const db = freshDatabase();
+  insertUser(db, "u1");
+  insertUser(db, "u2");
+  const tx = new DurableObjectV1Transaction(wrapDatabase(db), emptyCatalog);
+  await tx.insertNutritionEvent({ id: "e-newest", userSubject: "u1", eventType: "water-log", occurredAt: "2026-09-05T08:00:00.000Z", localDate: "2026-09-05", payloadJson: "{}", createdAt: "2026-09-05T08:00:00.000Z" });
+  await tx.insertNutritionEvent({ id: "e-oldest", userSubject: "u1", eventType: "meal-log", occurredAt: "2026-09-01T08:00:00.000Z", localDate: "2026-09-01", payloadJson: "{}", createdAt: "2026-09-01T08:00:00.000Z" });
+  await tx.insertNutritionEvent({ id: "e-other-user", userSubject: "u2", eventType: "water-log", occurredAt: "2026-09-03T08:00:00.000Z", localDate: "2026-09-03", payloadJson: "{}", createdAt: "2026-09-03T08:00:00.000Z" });
+  const events = await tx.listNutritionEvents("u1");
+  assert.deepEqual(events.map((e) => e.id), ["e-oldest", "e-newest"]);
+});
+
 test("searchFoodVersions and findFoodVersionByBarcode never resolve another user's private custom food", async () => {
   const db = freshDatabase();
   insertUser(db, "u1");
@@ -295,6 +307,36 @@ test("insertCustomFoodVersion writes a food and its portions that searchFoodVers
   // Another user must never resolve, search, or barcode-match someone else's private custom food.
   assert.equal(await tx2.getFoodVersion("u2", "custom-1"), null);
   assert.equal((await tx2.searchFoodVersions("u2", "mercimek köftesi", 10)).length, 0);
+});
+
+test("listCustomFoodVersions returns every custom food (with its portions) this subject owns, never another subject's, and never the shared unowned catalog (Faz 9 export)", async () => {
+  const db = freshDatabase();
+  insertUser(db, "u1");
+  insertUser(db, "u2");
+  const catalog = (sql: string, params: unknown[]) => Promise.resolve(db.prepare(sql).all(...(params as never[])) as Record<string, unknown>[]);
+  const tx1 = new DurableObjectV1Transaction(wrapDatabase(db), catalog);
+  const tx2 = new DurableObjectV1Transaction(wrapDatabase(db), catalog);
+  const now = "2026-09-04T00:00:00.000Z";
+  db.prepare("INSERT INTO food_versions (id, food_key, version, owner_subject, name, normalized_name, energy_kcal_100g, protein_g_100g, carbs_g_100g, fat_g_100g, allergen_data_status, dietary_safety_data_status, source_provider, verified_at, created_at) VALUES ('shared-1','elma',1,NULL,'Elma','elma',52,0.3,14,0.2,'unknown','not-applicable','manual-verified',?,?)").run(now, now);
+
+  await tx1.insertCustomFoodVersion({
+    id: "custom-1", foodKey: "custom-1", ownerSubject: "u1", name: "Mercimek Köftesi", isLiquid: false,
+    energyKcal: 180, proteinG: 6, carbsG: 30, fatG: 4, fiberG: 5,
+    allergenDataStatus: "unknown", allergenIds: [], dietarySafetyDataStatus: "unknown", dietaryConflictRuleIds: [],
+    verifiedAt: now, createdAt: now, portions: [{ id: "portion-1", measure: "piece", label: "1 adet", gramsPerUnit: 40 }],
+  });
+  await tx2.insertCustomFoodVersion({
+    id: "custom-2", foodKey: "custom-2", ownerSubject: "u2", name: "u2'nin yemeği", isLiquid: false,
+    energyKcal: 90, proteinG: 2, carbsG: 10, fatG: 1, fiberG: null,
+    allergenDataStatus: "unknown", allergenIds: [], dietarySafetyDataStatus: "unknown", dietaryConflictRuleIds: [],
+    verifiedAt: now, createdAt: now, portions: [{ id: "portion-2", measure: "serving", label: "1 porsiyon", gramsPerUnit: 100 }],
+  });
+
+  const u1Foods = await tx1.listCustomFoodVersions("u1");
+  assert.deepEqual(u1Foods.map((f) => f.id), ["custom-1"], "must include only u1's own custom food, never u2's and never the shared unowned catalog row");
+  assert.equal(u1Foods[0]?.portions[0]?.label, "1 adet");
+  assert.equal((await tx1.listCustomFoodVersions("u2")).length, 1);
+  assert.equal((await tx1.listCustomFoodVersions("u2"))[0]?.id, "custom-2");
 });
 
 test("searchFoodVersions collapses multiple catalog sources sharing one food_key down to the most recently verified row", async () => {

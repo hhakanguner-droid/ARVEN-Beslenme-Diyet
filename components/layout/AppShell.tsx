@@ -11,9 +11,15 @@ export function BrandWordmark() {
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   return (
-    <main className="app-frame">
-      <div className="page-content">{children}</div>
-      <BottomNav />
-    </main>
+    <>
+      {/* Faz 9 erişilebilirlik: klavye/ekran okuyucu kullanan biri her sayfada önce alt gezinme
+          menüsünün tüm bağlantılarını dinlemek zorunda kalmasın diye, sayfa içeriğine doğrudan
+          atlama bağlantısı. Yalnızca klavyeyle Tab'a basıldığında görünür olur. */}
+      <a href="#ana-icerik" className="skip-link">İçeriğe geç</a>
+      <main className="app-frame">
+        <div className="page-content" id="ana-icerik">{children}</div>
+        <BottomNav />
+      </main>
+    </>
   );
 }

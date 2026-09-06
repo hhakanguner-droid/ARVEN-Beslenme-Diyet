@@ -39,3 +39,7 @@ Sensitive files such as meal photos, lab documents and body photos remain privat
 - do not silently convert unknown nutrient values to zero
 
 Portability work is scheduled before production hardening is considered complete.
+
+## Implementation status (Phase 9)
+
+Implemented: `lib/portability/export.ts` (versioned JSON export, `/api/export` GET), `lib/portability/csv.ts` (meal-log/water-log/measurements tables, `/api/export/csv` GET), `lib/portability/import.ts` (restore, `/api/export` POST). Every import always writes under the server-authenticated subject and always generates fresh ids — repeat-importing the same backup duplicates history rather than colliding, which the returned per-section counts surface to the caller. The media manifest section restores metadata only; re-importing binary bytes remains out of scope, matching "Permanent public URLs are not part of the export model" above. See `docs/ARCHITECTURE.md`'s "Portability, account deletion and hardening (Phase 9)" section for the full design notes.

@@ -3,6 +3,7 @@ import {
   type ArvenChatReply, type LabResultExtraction, type MealPhotoEstimate, type MenuAnalysis, type ProductPhotoIdentification, type WeeklyInsight,
 } from "@/lib/ai/contracts";
 import type { WeeklyMetricsV1 } from "@/lib/nutrition/weekly-metrics";
+import { dedupeInFlight, recordAiUsage } from "@/lib/ai/telemetry";
 
 const DEFAULT_BASE_URL = "https://api.openai.com/v1";
 const DEFAULT_MODEL = "gpt-4o-mini";
@@ -67,7 +68,7 @@ const LAB_RESULT_SCHEMA_HINT =
   '{"schemaVersion":"LabResultExtractionV1","entries":[{"markerName":"...","valueText":"...",' +
   '"unitText":"..."|null,"referenceRangeText":"..."|null}],"uncertainty":["..."]}. ' +
   "Fotoğrafta gördüğün her tahlil kalemini (ör. Glukoz, HbA1c, TSH) ayrı bir öğe olarak, gördüğün gibi " +
-  "harfiyen aktar — değeri, birimini ve varsa referans aralığını olduğu gibi yaz, YORUMLAMA veya YUVARLAMA. " +
+  "harfiyen aktar — değerini, birimini ve varsa referans aralığını olduğu gibi yaz, YORUMLAMA veya YUVARLAMA. " +
   "Hiçbir alanda tanı koyma, hastalık ismi söyleme veya tedavi/ilaç önerisi verme; yalnızca fotoğrafta " +
   "yazılanı transkript et. Net okuyamadığın veya emin olamadığın kısımları uncertainty alanında belirt.";
 
@@ -119,30 +120,52 @@ export type OpenAiClientConfig = {
 type ChatContentPart = { type: "text"; text: string } | { type: "image_url"; image_url: { url: string } };
 type ChatMessage = { role: "system" | "user" | "assistant"; content: string | ChatContentPart[] };
 
-async function performJsonCompletion(config: OpenAiClientConfig, messages: ChatMessage[]): Promise<unknown> {
+/** OpenAI's own chat-completions token-usage block, when the API includes it. */
+type OpenAiUsage = { prompt_tokens?: number; completion_tokens?: number };
+
+/**
+ * Faz 9 hardening: every one of this module's six call sites goes through here, so this single
+ * choke point is where cost telemetry (`lib/ai/telemetry.ts`) and request deduplication both live —
+ * neither needed touching each of the six functions below individually. Deduplication is keyed on
+ * the exact request body (model + messages), so it only ever collapses genuinely identical
+ * concurrent calls (e.g. a double-tap send before the first reply arrives), never two different
+ * users' or two different turns' requests.
+ */
+async function performJsonCompletion(config: OpenAiClientConfig, messages: ChatMessage[], endpoint: string): Promise<unknown> {
   const baseUrl = config.baseUrl ?? DEFAULT_BASE_URL;
   const url = `${baseUrl}/chat/completions`;
-  let response: AiFetchResponse;
-  try {
-    response = await config.fetchImpl(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${config.apiKey}` },
-      body: JSON.stringify({ model: config.model, messages, response_format: { type: "json_object" }, temperature: 0.4 }),
-    });
-  } catch (error) {
-    throw new AiProviderError("network-error", error instanceof Error ? error.message : "OpenAI request failed");
-  }
-  if (response.status === 429) {
-    throw new AiProviderError("rate-limited", "OpenAI rate limit exceeded", response.status);
-  }
-  if (!response.ok) {
-    throw new AiProviderError("http-error", `OpenAI request failed with status ${response.status}`, response.status);
-  }
-  try {
-    return await response.json();
-  } catch (error) {
-    throw new AiProviderError("malformed-response", error instanceof Error ? error.message : "OpenAI response was not valid JSON");
-  }
+  const requestBody = JSON.stringify({ model: config.model, messages, response_format: { type: "json_object" }, temperature: 0.4 });
+  const dedupeKey = `${url}:${requestBody}`;
+
+  return dedupeInFlight(dedupeKey, async () => {
+    let response: AiFetchResponse;
+    try {
+      response = await config.fetchImpl(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${config.apiKey}` },
+        body: requestBody,
+      });
+    } catch (error) {
+      throw new AiProviderError("network-error", error instanceof Error ? error.message : "OpenAI request failed");
+    }
+    if (response.status === 429) {
+      throw new AiProviderError("rate-limited", "OpenAI rate limit exceeded", response.status);
+    }
+    if (!response.ok) {
+      throw new AiProviderError("http-error", `OpenAI request failed with status ${response.status}`, response.status);
+    }
+    let body: unknown;
+    try {
+      body = await response.json();
+    } catch (error) {
+      throw new AiProviderError("malformed-response", error instanceof Error ? error.message : "OpenAI response was not valid JSON");
+    }
+    const usage = (body as { usage?: OpenAiUsage } | null)?.usage;
+    if (usage) {
+      recordAiUsage({ endpoint, model: config.model, promptTokens: usage.prompt_tokens ?? 0, completionTokens: usage.completion_tokens ?? 0 });
+    }
+    return body;
+  });
 }
 
 function extractMessageContent(body: unknown): string {
@@ -176,7 +199,7 @@ export async function generateChatReply(config: OpenAiClientConfig, request: Arv
     ...request.history.map((turn) => ({ role: turn.role, content: turn.content })),
     { role: "user", content: request.userMessage },
   ];
-  const body = await performJsonCompletion(config, messages);
+  const body = await performJsonCompletion(config, messages, "chat-reply");
   const parsedJson = parseJsonContent(extractMessageContent(body));
   try {
     return parseArvenChatReply(parsedJson);
@@ -199,7 +222,7 @@ export async function generateWeeklyInsight(
     { role: "system", content: `${request.systemPrompt}\n\n${WEEKLY_INSIGHT_SCHEMA_HINT}` },
     { role: "user", content: `Bu haftanın sayısal verileri (yalnızca bağlam amaçlı, tekrar etme): ${JSON.stringify(request.metrics)}` },
   ];
-  const body = await performJsonCompletion(config, messages);
+  const body = await performJsonCompletion(config, messages, "weekly-insight");
   const parsedJson = parseJsonContent(extractMessageContent(body));
   try {
     return parseWeeklyInsight(parsedJson);
@@ -225,7 +248,7 @@ export async function analyzeMealPhoto(config: OpenAiClientConfig, request: Arve
     { role: "system", content: `${request.systemPrompt}\n\n${MEAL_PHOTO_SCHEMA_HINT}` },
     buildPhotoUserMessage("Ekteki yemek fotoğrafını incele ve gördüğün besinleri belirt.", request),
   ];
-  const body = await performJsonCompletion(config, messages);
+  const body = await performJsonCompletion(config, messages, "meal-photo");
   const parsedJson = parseJsonContent(extractMessageContent(body));
   try {
     return parseMealPhotoEstimate(parsedJson);
@@ -240,7 +263,7 @@ export async function analyzeMenuPhoto(config: OpenAiClientConfig, request: Arve
     { role: "system", content: `${request.systemPrompt}\n\n${MENU_PHOTO_SCHEMA_HINT}` },
     buildPhotoUserMessage("Ekteki restoran menüsü fotoğrafını incele ve seçenekleri sırala.", request),
   ];
-  const body = await performJsonCompletion(config, messages);
+  const body = await performJsonCompletion(config, messages, "menu-photo");
   const parsedJson = parseJsonContent(extractMessageContent(body));
   try {
     return parseMenuAnalysis(parsedJson);
@@ -255,7 +278,7 @@ export async function identifyProductPhoto(config: OpenAiClientConfig, request: 
     { role: "system", content: `${request.systemPrompt}\n\n${PRODUCT_PHOTO_SCHEMA_HINT}` },
     buildPhotoUserMessage("Ekteki ürün fotoğrafını incele ve ürünü tanımaya çalış.", request),
   ];
-  const body = await performJsonCompletion(config, messages);
+  const body = await performJsonCompletion(config, messages, "product-photo");
   const parsedJson = parseJsonContent(extractMessageContent(body));
   try {
     return parseProductPhotoIdentification(parsedJson);
@@ -275,7 +298,7 @@ export async function extractLabResult(config: OpenAiClientConfig, request: Arve
     { role: "system", content: `${request.systemPrompt}\n\n${LAB_RESULT_SCHEMA_HINT}` },
     buildPhotoUserMessage("Ekteki tahlil sonucu fotoğrafını incele ve gördüğün değerleri aktar.", request),
   ];
-  const body = await performJsonCompletion(config, messages);
+  const body = await performJsonCompletion(config, messages, "lab-result");
   const parsedJson = parseJsonContent(extractMessageContent(body));
   try {
     return parseLabResultExtraction(parsedJson);
