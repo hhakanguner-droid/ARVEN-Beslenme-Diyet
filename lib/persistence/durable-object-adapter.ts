@@ -14,12 +14,18 @@ import type {
   StoredLabResultEntry,
   StoredNutritionEvent,
   StoredOutcome,
+  StoredPantryItem,
   StoredPhotoAsset,
   StoredProfile,
   StoredProposal,
+  StoredRecipe,
   StoredSafetyAcknowledgement,
+  StoredShoppingListItem,
   StoredSupplementRecord,
+  StoredWeekPrepPreferences,
+  StoredWeekPrepStatus,
   StoredWeeklyInsightSnapshot,
+  StoredWeeklyPlanVersion,
   V1Transaction,
   V1TransactionRunner,
   VersionedFood,
@@ -160,6 +166,32 @@ function mapSupplementRecord(row: Record<string, unknown>): StoredSupplementReco
     id: asString(row.id), userSubject: asString(row.user_subject), foodVersionId: asNullableString(row.food_version_id),
     name: asString(row.name), note: asNullableString(row.note), isActive: Number(row.is_active) === 1, createdAt: asString(row.created_at),
   };
+}
+function mapRecipe(row: Record<string, unknown>): StoredRecipe {
+  return { id: asString(row.id), userSubject: asString(row.user_subject), name: asString(row.name), servings: Number(row.servings), ingredientsJson: asString(row.ingredients_json), createdAt: asString(row.created_at) };
+}
+function mapWeeklyPlanVersion(row: Record<string, unknown>): StoredWeeklyPlanVersion {
+  return { id: asString(row.id), userSubject: asString(row.user_subject), weekStartLocalDate: asString(row.week_start_local_date), daysJson: asString(row.days_json), createdAt: asString(row.created_at) };
+}
+function mapPantryItem(row: Record<string, unknown>): StoredPantryItem {
+  return {
+    id: asString(row.id), userSubject: asString(row.user_subject), foodVersionId: asNullableString(row.food_version_id),
+    label: asString(row.label), quantityGrams: row.quantity_grams == null ? null : Number(row.quantity_grams),
+    quantityNote: asNullableString(row.quantity_note), createdAt: asString(row.created_at), updatedAt: asString(row.updated_at),
+  };
+}
+function mapShoppingListItem(row: Record<string, unknown>): StoredShoppingListItem {
+  return {
+    id: asString(row.id), userSubject: asString(row.user_subject), weekStartLocalDate: asString(row.week_start_local_date),
+    foodVersionId: asNullableString(row.food_version_id), label: asString(row.label),
+    neededGrams: row.needed_grams == null ? null : Number(row.needed_grams), isChecked: Number(row.is_checked) === 1, createdAt: asString(row.created_at),
+  };
+}
+function mapWeekPrepPreferences(row: Record<string, unknown>): StoredWeekPrepPreferences {
+  return { userSubject: asString(row.user_subject), enabled: Number(row.enabled) === 1, prepDayOfWeek: Number(row.prep_day_of_week), prepLocalTime: asString(row.prep_local_time), updatedAt: asString(row.updated_at) };
+}
+function mapWeekPrepStatus(row: Record<string, unknown>): StoredWeekPrepStatus {
+  return { userSubject: asString(row.user_subject), weekStartLocalDate: asString(row.week_start_local_date), isCompleted: Number(row.is_completed) === 1, updatedAt: asString(row.updated_at) };
 }
 /** Keeps one row per `food_key` (the most recently verified), preserving first-seen order otherwise. */
 function dedupeByFoodKey(rows: Record<string, unknown>[]): Record<string, unknown>[] {
@@ -663,6 +695,107 @@ export class DurableObjectV1Transaction implements V1Transaction {
     this.sql.exec("DELETE FROM supplement_records WHERE id=? AND user_subject=?", id, userSubject);
   }
 
+  async insertRecipe(recipe: StoredRecipe): Promise<void> {
+    this.sql.exec(
+      "INSERT INTO recipes (id, user_subject, name, servings, ingredients_json, created_at) VALUES (?,?,?,?,?,?)",
+      recipe.id, recipe.userSubject, recipe.name, recipe.servings, recipe.ingredientsJson, recipe.createdAt,
+    );
+  }
+  async listRecipes(userSubject: string): Promise<StoredRecipe[]> {
+    return this.sql.exec("SELECT * FROM recipes WHERE user_subject=? ORDER BY created_at DESC", userSubject).toArray().map(mapRecipe);
+  }
+  async getRecipe(userSubject: string, id: string): Promise<StoredRecipe | null> {
+    const row = this.sql.exec("SELECT * FROM recipes WHERE id=? AND user_subject=?", id, userSubject).one();
+    return row ? mapRecipe(row) : null;
+  }
+  async deleteRecipe(userSubject: string, id: string): Promise<void> {
+    this.sql.exec("DELETE FROM recipes WHERE id=? AND user_subject=?", id, userSubject);
+  }
+
+  async insertWeeklyPlanVersionAndSetCurrent(plan: StoredWeeklyPlanVersion, selectedAt: string): Promise<void> {
+    this.sql.transactionSync(() => {
+      this.sql.exec(
+        "INSERT INTO weekly_plan_versions (id, user_subject, week_start_local_date, days_json, created_at) VALUES (?,?,?,?,?)",
+        plan.id, plan.userSubject, plan.weekStartLocalDate, plan.daysJson, plan.createdAt,
+      );
+      this.sql.exec(
+        `INSERT INTO user_current_weekly_plan (user_subject, week_start_local_date, weekly_plan_version_id, selected_at) VALUES (?,?,?,?)
+         ON CONFLICT(user_subject, week_start_local_date) DO UPDATE SET weekly_plan_version_id=excluded.weekly_plan_version_id, selected_at=excluded.selected_at`,
+        plan.userSubject, plan.weekStartLocalDate, plan.id, selectedAt,
+      );
+    });
+  }
+  async getCurrentWeeklyPlan(userSubject: string, weekStartLocalDate: string): Promise<StoredWeeklyPlanVersion | null> {
+    const row = this.sql.exec(
+      `SELECT p.* FROM user_current_weekly_plan c JOIN weekly_plan_versions p ON p.id = c.weekly_plan_version_id AND p.user_subject = c.user_subject WHERE c.user_subject=? AND c.week_start_local_date=?`,
+      userSubject, weekStartLocalDate,
+    ).one();
+    return row ? mapWeeklyPlanVersion(row) : null;
+  }
+
+  async insertPantryItem(item: StoredPantryItem): Promise<void> {
+    this.sql.exec(
+      "INSERT INTO pantry_items (id, user_subject, food_version_id, label, quantity_grams, quantity_note, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)",
+      item.id, item.userSubject, item.foodVersionId, item.label, item.quantityGrams, item.quantityNote, item.createdAt, item.updatedAt,
+    );
+  }
+  async listPantryItems(userSubject: string): Promise<StoredPantryItem[]> {
+    return this.sql.exec("SELECT * FROM pantry_items WHERE user_subject=? ORDER BY created_at DESC", userSubject).toArray().map(mapPantryItem);
+  }
+  async updatePantryItem(userSubject: string, id: string, edit: { quantityGrams: number | null; quantityNote: string | null }): Promise<StoredPantryItem> {
+    const updatedAt = new Date().toISOString();
+    this.sql.exec("UPDATE pantry_items SET quantity_grams=?, quantity_note=?, updated_at=? WHERE id=? AND user_subject=?", edit.quantityGrams, edit.quantityNote, updatedAt, id, userSubject);
+    const row = this.sql.exec("SELECT * FROM pantry_items WHERE id=? AND user_subject=?", id, userSubject).one();
+    if (!row) throw new Error("Pantry item not found");
+    return mapPantryItem(row);
+  }
+  async deletePantryItem(userSubject: string, id: string): Promise<void> {
+    this.sql.exec("DELETE FROM pantry_items WHERE id=? AND user_subject=?", id, userSubject);
+  }
+
+  async replaceShoppingListItems(userSubject: string, weekStartLocalDate: string, items: StoredShoppingListItem[]): Promise<void> {
+    this.sql.transactionSync(() => {
+      this.sql.exec("DELETE FROM shopping_list_items WHERE user_subject=? AND week_start_local_date=?", userSubject, weekStartLocalDate);
+      for (const item of items) {
+        this.sql.exec(
+          "INSERT INTO shopping_list_items (id, user_subject, week_start_local_date, food_version_id, label, needed_grams, is_checked, created_at) VALUES (?,?,?,?,?,?,?,?)",
+          item.id, item.userSubject, item.weekStartLocalDate, item.foodVersionId, item.label, item.neededGrams, item.isChecked ? 1 : 0, item.createdAt,
+        );
+      }
+    });
+  }
+  async listShoppingListItems(userSubject: string, weekStartLocalDate: string): Promise<StoredShoppingListItem[]> {
+    return this.sql.exec("SELECT * FROM shopping_list_items WHERE user_subject=? AND week_start_local_date=? ORDER BY created_at DESC", userSubject, weekStartLocalDate).toArray().map(mapShoppingListItem);
+  }
+  async setShoppingListItemChecked(userSubject: string, id: string, isChecked: boolean): Promise<void> {
+    this.sql.exec("UPDATE shopping_list_items SET is_checked=? WHERE id=? AND user_subject=?", isChecked ? 1 : 0, id, userSubject);
+    const row = this.sql.exec("SELECT id FROM shopping_list_items WHERE id=? AND user_subject=?", id, userSubject).one();
+    if (!row) throw new Error("Shopping list item not found");
+  }
+
+  async getWeekPrepPreferences(userSubject: string): Promise<StoredWeekPrepPreferences | null> {
+    const row = this.sql.exec("SELECT * FROM week_prep_preferences WHERE user_subject=?", userSubject).one();
+    return row ? mapWeekPrepPreferences(row) : null;
+  }
+  async upsertWeekPrepPreferences(preferences: StoredWeekPrepPreferences): Promise<void> {
+    this.sql.exec(
+      `INSERT INTO week_prep_preferences (user_subject, enabled, prep_day_of_week, prep_local_time, updated_at) VALUES (?,?,?,?,?)
+       ON CONFLICT(user_subject) DO UPDATE SET enabled=excluded.enabled, prep_day_of_week=excluded.prep_day_of_week, prep_local_time=excluded.prep_local_time, updated_at=excluded.updated_at`,
+      preferences.userSubject, preferences.enabled ? 1 : 0, preferences.prepDayOfWeek, preferences.prepLocalTime, preferences.updatedAt,
+    );
+  }
+  async getWeekPrepStatus(userSubject: string, weekStartLocalDate: string): Promise<StoredWeekPrepStatus | null> {
+    const row = this.sql.exec("SELECT * FROM week_prep_status WHERE user_subject=? AND week_start_local_date=?", userSubject, weekStartLocalDate).one();
+    return row ? mapWeekPrepStatus(row) : null;
+  }
+  async upsertWeekPrepStatus(status: StoredWeekPrepStatus): Promise<void> {
+    this.sql.exec(
+      `INSERT INTO week_prep_status (user_subject, week_start_local_date, is_completed, updated_at) VALUES (?,?,?,?)
+       ON CONFLICT(user_subject, week_start_local_date) DO UPDATE SET is_completed=excluded.is_completed, updated_at=excluded.updated_at`,
+      status.userSubject, status.weekStartLocalDate, status.isCompleted ? 1 : 0, status.updatedAt,
+    );
+  }
+
   /**
    * Ordered deletes respecting the schema's mixed CASCADE/RESTRICT foreign keys
    * — see db/migrations/*.sql. Only touches this user's own Durable Object
@@ -705,6 +838,13 @@ export class DurableObjectV1Transaction implements V1Transaction {
       this.sql.exec("DELETE FROM lab_result_entries WHERE user_subject=?", userSubject);
       this.sql.exec("DELETE FROM lab_documents WHERE user_subject=?", userSubject);
       this.sql.exec("DELETE FROM supplement_records WHERE user_subject=?", userSubject);
+      this.sql.exec("DELETE FROM shopping_list_items WHERE user_subject=?", userSubject);
+      this.sql.exec("DELETE FROM week_prep_status WHERE user_subject=?", userSubject);
+      this.sql.exec("DELETE FROM week_prep_preferences WHERE user_subject=?", userSubject);
+      this.sql.exec("DELETE FROM pantry_items WHERE user_subject=?", userSubject);
+      this.sql.exec("DELETE FROM user_current_weekly_plan WHERE user_subject=?", userSubject);
+      this.sql.exec("DELETE FROM weekly_plan_versions WHERE user_subject=?", userSubject);
+      this.sql.exec("DELETE FROM recipes WHERE user_subject=?", userSubject);
       this.sql.exec("DELETE FROM profiles WHERE user_subject=?", userSubject);
       this.sql.exec("DELETE FROM users WHERE subject=?", userSubject);
     });
