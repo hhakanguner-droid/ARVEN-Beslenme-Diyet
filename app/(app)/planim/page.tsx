@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { BrandWordmark } from "@/components/layout/AppShell";
 import { EmptyState } from "@/components/states/EmptyState";
@@ -146,6 +147,9 @@ export default function PlanimPage() {
       <BrandWordmark />
       <h1 className="page-title">Planım</h1>
       <p className="page-subtitle">Günlük beslenme planın burada. Her değişiklik yeni bir sürüm olarak kaydedilir; önceki planların kaybolmaz.</p>
+      <p className="card-copy">
+        <Link href="/planim/haftalik">Haftalık plan</Link> · <Link href="/tarifler">Tariflerim</Link> · <Link href="/kiler">Kilerim</Link> · <Link href="/alisveris">Alışveriş listesi</Link>
+      </p>
 
       {status && <p className="status-banner">{status}</p>}
       {error && <p className="error-banner">{error}</p>}
