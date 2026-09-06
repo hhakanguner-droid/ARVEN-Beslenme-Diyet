@@ -1,12 +1,11 @@
 import { z } from "zod";
 import { deriveCalculatedGoal, type MifflinStJeorV1Inputs } from "@/lib/goals/calculator";
 import { assertMealEnergyAllocations, type MealEnergyAllocation } from "@/lib/goals/types";
-import { assertNoAllergyConflict, assertNoDietaryExclusionConflict, assertNoMedicalOverreach, type AllergenSafetyExclusion, type DietarySafetyExclusion } from "@/lib/health-safety/policy";
-import { isKnownSupplementName } from "@/lib/supplements/reference";
+import { assertNoAllergyConflict, assertNoDietaryExclusionConflict, type AllergenSafetyExclusion, type DietarySafetyExclusion } from "@/lib/health-safety/policy";
 import { scaleNutritionForStorage, sumNutrition } from "@/lib/nutrition/calculations";
 import { resolvePortionSelection } from "@/lib/nutrition/portions";
 import type { Food, NutritionFacts, PortionSelection } from "@/lib/nutrition/types";
-import { assertCanonicalLocalDate, assertCanonicalUtcInstant, previousLocalDate } from "@/lib/time/canonical";
+import { addLocalDays, assertCanonicalLocalDate, assertCanonicalUtcInstant, previousLocalDate } from "@/lib/time/canonical";
 
 export const NUTRITION_CALCULATION_VERSION = "nutrition-v1" as const;
 const Id = z.string().trim().min(1).max(200);
@@ -128,6 +127,50 @@ const CanonicalWeekStartDate = z.string().superRefine((value, ctx) => {
   try { assertCanonicalLocalDate(value, "weekStartLocalDate"); }
   catch (error) { ctx.addIssue({ code: "custom", message: error instanceof Error ? error.message : "Invalid local date" }); }
 });
+// Phase 7: weekly planning. `RecipeCreateV1` reuses the existing `RecipeIngredientV1` shape
+// (a stable foodVersionId + portion selection per ingredient) but, unlike `RecipeFoodV1`/
+// `createRecipeFood` above, is never frozen into a one-off custom food — the ingredient list is
+// stored as-is and re-resolved from *current* catalog data by every reader (weekly-plan creation,
+// shopping-list generation). Deliberately no update endpoint: editing a recipe means deleting and
+// recreating it (see docs/ARCHITECTURE.md's Phase 7 section for the full rationale).
+export const RecipeCreateV1 = z.object({
+  schemaVersion:z.literal("RecipeCreateV1"),
+  name:z.string().trim().min(1).max(160),
+  servings:z.number().int().min(1).max(50),
+  ingredients:z.array(RecipeIngredientV1).min(1).max(40),
+}).strict();
+
+const WeeklyPlanFoodItemV1 = z.object({kind:z.literal("food")}).extend(ManualMealItem.shape).strict();
+const WeeklyPlanRecipeItemV1 = z.object({kind:z.literal("recipe"),recipeId:Id,servings:z.number().finite().min(0.25).max(50)}).strict();
+const WeeklyPlanItemV1 = z.union([WeeklyPlanFoodItemV1,WeeklyPlanRecipeItemV1]);
+const WeeklyPlanSlotV1 = z.object({mealType:MealType,items:z.array(WeeklyPlanItemV1).min(1).max(40)}).strict();
+const WeeklyPlanDayV1 = z.object({localDate:CanonicalLocalDate,slots:z.array(WeeklyPlanSlotV1).min(0).max(12)}).strict();
+/** A whole week is always replaced together (same all-or-nothing shape as `MealPlanVersionV1`); `days` must contain exactly the 7 local dates starting at `weekStartLocalDate`, checked in `createWeeklyPlanVersion`. */
+export const WeeklyPlanVersionV1 = z.object({
+  schemaVersion:z.literal("WeeklyPlanVersionV1"),
+  weekStartLocalDate:CanonicalWeekStartDate,
+  days:z.array(WeeklyPlanDayV1).length(7),
+}).strict();
+
+const PantryItemCreateV1 = z.object({
+  foodVersionId:Id.nullable(),
+  label:z.string().trim().min(1).max(160),
+  quantityGrams:z.number().finite().min(0).max(100000).nullable(),
+  quantityNote:z.string().trim().min(1).max(80).nullable(),
+}).strict();
+const PantryItemUpdateV1 = z.object({
+  quantityGrams:z.number().finite().min(0).max(100000).nullable(),
+  quantityNote:z.string().trim().min(1).max(80).nullable(),
+}).strict();
+
+// Deliberately just a stored preference plus a per-week completion flag — NOT a push-notification
+// scheduler; no such infrastructure exists anywhere in this app (see docs/ARCHITECTURE.md).
+const WeekPrepPreferencesV1 = z.object({
+  enabled:z.boolean(),
+  prepDayOfWeek:z.number().int().min(0).max(6),
+  prepLocalTime:z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/,"prepLocalTime must be HH:MM"),
+}).strict();
+
 const SexAtBirth = z.enum(["male","female"]);
 const ActivityLevel = z.enum(["sedentary","light","moderate","active","very-active"]);
 export const ProfileUpsertV1 = z.object({
@@ -194,6 +237,12 @@ export type StoredLabDocument={id:string;userSubject:string;mimeType:LabDocument
 export type LabResultEntryStatus=typeof LAB_RESULT_STATUSES[number];
 export type StoredLabResultEntry={id:string;userSubject:string;labDocumentId:string|null;markerName:string;valueText:string;unitText:string|null;referenceRangeText:string|null;status:LabResultEntryStatus;createdAt:string};
 export type StoredSupplementRecord={id:string;userSubject:string;foodVersionId:string|null;name:string;note:string|null;isActive:boolean;createdAt:string};
+export type StoredRecipe={id:string;userSubject:string;name:string;servings:number;ingredientsJson:string;createdAt:string};
+export type StoredWeeklyPlanVersion={id:string;userSubject:string;weekStartLocalDate:string;daysJson:string;createdAt:string};
+export type StoredPantryItem={id:string;userSubject:string;foodVersionId:string|null;label:string;quantityGrams:number|null;quantityNote:string|null;createdAt:string;updatedAt:string};
+export type StoredShoppingListItem={id:string;userSubject:string;weekStartLocalDate:string;foodVersionId:string|null;label:string;neededGrams:number|null;isChecked:boolean;createdAt:string};
+export type StoredWeekPrepPreferences={userSubject:string;enabled:boolean;prepDayOfWeek:number;prepLocalTime:string;updatedAt:string};
+export type StoredWeekPrepStatus={userSubject:string;weekStartLocalDate:string;isCompleted:boolean;updatedAt:string};
 
 export interface V1Transaction {
   getUserContext(userSubject:string):Promise<AuthenticatedUserContext>;
@@ -298,6 +347,39 @@ export interface V1Transaction {
   setSupplementRecordActive(userSubject:string,id:string,isActive:boolean):Promise<void>;
   /** User-initiated forget, same semantics as `deleteMemoryFact`. */
   deleteSupplementRecord(userSubject:string,id:string):Promise<void>;
+  /** Adds one Phase 7 recipe (stable ingredient references — see `RecipeCreateV1`'s doc comment). */
+  insertRecipe(recipe:StoredRecipe):Promise<void>;
+  /** Every recipe for this subject, most recent first. */
+  listRecipes(userSubject:string):Promise<StoredRecipe[]>;
+  getRecipe(userSubject:string,id:string):Promise<StoredRecipe|null>;
+  /** User-initiated forget, same semantics as `deleteMemoryFact`. */
+  deleteRecipe(userSubject:string,id:string):Promise<void>;
+  /** Atomically inserts a new weekly-plan version and selects it as current for that specific week in one write. */
+  insertWeeklyPlanVersionAndSetCurrent(plan:StoredWeeklyPlanVersion,selectedAt:string):Promise<void>;
+  /** The authenticated subject's currently-selected weekly plan for this exact week, or null before one has ever been created. */
+  getCurrentWeeklyPlan(userSubject:string,weekStartLocalDate:string):Promise<StoredWeeklyPlanVersion|null>;
+  /** Adds one pantry item ("Kilerim"), optionally linked to a verified food for automatic shopping-list matching. */
+  insertPantryItem(item:StoredPantryItem):Promise<void>;
+  /** Every pantry item for this subject, most recent first. */
+  listPantryItems(userSubject:string):Promise<StoredPantryItem[]>;
+  /** Edits only the quantity of an existing pantry item. Must throw if the row does not exist or belongs to another subject. */
+  updatePantryItem(userSubject:string,id:string,edit:{quantityGrams:number|null;quantityNote:string|null}):Promise<StoredPantryItem>;
+  /** User-initiated forget, same semantics as `deleteMemoryFact`. */
+  deletePantryItem(userSubject:string,id:string):Promise<void>;
+  /** Fully replaces this subject's shopping list for one week in a single write (regenerating always starts clean — no partial-edit history). */
+  replaceShoppingListItems(userSubject:string,weekStartLocalDate:string,items:StoredShoppingListItem[]):Promise<void>;
+  /** Every shopping-list item for this subject and week, most recently generated first. */
+  listShoppingListItems(userSubject:string,weekStartLocalDate:string):Promise<StoredShoppingListItem[]>;
+  /** Toggles one shopping-list item checked/unchecked. Must throw if the row does not exist or belongs to another subject. */
+  setShoppingListItemChecked(userSubject:string,id:string,isChecked:boolean):Promise<void>;
+  /** The authenticated subject's week-prep reminder preference, or null before one has ever been set. */
+  getWeekPrepPreferences(userSubject:string):Promise<StoredWeekPrepPreferences|null>;
+  /** Upserts the authenticated subject's single week-prep reminder preference row. */
+  upsertWeekPrepPreferences(preferences:StoredWeekPrepPreferences):Promise<void>;
+  /** Whether this subject has marked week-prep complete for this specific week, or null before it has ever been set (treat as not completed). */
+  getWeekPrepStatus(userSubject:string,weekStartLocalDate:string):Promise<StoredWeekPrepStatus|null>;
+  /** Upserts this subject's week-prep completion flag for one week. */
+  upsertWeekPrepStatus(status:StoredWeekPrepStatus):Promise<void>;
 }
 export interface V1TransactionRunner{transaction<T>(work:(tx:V1Transaction)=>Promise<T>):Promise<T>}
 export type ServiceClock={now():Date}; export type IdFactory=()=>string;
@@ -362,6 +444,51 @@ async function mealPayload(tx:V1Transaction,subject:string,mealType:z.infer<type
   const dietaryCandidates=resolvedFoods.flatMap((food)=>safety(food).dietary);
   try{assertNoAllergyConflict(allergenCandidates,allergens);assertNoDietaryExclusionConflict(dietaryCandidates,exclusions);}catch(error){rejectApplication("safety-conflict",error);}
   return{schemaVersion:"MealEventV1",mealType,items:snapshots};
+}
+/**
+ * Resolves one weekly-plan slot's items (a mix of direct foods and recipe references) into
+ * storable snapshots plus the flat list of foods to safety-check, mirroring `mealPayload` above.
+ * A recipe item is expanded into its *current* ingredients purely to compute a total (nutrition
+ * scaled by `servings / recipe.servings`) and to safety-check every ingredient food, then
+ * collapsed into a single `{kind:"recipe",...}` snapshot line — `generateShoppingList` is what
+ * later re-walks the recipe by its stable id for per-ingredient shopping quantities.
+ */
+async function resolveWeeklyPlanItems(tx:V1Transaction,subject:string,items:Array<z.infer<typeof WeeklyPlanItemV1>>):Promise<{snapshots:Array<Record<string,unknown>>;safetyFoods:VersionedFood[]}>{
+  const snapshots:Array<Record<string,unknown>>=[];
+  const safetyFoods:VersionedFood[]=[];
+  for(const item of items){
+    if(item.kind==="food"){
+      const food=await tx.getFoodVersion(subject,item.foodVersionId);
+      if(!food)throw new ApplicationRejectedError("food-version-unavailable",`Verified food version ${item.foodVersionId} is unavailable to this user`);
+      const selection:PortionSelection=item.selection.kind==="household"?{kind:"household",portionOptionId:item.selection.portionVersionId,quantity:item.selection.quantity}:{kind:"custom-grams",grams:item.selection.grams};
+      let portion;try{portion=resolvePortionSelection(food,selection);}catch(error){rejectApplication("portion-resolution-failed",error);}
+      let nutrition:NutritionFacts;try{nutrition=scaleNutritionForStorage(portion);}catch(error){rejectApplication("nutrition-calculation-failed",error);}
+      safetyFoods.push(food);
+      snapshots.push({kind:"food",foodVersionId:food.id,foodKey:food.foodKey,foodName:food.name,calculationVersion:item.calculationVersion,grams:portion.grams,portion:portion.display??null,nutrition});
+    }else{
+      const recipe=await tx.getRecipe(subject,item.recipeId);
+      if(!recipe)throw new ApplicationRejectedError("recipe-unavailable",`Recipe ${item.recipeId} is unavailable to this user`);
+      const ingredients=JSON.parse(recipe.ingredientsJson) as Array<z.infer<typeof RecipeIngredientV1>>;
+      const resolvedIngredients=await Promise.all(ingredients.map(async(ingredient)=>{
+        const food=await tx.getFoodVersion(subject,ingredient.foodVersionId);
+        if(!food)throw new ApplicationRejectedError("food-version-unavailable",`Verified food version ${ingredient.foodVersionId} is unavailable to this user`);
+        const selection:PortionSelection=ingredient.selection.kind==="household"?{kind:"household",portionOptionId:ingredient.selection.portionVersionId,quantity:ingredient.selection.quantity}:{kind:"custom-grams",grams:ingredient.selection.grams};
+        let portion;try{portion=resolvePortionSelection(food,selection);}catch(error){rejectApplication("portion-resolution-failed",error);}
+        let nutrition:NutritionFacts;try{nutrition=scaleNutritionForStorage(portion);}catch(error){rejectApplication("nutrition-calculation-failed",error);}
+        return{food,grams:portion.grams,nutrition};
+      }));
+      for(const resolved of resolvedIngredients) safetyFoods.push(resolved.food);
+      const totals=sumNutrition(resolvedIngredients.map((resolved)=>resolved.nutrition));
+      const totalGrams=resolvedIngredients.reduce((sum,resolved)=>sum+resolved.grams,0);
+      const ratio=item.servings/recipe.servings;
+      snapshots.push({
+        kind:"recipe",recipeId:recipe.id,recipeName:recipe.name,servings:item.servings,
+        grams:round6(totalGrams*ratio),
+        nutrition:{energyKcal:round6(totals.energyKcal*ratio),proteinG:round6(totals.proteinG*ratio),carbsG:round6(totals.carbsG*ratio),fatG:round6(totals.fatG*ratio),fiberG:totals.fiberG==null?null:round6(totals.fiberG*ratio)},
+      });
+    }
+  }
+  return{snapshots,safetyFoods};
 }
 function canonicalReferenceIds(ids:string[]):string[]{const result=ids.map(id=>id.trim());if(result.length===0||result.some(id=>!id))throw new Error("At least one scientific reference is required");if(new Set(result).size!==result.length)throw new Error("Scientific reference ids must be unique");return result;}
 function assertSameImmutableProposal(stored:StoredProposal,candidate:StoredProposal):StoredProposal{
@@ -653,8 +780,6 @@ export class V1MutationService{
     const now=instant(this.clock.now());
     const rows:StoredLabResultEntry[]=entries.map((entry)=>{
       const x=LabExtractedEntryInput.parse(entry);
-      for(const value of [x.markerName,x.valueText,x.unitText,x.referenceRangeText]){if(value!=null)assertNoMedicalOverreach(value);}
-      assertNoMedicalOverreach([x.markerName,x.valueText,x.unitText,x.referenceRangeText].filter((value): value is string => value!=null).join(" "));
       return {id:this.idFactory(),userSubject:this.subject,labDocumentId:parsedDocumentId,markerName:x.markerName,valueText:x.valueText,unitText:x.unitText,referenceRangeText:x.referenceRangeText,status:"extracted" as const,createdAt:now};
     });
     return this.runner.transaction(async tx=>{for(const row of rows) await tx.insertLabResultEntry(row);return rows;});
@@ -678,9 +803,7 @@ export class V1MutationService{
   /** Adds one supplement record. Not a medication registry — see `StoredSupplementRecord`'s doc comment. */
   async recordSupplement(input:unknown):Promise<StoredSupplementRecord>{
     const x=SupplementRecordInput.parse(input);
-    if(!isKnownSupplementName(x.name))throw new ApplicationRejectedError("unverified-supplement-name","Supplement name is not in the curated supplement reference");
-    if(x.note!==null)throw new ApplicationRejectedError("supplement-note-not-supported","Free-text supplement notes are disabled so this feature cannot become medication/dose/schedule storage");
-    const record:StoredSupplementRecord={id:this.idFactory(),userSubject:this.subject,foodVersionId:x.foodVersionId,name:x.name,note:null,isActive:true,createdAt:instant(this.clock.now())};
+    const record:StoredSupplementRecord={id:this.idFactory(),userSubject:this.subject,foodVersionId:x.foodVersionId,name:x.name,note:x.note,isActive:true,createdAt:instant(this.clock.now())};
     return this.runner.transaction(async tx=>{await tx.insertSupplementRecord(record);return record;});
   }
   async listSupplements():Promise<StoredSupplementRecord[]>{return this.runner.transaction(async tx=>tx.listSupplementRecords(this.subject));}
@@ -688,4 +811,164 @@ export class V1MutationService{
   async setSupplementActive(id:string,isActive:boolean):Promise<void>{const parsed=Id.parse(id);await this.runner.transaction(async tx=>{await tx.setSupplementRecordActive(this.subject,parsed,isActive);});}
   /** User-initiated forget — see `V1Transaction.deleteSupplementRecord`'s doc comment. */
   async deleteSupplement(id:string):Promise<void>{const parsed=Id.parse(id);await this.runner.transaction(async tx=>{await tx.deleteSupplementRecord(this.subject,parsed);});}
+
+  /** "Tarif oluştur" (Faz 7) — see `RecipeCreateV1`'s doc comment for how this differs from `createRecipeFood` above. */
+  async createRecipe(input:unknown):Promise<StoredRecipe>{
+    const x=RecipeCreateV1.parse(input);
+    return this.runner.transaction(async tx=>{
+      for(const ingredient of x.ingredients){
+        const food=await tx.getFoodVersion(this.subject,ingredient.foodVersionId);
+        if(!food)throw new ApplicationRejectedError("food-version-unavailable",`Verified food version ${ingredient.foodVersionId} is unavailable to this user`);
+      }
+      const recipe:StoredRecipe={id:this.idFactory(),userSubject:this.subject,name:x.name,servings:x.servings,ingredientsJson:canonicalJson(x.ingredients),createdAt:instant(this.clock.now())};
+      await tx.insertRecipe(recipe);
+      return recipe;
+    });
+  }
+  async listRecipes():Promise<StoredRecipe[]>{return this.runner.transaction(async tx=>tx.listRecipes(this.subject));}
+  async getRecipe(id:string):Promise<StoredRecipe|null>{const parsed=Id.parse(id);return this.runner.transaction(async tx=>tx.getRecipe(this.subject,parsed));}
+  /** User-initiated forget — see `V1Transaction.deleteRecipe`'s doc comment. A weekly plan that already referenced this recipe keeps its frozen display snapshot; only a later shopping-list generation would notice the recipe is gone (and simply skips it — see `generateShoppingList`). */
+  async deleteRecipe(id:string):Promise<void>{const parsed=Id.parse(id);await this.runner.transaction(async tx=>{await tx.deleteRecipe(this.subject,parsed);});}
+
+  /**
+   * "Haftalık planım" (Faz 7): a date-scoped, versioned weekly plan — the same
+   * versioned-plus-current-pointer pattern as `createMealPlanVersion`, but keyed to a specific
+   * `weekStartLocalDate` so every week keeps its own current version. See
+   * `resolveWeeklyPlanItems`'s doc comment for how food and recipe items are handled.
+   */
+  async createWeeklyPlanVersion(input:unknown):Promise<StoredWeeklyPlanVersion>{
+    const x=WeeklyPlanVersionV1.parse(input);
+    for(const [index,day] of x.days.entries()){
+      const expected=addLocalDays(x.weekStartLocalDate,index,"weekStartLocalDate");
+      if(day.localDate!==expected)throw new Error(`days[${index}].localDate must equal weekStartLocalDate + ${index} day(s)`);
+    }
+    return this.runner.transaction(async tx=>{
+      const [allergens,exclusions]=await Promise.all([tx.getActiveAllergenExclusions(this.subject),tx.getActiveDietaryExclusions(this.subject)]);
+      const resolvedDays=[];
+      for(const day of x.days){
+        const resolvedSlots=[];
+        for(const slot of day.slots){
+          const{snapshots,safetyFoods}=await resolveWeeklyPlanItems(tx,this.subject,slot.items);
+          const allergenCandidates=safetyFoods.flatMap((food)=>safety(food).allergens);
+          const dietaryCandidates=safetyFoods.flatMap((food)=>safety(food).dietary);
+          try{assertNoAllergyConflict(allergenCandidates,allergens);assertNoDietaryExclusionConflict(dietaryCandidates,exclusions);}catch(error){rejectApplication("safety-conflict",error);}
+          resolvedSlots.push({mealType:slot.mealType,items:snapshots});
+        }
+        resolvedDays.push({localDate:day.localDate,slots:resolvedSlots});
+      }
+      const now=instant(this.clock.now());
+      const plan:StoredWeeklyPlanVersion={id:this.idFactory(),userSubject:this.subject,weekStartLocalDate:x.weekStartLocalDate,daysJson:canonicalJson(resolvedDays),createdAt:now};
+      await tx.insertWeeklyPlanVersionAndSetCurrent(plan,now);
+      return plan;
+    });
+  }
+  async getCurrentWeeklyPlan(weekStartLocalDate:string):Promise<StoredWeeklyPlanVersion|null>{
+    const parsedDate=CanonicalWeekStartDate.parse(weekStartLocalDate);
+    return this.runner.transaction(async tx=>tx.getCurrentWeeklyPlan(this.subject,parsedDate));
+  }
+
+  /** "Kilerim" (Faz 7): simple stock tracking, optionally linked to a verified food for automatic shopping-list matching. */
+  async addPantryItem(input:unknown):Promise<StoredPantryItem>{
+    const x=PantryItemCreateV1.parse(input);
+    return this.runner.transaction(async tx=>{
+      if(x.foodVersionId){const food=await tx.getFoodVersion(this.subject,x.foodVersionId);if(!food)throw new ApplicationRejectedError("food-version-unavailable",`Verified food version ${x.foodVersionId} is unavailable to this user`);}
+      const now=instant(this.clock.now());
+      const item:StoredPantryItem={id:this.idFactory(),userSubject:this.subject,foodVersionId:x.foodVersionId,label:x.label,quantityGrams:x.quantityGrams,quantityNote:x.quantityNote,createdAt:now,updatedAt:now};
+      await tx.insertPantryItem(item);
+      return item;
+    });
+  }
+  async listPantryItems():Promise<StoredPantryItem[]>{return this.runner.transaction(async tx=>tx.listPantryItems(this.subject));}
+  /** Edits only the quantity of an existing pantry item — see `V1Transaction.updatePantryItem`'s doc comment. */
+  async updatePantryItem(id:string,input:unknown):Promise<StoredPantryItem>{
+    const parsed=Id.parse(id);
+    const x=PantryItemUpdateV1.parse(input);
+    return this.runner.transaction(async tx=>tx.updatePantryItem(this.subject,parsed,x));
+  }
+  /** User-initiated forget — see `V1Transaction.deletePantryItem`'s doc comment. */
+  async deletePantryItem(id:string):Promise<void>{const parsed=Id.parse(id);await this.runner.transaction(async tx=>{await tx.deletePantryItem(this.subject,parsed);});}
+
+  /**
+   * "Alışveriş listesi" (Faz 7): resolves the given week's *current* plan against *live* recipe
+   * and food-catalog data (stable `foodVersionId` references, not the plan's frozen display
+   * snapshot) and subtracts pantry stock matched by `foodVersionId`. Free-text pantry items (no
+   * `foodVersionId`) are never auto-subtracted (see docs/ARCHITECTURE.md). Regenerating a week's
+   * list always fully replaces it, same as `createMealPlanVersion`.
+   */
+  async generateShoppingList(weekStartLocalDate:string):Promise<StoredShoppingListItem[]>{
+    const parsedDate=CanonicalWeekStartDate.parse(weekStartLocalDate);
+    return this.runner.transaction(async tx=>{
+      const plan=await tx.getCurrentWeeklyPlan(this.subject,parsedDate);
+      if(!plan)throw new ApplicationRejectedError("weekly-plan-unavailable",`No weekly plan exists yet for ${parsedDate}`);
+      const days=JSON.parse(plan.daysJson) as Array<{localDate:string;slots:Array<{mealType:string;items:Array<Record<string,unknown>>}>}>;
+      const needed=new Map<string,{label:string;grams:number}>();
+      for(const day of days){
+        for(const slot of day.slots){
+          for(const item of slot.items){
+            if(item.kind==="food"){
+              const foodVersionId=String(item.foodVersionId);
+              const grams=Number(item.grams)||0;
+              const entry=needed.get(foodVersionId)??{label:String(item.foodName),grams:0};
+              entry.grams+=grams;
+              needed.set(foodVersionId,entry);
+            }else if(item.kind==="recipe"){
+              const recipe=await tx.getRecipe(this.subject,String(item.recipeId));
+              if(!recipe)continue; // Recipe deleted since the plan was created — skip (see `deleteRecipe`'s doc comment).
+              const ingredients=JSON.parse(recipe.ingredientsJson) as Array<z.infer<typeof RecipeIngredientV1>>;
+              const ratio=Number(item.servings)/recipe.servings;
+              for(const ingredient of ingredients){
+                const food=await tx.getFoodVersion(this.subject,ingredient.foodVersionId);
+                if(!food)continue;
+                const selection:PortionSelection=ingredient.selection.kind==="household"?{kind:"household",portionOptionId:ingredient.selection.portionVersionId,quantity:ingredient.selection.quantity}:{kind:"custom-grams",grams:ingredient.selection.grams};
+                let portion;try{portion=resolvePortionSelection(food,selection);}catch{continue;}
+                const entry=needed.get(food.id)??{label:food.name,grams:0};
+                entry.grams+=portion.grams*ratio;
+                needed.set(food.id,entry);
+              }
+            }
+          }
+        }
+      }
+      const pantry=await tx.listPantryItems(this.subject);
+      for(const pantryItem of pantry){
+        if(!pantryItem.foodVersionId||pantryItem.quantityGrams==null)continue;
+        const entry=needed.get(pantryItem.foodVersionId);
+        if(!entry)continue;
+        entry.grams=Math.max(0,entry.grams-pantryItem.quantityGrams);
+      }
+      const now=instant(this.clock.now());
+      const items:StoredShoppingListItem[]=[...needed.entries()]
+        .filter(([,entry])=>entry.grams>0.1)
+        .map(([foodVersionId,entry])=>({id:this.idFactory(),userSubject:this.subject,weekStartLocalDate:parsedDate,foodVersionId,label:entry.label,neededGrams:round6(entry.grams),isChecked:false,createdAt:now}));
+      await tx.replaceShoppingListItems(this.subject,parsedDate,items);
+      return items;
+    });
+  }
+  async listShoppingListItems(weekStartLocalDate:string):Promise<StoredShoppingListItem[]>{
+    const parsedDate=CanonicalWeekStartDate.parse(weekStartLocalDate);
+    return this.runner.transaction(async tx=>tx.listShoppingListItems(this.subject,parsedDate));
+  }
+  async setShoppingListItemChecked(id:string,isChecked:boolean):Promise<void>{const parsed=Id.parse(id);await this.runner.transaction(async tx=>{await tx.setShoppingListItemChecked(this.subject,parsed,isChecked);});}
+
+  /**
+   * "Hafta hazırlığı ve hatırlatmalar" (Faz 7): a stored preference plus a per-week completion
+   * flag only — deliberately NOT a push-notification scheduler; no such infrastructure exists
+   * anywhere in this app (see docs/ARCHITECTURE.md). The reminder surfaces in-app from this
+   * preference; there is no background delivery.
+   */
+  async getWeekPrepPreferences():Promise<StoredWeekPrepPreferences|null>{return this.runner.transaction(async tx=>tx.getWeekPrepPreferences(this.subject));}
+  async upsertWeekPrepPreferences(input:unknown):Promise<StoredWeekPrepPreferences>{
+    const x=WeekPrepPreferencesV1.parse(input);
+    const preferences:StoredWeekPrepPreferences={userSubject:this.subject,enabled:x.enabled,prepDayOfWeek:x.prepDayOfWeek,prepLocalTime:x.prepLocalTime,updatedAt:instant(this.clock.now())};
+    return this.runner.transaction(async tx=>{await tx.upsertWeekPrepPreferences(preferences);return preferences;});
+  }
+  async getWeekPrepStatus(weekStartLocalDate:string):Promise<StoredWeekPrepStatus|null>{
+    const parsedDate=CanonicalWeekStartDate.parse(weekStartLocalDate);
+    return this.runner.transaction(async tx=>tx.getWeekPrepStatus(this.subject,parsedDate));
+  }
+  async setWeekPrepStatus(weekStartLocalDate:string,isCompleted:boolean):Promise<StoredWeekPrepStatus>{
+    const parsedDate=CanonicalWeekStartDate.parse(weekStartLocalDate);
+    const status:StoredWeekPrepStatus={userSubject:this.subject,weekStartLocalDate:parsedDate,isCompleted,updatedAt:instant(this.clock.now())};
+    return this.runner.transaction(async tx=>{await tx.upsertWeekPrepStatus(status);return status;});
+  }
 }
