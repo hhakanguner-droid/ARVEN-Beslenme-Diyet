@@ -323,6 +323,8 @@ export interface V1Transaction {
   getCurrentGoalVersion(userSubject:string):Promise<StoredGoalVersion|null>;
   /** Every nutrition event recorded for one authenticated local calendar day (read-only; `Bugün`'s daily snapshot). */
   listNutritionEventsForLocalDate(userSubject:string,localDate:string):Promise<StoredNutritionEvent[]>;
+  /** Every nutrition event this subject has ever recorded, oldest first (Faz 9: full-history export/backup only). */
+  listNutritionEvents(userSubject:string):Promise<StoredNutritionEvent[]>;
   /** Verified-catalog text search by normalized name, scoped to global rows plus this subject's own custom foods. */
   searchFoodVersions(userSubject:string,query:string,limit:number):Promise<VersionedFood[]>;
   /** Verified-catalog barcode lookup, scoped the same way as `searchFoodVersions`. */
@@ -345,6 +347,8 @@ export interface V1Transaction {
   deleteManualNutritionEvent(userSubject:string,eventId:string):Promise<void>;
   /** Writes a new user-owned custom food (plain manual entry or a summed recipe) into the shared catalog, scoped by owner_subject exactly like every other private row there. */
   insertCustomFoodVersion(food:StoredCustomFoodVersion):Promise<void>;
+  /** Every custom food this subject owns, most recently verified first (Faz 9: full-history export/backup only). */
+  listCustomFoodVersions(userSubject:string):Promise<StoredCustomFoodVersion[]>;
   /** Delete the authenticated account and all dependent lifecycle rows in one transaction, in dependency-safe order. */
   purgeAuthenticatedUser(userSubject:string):Promise<void>;
   /** Appends one ARVEN memory fact. Never deduplicated by the adapter — the service decides what's worth remembering. */
@@ -845,6 +849,10 @@ export class V1MutationService{
   /** User-initiated forget — see `V1Transaction.deletePhotoAsset`'s doc comment. Callers are responsible for also deleting the underlying bytes via `lib/media/storage.ts`. */
   async deletePhotoAsset(id:string):Promise<void>{const parsed=Id.parse(id);await this.runner.transaction(async tx=>{await tx.deletePhotoAsset(this.subject,parsed);});}
   async deleteAccount():Promise<void>{await this.runner.transaction(async tx=>{await tx.purgeAuthenticatedUser(this.subject);});}
+  /** Every nutrition event (meal-log and water-log alike) this subject has ever recorded — Faz 9 data export/backup. */
+  async listAllNutritionEvents():Promise<StoredNutritionEvent[]>{return this.runner.transaction(async tx=>tx.listNutritionEvents(this.subject));}
+  /** Every custom food this subject owns — Faz 9 data export/backup. */
+  async listCustomFoods():Promise<StoredCustomFoodVersion[]>{return this.runner.transaction(async tx=>tx.listCustomFoodVersions(this.subject));}
   async getOrCreateAuthenticatedUser(defaults:{timezone:string;locale:string}):Promise<AuthenticatedUserContext>{return this.runner.transaction(async tx=>tx.getOrCreateUser(this.subject,defaults));}
   async upsertProfile(input:unknown):Promise<StoredProfile>{const x=ProfileUpsertV1.parse(input);const profile:StoredProfile={userSubject:this.subject,displayName:x.displayName,birthDate:x.birthDate,sexAtBirth:x.sexAtBirth,heightCm:x.heightCm,activityLevel:x.activityLevel,updatedAt:instant(this.clock.now())};return this.runner.transaction(async tx=>{await tx.upsertProfile(profile);return profile;});}
   async recordAssessmentSnapshot(input:unknown):Promise<StoredAssessmentSnapshot>{const x=AssessmentSnapshotPayloadV1.parse(input);const now=instant(this.clock.now());const snapshot:StoredAssessmentSnapshot={id:this.idFactory(),userSubject:this.subject,completedAt:now,payloadJson:canonicalJson(x),createdAt:now};return this.runner.transaction(async tx=>{await tx.insertAssessmentSnapshot(snapshot);return snapshot;});}
