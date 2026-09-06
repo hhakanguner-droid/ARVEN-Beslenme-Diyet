@@ -159,3 +159,7 @@ Meal photos, menu scans, body photos, lab files, audio and exports remain privat
 ## Visual system
 
 The approved ARVEN mobile mockups remain the source of truth: green/white system, real food imagery, readable mobile cards, five-tab bottom navigation and natural vertical scroll. Long screens scroll rather than being shrunk into one viewport.
+
+## Phase 8 verification note
+
+The Phase 8 (progress and reports) change set was verified locally end-to-end before merge: the full test suite (257 tests), the TypeScript type check, the migration validation script, and the production build all pass cleanly on Node 22.
