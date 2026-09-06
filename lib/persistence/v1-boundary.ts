@@ -172,6 +172,39 @@ const WeekPrepPreferencesV1 = z.object({
   prepLocalTime:z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/,"prepLocalTime must be HH:MM"),
 }).strict();
 
+// Phase 8: progress and reports. Keys are required-but-nullable (same convention as
+// `ProfileUpsertV1`) rather than optional, so a client always states its intent explicitly; the
+// refine below rejects an all-null submission, since an empty measurement carries no information.
+const BodyMeasurementCreateV1 = z.object({
+  schemaVersion:z.literal("BodyMeasurementCreateV1"),
+  localDate:CanonicalLocalDate,
+  weightKg:z.number().finite().min(20).max(400).nullable(),
+  bodyFatPercent:z.number().finite().min(1).max(75).nullable(),
+  waistCm:z.number().finite().min(20).max(300).nullable(),
+  hipCm:z.number().finite().min(20).max(300).nullable(),
+  chestCm:z.number().finite().min(20).max(300).nullable(),
+  note:z.string().trim().max(300).nullable(),
+}).strict().refine(
+  (x)=>x.weightKg!=null||x.bodyFatPercent!=null||x.waistCm!=null||x.hipCm!=null||x.chestCm!=null,
+  {message:"At least one measurement value is required",path:["weightKg"]},
+);
+const BODY_PHOTO_ANGLES=["front","side","back"] as const;
+const BodyPhotoSetInput = z.object({
+  localDate:CanonicalLocalDate,
+  angle:z.enum(BODY_PHOTO_ANGLES).nullable(),
+  mimeType:z.enum(PHOTO_ASSET_MIME_TYPES),
+  byteSize:z.number().int().min(1).max(8_000_000),
+  storageKey:z.string().trim().min(1).max(300),
+}).strict();
+const PROGRESS_REPORT_TYPES=["daily","weekly"] as const;
+/** `periodLocalDate` is the report's single anchor date: the day itself for a daily report, or that week's `weekStartLocalDate` for a weekly one — both are plain canonical local dates, so one schema covers both. */
+const ProgressReportExportInput = z.object({
+  reportType:z.enum(PROGRESS_REPORT_TYPES),
+  periodLocalDate:CanonicalLocalDate,
+  byteSize:z.number().int().min(1).max(8_000_000),
+  storageKey:z.string().trim().min(1).max(300),
+}).strict();
+
 const SexAtBirth = z.enum(["male","female"]);
 const ActivityLevel = z.enum(["sedentary","light","moderate","active","very-active"]);
 export const ProfileUpsertV1 = z.object({
@@ -244,6 +277,12 @@ export type StoredPantryItem={id:string;userSubject:string;foodVersionId:string|
 export type StoredShoppingListItem={id:string;userSubject:string;weekStartLocalDate:string;foodVersionId:string|null;label:string;neededGrams:number|null;isChecked:boolean;createdAt:string};
 export type StoredWeekPrepPreferences={userSubject:string;enabled:boolean;prepDayOfWeek:number;prepLocalTime:string;updatedAt:string};
 export type StoredWeekPrepStatus={userSubject:string;weekStartLocalDate:string;isCompleted:boolean;updatedAt:string};
+export type StoredBodyMeasurement={id:string;userSubject:string;localDate:string;weightKg:number|null;bodyFatPercent:number|null;waistCm:number|null;hipCm:number|null;chestCm:number|null;note:string|null;createdAt:string};
+export type BodyPhotoAngle=typeof BODY_PHOTO_ANGLES[number];
+export type StoredBodyPhotoSet={id:string;userSubject:string;localDate:string;angle:BodyPhotoAngle|null;mimeType:PhotoAssetMimeType;byteSize:number;storageKey:string;createdAt:string};
+export type StoredProgressMilestone={id:string;userSubject:string;milestoneKey:string;achievedAt:string};
+export type ProgressReportType=typeof PROGRESS_REPORT_TYPES[number];
+export type StoredProgressReportExport={id:string;userSubject:string;reportType:ProgressReportType;periodLocalDate:string;mimeType:"application/pdf";byteSize:number;storageKey:string;createdAt:string};
 
 export interface V1Transaction {
   getUserContext(userSubject:string):Promise<AuthenticatedUserContext>;
@@ -381,6 +420,32 @@ export interface V1Transaction {
   getWeekPrepStatus(userSubject:string,weekStartLocalDate:string):Promise<StoredWeekPrepStatus|null>;
   /** Upserts this subject's week-prep completion flag for one week. */
   upsertWeekPrepStatus(status:StoredWeekPrepStatus):Promise<void>;
+  /** Adds one body-measurement row ("Gelişim", Faz 8). */
+  insertBodyMeasurement(measurement:StoredBodyMeasurement):Promise<void>;
+  /** Every measurement for this subject, in no particular order — callers sort as needed (see `V1MutationService.recordBodyMeasurement`). */
+  listBodyMeasurements(userSubject:string):Promise<StoredBodyMeasurement[]>;
+  /** User-initiated forget, same semantics as `deleteMemoryFact`. Does not retract any milestone the deleted measurement helped earn — see `StoredProgressMilestone`'s doc comment. */
+  deleteBodyMeasurement(userSubject:string,id:string):Promise<void>;
+  /** Records metadata for a body-progress photo the caller has already written to `lib/media/storage.ts`; the adapter never touches the bytes themselves. */
+  insertBodyPhotoSet(photo:StoredBodyPhotoSet):Promise<void>;
+  getBodyPhotoSet(userSubject:string,id:string):Promise<StoredBodyPhotoSet|null>;
+  /** Every body-progress photo for this subject, most recent first. */
+  listBodyPhotoSets(userSubject:string):Promise<StoredBodyPhotoSet[]>;
+  /** User-initiated forget, same semantics as `deleteMemoryFact`. Callers are responsible for also deleting the underlying bytes via `lib/media/storage.ts`. */
+  deleteBodyPhotoSet(userSubject:string,id:string):Promise<void>;
+  /** Whether this (userSubject, milestoneKey) pair has already been earned — checked by `V1MutationService.recordBodyMeasurement` before inserting, so a milestone is never earned twice. */
+  hasProgressMilestone(userSubject:string,milestoneKey:string):Promise<boolean>;
+  /** Appends one newly-earned milestone. Callers must check `hasProgressMilestone` first; the schema's unique index is only a defense-in-depth backstop, not the primary race-avoidance mechanism (unlike `insertProposalIfAbsent`). */
+  insertProgressMilestone(milestone:StoredProgressMilestone):Promise<void>;
+  /** Every milestone this subject has earned, most recently first. */
+  listProgressMilestones(userSubject:string):Promise<StoredProgressMilestone[]>;
+  /** Records metadata for a report PDF the caller has already generated (see `lib/progress/pdf.ts`) and written to `lib/media/storage.ts`. */
+  insertProgressReportExport(report:StoredProgressReportExport):Promise<void>;
+  getProgressReportExport(userSubject:string,id:string):Promise<StoredProgressReportExport|null>;
+  /** Every report export for this subject, most recently generated first. */
+  listProgressReportExports(userSubject:string):Promise<StoredProgressReportExport[]>;
+  /** User-initiated forget, same semantics as `deleteMemoryFact`. Callers are responsible for also deleting the underlying bytes via `lib/media/storage.ts`. */
+  deleteProgressReportExport(userSubject:string,id:string):Promise<void>;
 }
 export interface V1TransactionRunner{transaction<T>(work:(tx:V1Transaction)=>Promise<T>):Promise<T>}
 export type ServiceClock={now():Date}; export type IdFactory=()=>string;
@@ -490,6 +555,27 @@ async function resolveWeeklyPlanItems(tx:V1Transaction,subject:string,items:Arra
     }
   }
   return{snapshots,safetyFoods};
+}
+/**
+ * Deterministic milestone evaluation for "Gelişim" (Faz 8): purely a function of the subject's own
+ * measurement history (already including the just-inserted one, sorted ascending by localDate then
+ * createdAt) — never AI, never a goal the app doesn't actually track (this app's goals are
+ * macro/energy targets, not a target body weight; see docs/ROADMAP.md's Phase 8 entry). Returns the
+ * set of milestone keys the history currently qualifies for; `recordBodyMeasurement` is what filters
+ * out ones already earned before inserting.
+ */
+function evaluateBodyMeasurementMilestones(history:StoredBodyMeasurement[]):string[]{
+  const earned:string[]=[];
+  if(history.length>=1)earned.push("first-measurement-logged");
+  if(history.length>=5)earned.push("five-measurements-logged");
+  if(history.length>=20)earned.push("twenty-measurements-logged");
+  const withWeight=history.filter((m)=>m.weightKg!=null);
+  if(withWeight.length>=2){
+    const change=Math.abs(withWeight[withWeight.length-1].weightKg!-withWeight[0].weightKg!);
+    if(change>=1)earned.push("weight-change-1kg-observed");
+    if(change>=5)earned.push("weight-change-5kg-observed");
+  }
+  return earned;
 }
 function canonicalReferenceIds(ids:string[]):string[]{const result=ids.map(id=>id.trim());if(result.length===0||result.some(id=>!id))throw new Error("At least one scientific reference is required");if(new Set(result).size!==result.length)throw new Error("Scientific reference ids must be unique");return result;}
 function assertSameImmutableProposal(stored:StoredProposal,candidate:StoredProposal):StoredProposal{
@@ -976,4 +1062,54 @@ export class V1MutationService{
     const status:StoredWeekPrepStatus={userSubject:this.subject,weekStartLocalDate:parsedDate,isCompleted,updatedAt:instant(this.clock.now())};
     return this.runner.transaction(async tx=>{await tx.upsertWeekPrepStatus(status);return status;});
   }
+
+  /**
+   * "Gelişim" (Faz 8): logs one body measurement and, in the same transaction, evaluates
+   * deterministic milestones purely from this subject's own measurement history (see
+   * `evaluateBodyMeasurementMilestones`) — no AI, no goal beyond what the numbers themselves show.
+   */
+  async recordBodyMeasurement(input:unknown):Promise<{measurement:StoredBodyMeasurement;newMilestones:StoredProgressMilestone[]}>{
+    const x=BodyMeasurementCreateV1.parse(input);
+    const now=instant(this.clock.now());
+    const measurement:StoredBodyMeasurement={id:this.idFactory(),userSubject:this.subject,localDate:x.localDate,weightKg:x.weightKg,bodyFatPercent:x.bodyFatPercent,waistCm:x.waistCm,hipCm:x.hipCm,chestCm:x.chestCm,note:x.note,createdAt:now};
+    return this.runner.transaction(async tx=>{
+      await tx.insertBodyMeasurement(measurement);
+      const history=(await tx.listBodyMeasurements(this.subject)).slice().sort((a,b)=>a.localDate===b.localDate?a.createdAt.localeCompare(b.createdAt):a.localDate.localeCompare(b.localDate));
+      const newMilestones:StoredProgressMilestone[]=[];
+      for(const key of evaluateBodyMeasurementMilestones(history)){
+        if(await tx.hasProgressMilestone(this.subject,key))continue;
+        const milestone:StoredProgressMilestone={id:this.idFactory(),userSubject:this.subject,milestoneKey:key,achievedAt:now};
+        await tx.insertProgressMilestone(milestone);
+        newMilestones.push(milestone);
+      }
+      return{measurement,newMilestones};
+    });
+  }
+  async listBodyMeasurements():Promise<StoredBodyMeasurement[]>{return this.runner.transaction(async tx=>tx.listBodyMeasurements(this.subject));}
+  /** User-initiated forget — see `V1Transaction.deleteBodyMeasurement`'s doc comment. */
+  async deleteBodyMeasurement(id:string):Promise<void>{const parsed=Id.parse(id);await this.runner.transaction(async tx=>{await tx.deleteBodyMeasurement(this.subject,parsed);});}
+
+  /** Records metadata for a body-progress photo the caller has already written to `lib/media/storage.ts`. This service never sees the bytes. */
+  async recordBodyPhotoSet(input:unknown):Promise<StoredBodyPhotoSet>{
+    const x=BodyPhotoSetInput.parse(input);
+    const photo:StoredBodyPhotoSet={id:this.idFactory(),userSubject:this.subject,localDate:x.localDate,angle:x.angle,mimeType:x.mimeType,byteSize:x.byteSize,storageKey:x.storageKey,createdAt:instant(this.clock.now())};
+    return this.runner.transaction(async tx=>{await tx.insertBodyPhotoSet(photo);return photo;});
+  }
+  async getBodyPhotoSet(id:string):Promise<StoredBodyPhotoSet|null>{const parsed=Id.parse(id);return this.runner.transaction(async tx=>tx.getBodyPhotoSet(this.subject,parsed));}
+  async listBodyPhotoSets():Promise<StoredBodyPhotoSet[]>{return this.runner.transaction(async tx=>tx.listBodyPhotoSets(this.subject));}
+  /** User-initiated forget — see `V1Transaction.deleteBodyPhotoSet`'s doc comment. */
+  async deleteBodyPhotoSet(id:string):Promise<void>{const parsed=Id.parse(id);await this.runner.transaction(async tx=>{await tx.deleteBodyPhotoSet(this.subject,parsed);});}
+
+  async listProgressMilestones():Promise<StoredProgressMilestone[]>{return this.runner.transaction(async tx=>tx.listProgressMilestones(this.subject));}
+
+  /** Records metadata for a report PDF the caller has already generated (see `lib/progress/pdf.ts` and `lib/progress/reports.ts`) and written to `lib/media/storage.ts`. This service never sees the bytes. */
+  async recordProgressReportExport(input:unknown):Promise<StoredProgressReportExport>{
+    const x=ProgressReportExportInput.parse(input);
+    const report:StoredProgressReportExport={id:this.idFactory(),userSubject:this.subject,reportType:x.reportType,periodLocalDate:x.periodLocalDate,mimeType:"application/pdf",byteSize:x.byteSize,storageKey:x.storageKey,createdAt:instant(this.clock.now())};
+    return this.runner.transaction(async tx=>{await tx.insertProgressReportExport(report);return report;});
+  }
+  async getProgressReportExport(id:string):Promise<StoredProgressReportExport|null>{const parsed=Id.parse(id);return this.runner.transaction(async tx=>tx.getProgressReportExport(this.subject,parsed));}
+  async listProgressReportExports():Promise<StoredProgressReportExport[]>{return this.runner.transaction(async tx=>tx.listProgressReportExports(this.subject));}
+  /** User-initiated forget — see `V1Transaction.deleteProgressReportExport`'s doc comment. */
+  async deleteProgressReportExport(id:string):Promise<void>{const parsed=Id.parse(id);await this.runner.transaction(async tx=>{await tx.deleteProgressReportExport(this.subject,parsed);});}
 }
