@@ -104,6 +104,20 @@ class Tx implements V1Transaction {
   async upsertWeekPrepPreferences(){}
   async getWeekPrepStatus(){ return null; }
   async upsertWeekPrepStatus(){}
+  async insertBodyMeasurement(){}
+  async listBodyMeasurements(){ return []; }
+  async deleteBodyMeasurement(){}
+  async insertBodyPhotoSet(){}
+  async getBodyPhotoSet(){ return null; }
+  async listBodyPhotoSets(){ return []; }
+  async deleteBodyPhotoSet(){}
+  async hasProgressMilestone(){ return false; }
+  async insertProgressMilestone(){}
+  async listProgressMilestones(){ return []; }
+  async insertProgressReportExport(){}
+  async getProgressReportExport(){ return null; }
+  async listProgressReportExports(){ return []; }
+  async deleteProgressReportExport(){}
 }
 class Runner implements V1TransactionRunner { constructor(readonly tx=new Tx()){} async transaction<T>(work:(tx:V1Transaction)=>Promise<T>){ return work(this.tx); } }
 function ids(...values:string[]){ let i=0; return()=>values[i++]??`id-${i}`; }
