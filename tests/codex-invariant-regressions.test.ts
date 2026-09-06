@@ -87,6 +87,23 @@ class Tx implements V1Transaction {
   async listSupplementRecords(){ return []; }
   async setSupplementRecordActive(){}
   async deleteSupplementRecord(){}
+  async insertRecipe(){}
+  async listRecipes(){ return []; }
+  async getRecipe(){ return null; }
+  async deleteRecipe(){}
+  async insertWeeklyPlanVersionAndSetCurrent(){}
+  async getCurrentWeeklyPlan(){ return null; }
+  async insertPantryItem(){}
+  async listPantryItems(){ return []; }
+  async updatePantryItem(){ return {} as never; }
+  async deletePantryItem(){}
+  async replaceShoppingListItems(){}
+  async listShoppingListItems(){ return []; }
+  async setShoppingListItemChecked(){}
+  async getWeekPrepPreferences(){ return null; }
+  async upsertWeekPrepPreferences(){}
+  async getWeekPrepStatus(){ return null; }
+  async upsertWeekPrepStatus(){}
 }
 class Runner implements V1TransactionRunner { constructor(readonly tx=new Tx()){} async transaction<T>(work:(tx:V1Transaction)=>Promise<T>){ return work(this.tx); } }
 function ids(...values:string[]){ let i=0; return()=>values[i++]??`id-${i}`; }
