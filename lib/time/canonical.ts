@@ -59,3 +59,10 @@ export function assertSevenDayLocalInterval(start: string, end: string, field = 
   const endDay = localDateDayNumber(end, `${field} end`);
   if (endDay - startDay !== 6) throw new Error(`${field} must span exactly seven local dates`);
 }
+
+/** Adds `offsetDays` (may be negative) whole days to a canonical local date, returning a canonical local date. */
+export function addLocalDays(value: string, offsetDays: number, field = "date"): string {
+  assertCanonicalLocalDate(value, field);
+  const [year, month, day] = value.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day + offsetDays)).toISOString().slice(0, 10);
+}

@@ -9,7 +9,7 @@ def reject(conn,sql,params=()):
     except (sqlite3.IntegrityError,sqlite3.OperationalError): return
     raise AssertionError(f'expected rejection: {sql}')
 def main():
-    assert [Path(p).name for p in MIGRATIONS]==['0001_initial.sql','0002_phase2_identity.sql','0003_phase3_planning.sql','0004_phase4_ai.sql','0005_phase5_vision.sql','0006_phase6_health.sql','0007_phase6_health_hardening.sql']
+    assert [Path(p).name for p in MIGRATIONS]==['0001_initial.sql','0002_phase2_identity.sql','0003_phase3_planning.sql','0004_phase4_ai.sql','0005_phase5_vision.sql','0006_phase6_health.sql','0007_phase6_health_hardening.sql','0008_phase7_planning.sql']
     combined='\n'.join(Path(p).read_text(encoding='utf-8') for p in MIGRATIONS)
     assert 'CREATE TABLE ai_actions' not in combined
     assert 'meal_entry_items' not in combined
@@ -68,5 +68,26 @@ def main():
     c.execute("INSERT INTO supplement_records(id,user_subject,food_version_id,name,note,is_active,created_at) VALUES('sr1','u1',NULL,'D Vitamini',NULL,1,?)",(now,))
     c.execute("UPDATE supplement_records SET is_active=0 WHERE id='sr1'")
     c.execute("DELETE FROM supplement_records WHERE id='sr1'")
+    reject(c,"INSERT INTO recipes(id,user_subject,name,servings,ingredients_json,created_at) VALUES('rc-bad','u1','  ',2,'[]',?)",(now,))
+    reject(c,"INSERT INTO recipes(id,user_subject,name,servings,ingredients_json,created_at) VALUES('rc-bad2','u1','Mercimek çorbası',0,'[]',?)",(now,))
+    reject(c,"INSERT INTO recipes(id,user_subject,name,servings,ingredients_json,created_at) VALUES('rc-bad3','u1','Mercimek çorbası',2,'not-json',?)",(now,))
+    c.execute("INSERT INTO recipes(id,user_subject,name,servings,ingredients_json,created_at) VALUES('rc1','u1','Mercimek çorbası',4,'[]',?)",(now,))
+    reject(c,"INSERT INTO weekly_plan_versions(id,user_subject,week_start_local_date,days_json,created_at) VALUES('wp-bad','u1','2026-08-31','not-json',?)",(now,))
+    c.execute("INSERT INTO weekly_plan_versions(id,user_subject,week_start_local_date,days_json,created_at) VALUES('wp1','u1','2026-08-31','[]',?)",(now,))
+    reject(c,"INSERT INTO user_current_weekly_plan(user_subject,week_start_local_date,weekly_plan_version_id,selected_at) VALUES('u2','2026-08-31','wp1',?)",(now,))
+    c.execute("INSERT INTO user_current_weekly_plan(user_subject,week_start_local_date,weekly_plan_version_id,selected_at) VALUES('u1','2026-08-31','wp1',?)",(now,))
+    reject(c,"INSERT INTO pantry_items(id,user_subject,food_version_id,label,quantity_grams,quantity_note,created_at,updated_at) VALUES('pi-bad','u1',NULL,'  ',NULL,NULL,?,?)",(now,now))
+    reject(c,"INSERT INTO pantry_items(id,user_subject,food_version_id,label,quantity_grams,quantity_note,created_at,updated_at) VALUES('pi-bad2','u1',NULL,'Un',-5,NULL,?,?)",(now,now))
+    c.execute("INSERT INTO pantry_items(id,user_subject,food_version_id,label,quantity_grams,quantity_note,created_at,updated_at) VALUES('pi1','u1',NULL,'Un',1000,NULL,?,?)",(now,now))
+    c.execute("UPDATE pantry_items SET quantity_grams=500,updated_at=? WHERE id='pi1'",(now,))
+    c.execute("DELETE FROM pantry_items WHERE id='pi1'")
+    reject(c,"INSERT INTO shopping_list_items(id,user_subject,week_start_local_date,food_version_id,label,needed_grams,is_checked,created_at) VALUES('sl-bad','u1','2026-08-31',NULL,'Un',500,2,?)",(now,))
+    c.execute("INSERT INTO shopping_list_items(id,user_subject,week_start_local_date,food_version_id,label,needed_grams,is_checked,created_at) VALUES('sl1','u1','2026-08-31',NULL,'Un',500,0,?)",(now,))
+    c.execute("UPDATE shopping_list_items SET is_checked=1 WHERE id='sl1'")
+    c.execute("DELETE FROM shopping_list_items WHERE id='sl1'")
+    reject(c,"INSERT INTO week_prep_preferences(user_subject,enabled,prep_day_of_week,prep_local_time,updated_at) VALUES('u1',1,0,'10:60',?)",(now,))
+    c.execute("INSERT INTO week_prep_preferences(user_subject,enabled,prep_day_of_week,prep_local_time,updated_at) VALUES('u1',1,6,'09:30',?)",(now,))
+    reject(c,"INSERT INTO week_prep_status(user_subject,week_start_local_date,is_completed,updated_at) VALUES('u1','2026-08-31',2,?)",(now,))
+    c.execute("INSERT INTO week_prep_status(user_subject,week_start_local_date,is_completed,updated_at) VALUES('u1','2026-08-31',1,?)",(now,))
     print('CLEAN_V1_MIGRATION_OK')
 if __name__=='__main__':main()
