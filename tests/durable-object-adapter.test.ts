@@ -6,7 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import { DurableObjectV1Transaction, type D1LikeQuery, type SyncSqlStorage } from "../lib/persistence/durable-object-adapter";
 import type { StoredCustomFoodVersion, StoredGoalVersion, StoredLabDocument, StoredLabResultEntry, StoredMemoryFact, StoredNutritionEvent, StoredOutcome, StoredPhotoAsset, StoredProposal, StoredSupplementRecord, StoredVerifiedFoodImport, StoredWeeklyInsightSnapshot } from "../lib/persistence/v1-boundary";
 
-const MIGRATIONS = ["0001_initial.sql", "0002_phase2_identity.sql", "0003_phase3_planning.sql", "0004_phase4_ai.sql", "0005_phase5_vision.sql", "0006_phase6_health.sql"].map(
+const MIGRATIONS = ["0001_initial.sql", "0002_phase2_identity.sql", "0003_phase3_planning.sql", "0004_phase4_ai.sql", "0005_phase5_vision.sql", "0006_phase6_health.sql", "0007_phase7_planning.sql"].map(
   (name) => fileURLToPath(new URL(`../db/migrations/${name}`, import.meta.url)),
 );
 
@@ -207,10 +207,16 @@ test("purgeAuthenticatedUser removes every row for that subject across all owned
   await tx1.insertLabDocument({ id: "ld1", userSubject: "u1", mimeType: "image/jpeg", byteSize: 12345, storageKey: "u1/ld1", createdAt: "2026-09-04T00:00:00.000Z" });
   await tx1.insertLabResultEntry({ id: "lr1", userSubject: "u1", labDocumentId: "ld1", markerName: "Glukoz", valueText: "95", unitText: "mg/dL", referenceRangeText: "70-100", status: "extracted", createdAt: "2026-09-04T00:00:00.000Z" });
   await tx1.insertSupplementRecord({ id: "sr1", userSubject: "u1", foodVersionId: null, name: "D Vitamini", note: null, isActive: true, createdAt: "2026-09-04T00:00:00.000Z" });
+  await tx1.insertRecipe({ id: "rc1", userSubject: "u1", name: "Tarif", servings: 2, ingredientsJson: "[]", createdAt: "2026-09-04T00:00:00.000Z" });
+  await tx1.insertWeeklyPlanVersionAndSetCurrent({ id: "wp1", userSubject: "u1", weekStartLocalDate: "2026-08-31", daysJson: "[]", createdAt: "2026-09-04T00:00:00.000Z" }, "2026-09-04T00:00:00.000Z");
+  await tx1.insertPantryItem({ id: "pi1", userSubject: "u1", foodVersionId: null, label: "Un", quantityGrams: 1000, quantityNote: null, createdAt: "2026-09-04T00:00:00.000Z", updatedAt: "2026-09-04T00:00:00.000Z" });
+  await tx1.replaceShoppingListItems("u1", "2026-08-31", [{ id: "sl1", userSubject: "u1", weekStartLocalDate: "2026-08-31", foodVersionId: null, label: "Un", neededGrams: 500, isChecked: false, createdAt: "2026-09-04T00:00:00.000Z" }]);
+  await tx1.upsertWeekPrepPreferences({ userSubject: "u1", enabled: true, prepDayOfWeek: 0, prepLocalTime: "09:00", updatedAt: "2026-09-04T00:00:00.000Z" });
+  await tx1.upsertWeekPrepStatus({ userSubject: "u1", weekStartLocalDate: "2026-08-31", isCompleted: true, updatedAt: "2026-09-04T00:00:00.000Z" });
 
   await assert.doesNotReject(() => tx1.purgeAuthenticatedUser("u1"));
 
-  for (const table of ["users", "profiles", "ai_action_proposals", "ai_action_decisions", "ai_action_outcomes", "nutrition_events", "goal_versions", "user_current_goal", "assessment_snapshots", "safety_acknowledgements", "meal_plan_versions", "user_current_meal_plan", "photo_assets", "lab_documents", "lab_result_entries", "supplement_records"]) {
+  for (const table of ["users", "profiles", "ai_action_proposals", "ai_action_decisions", "ai_action_outcomes", "nutrition_events", "goal_versions", "user_current_goal", "assessment_snapshots", "safety_acknowledgements", "meal_plan_versions", "user_current_meal_plan", "photo_assets", "lab_documents", "lab_result_entries", "supplement_records", "recipes", "weekly_plan_versions", "user_current_weekly_plan", "pantry_items", "shopping_list_items", "week_prep_preferences", "week_prep_status"]) {
     const count = (db.prepare(`SELECT count(*) as n FROM ${table} WHERE ${table === "users" ? "subject" : "user_subject"}='u1'`).get() as { n: number }).n;
     assert.equal(count, 0, `${table} should have no rows left for u1`);
   }
