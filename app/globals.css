@@ -27,6 +27,31 @@ body {
 button, input, textarea { font: inherit; }
 a { color: inherit; text-decoration: none; }
 
+/* Faz 9 erişilebilirlik: klavye ile gezinirken (Tab tuşu) odaklanılan öğe her zaman görünür
+   olmalı — fare/dokunmatik tıklamada gösterilmez (:focus-visible), yalnızca gerçek klavye
+   gezintisinde. Bu kurala kadar sitede hiçbir odak göstergesi yoktu. */
+a:focus-visible, button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible, [tabindex]:focus-visible {
+  outline: 3px solid var(--arven-green-action);
+  outline-offset: 2px;
+}
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 100;
+  background: var(--arven-green-deep);
+  color: #fff;
+  padding: 12px 18px;
+  border-radius: 0 0 12px 0;
+  font-weight: 700;
+}
+.skip-link:focus {
+  left: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; scroll-behavior: auto !important; }
+}
+
 .app-frame {
   width: 100%;
   max-width: 520px;
@@ -135,6 +160,26 @@ a { color: inherit; text-decoration: none; }
   background: #fff;
   color: var(--arven-green-deep);
   font-weight: 700;
+}
+.danger-button {
+  min-height: 48px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #c0392b;
+  border-radius: 15px;
+  padding: 0 18px;
+  background: #fff;
+  color: #c0392b;
+  font-weight: 750;
+  cursor: pointer;
+}
+.danger-zone {
+  margin-top: 26px;
+  padding: 16px;
+  border: 1px dashed #e0b4ac;
+  border-radius: 18px;
+  background: #fdf5f3;
 }
 
 .bottom-nav {
