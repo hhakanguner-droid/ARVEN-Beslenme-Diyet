@@ -18,7 +18,7 @@ test("renderSimplePdf transliterates Turkish letters outside WinAnsiEncoding but
   const bytes = renderSimplePdf("Başlık ıĞşÜöç", [{ text: "İştah" }]);
   const text = Buffer.from(bytes).toString("latin1");
   assert.ok(!text.includes("ş") && !text.includes("ğ") && !text.includes("ı") && !text.includes("İ"), "ş/ğ/ı/İ must be transliterated");
-  assert.ok(text.includes("Baslik iGşÜöç"), "transliteration must only replace ş/ğ/ı/İ, leaving native Latin-1 Turkish letters (Ü, ö, ç) untouched");
+  assert.ok(text.includes("Baslik iGsUcoc".replace("Uc", "Üö").replace("oc","ç")), "transliteration must only replace ş/ğ/ı/İ, leaving native Latin-1 Turkish letters (Ü, ö, ç) untouched");
 });
 
 test("renderSimplePdf escapes PDF-special characters in text so the content stream stays well-formed", () => {
