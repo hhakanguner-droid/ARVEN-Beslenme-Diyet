@@ -6,6 +6,7 @@ import {
   type AuthenticatedUserContext,
   type ScientificReferenceSnapshot,
   type StoredAssessmentSnapshot,
+  type StoredCustomFoodVersion,
   type StoredDecision,
   type StoredGoalVersion,
   type StoredMemoryFact,
@@ -69,6 +70,8 @@ class FakeTx implements V1Transaction {
   async getCurrentMealPlan() { return null; }
   async deleteManualNutritionEvent(): Promise<void> { throw new Error("unused"); }
   async insertCustomFoodVersion(): Promise<void> { throw new Error("unused"); }
+  async listNutritionEvents(): Promise<StoredNutritionEvent[]> { throw new Error("unused"); }
+  async listCustomFoodVersions(): Promise<StoredCustomFoodVersion[]> { throw new Error("unused"); }
   async purgeAuthenticatedUser(): Promise<void> { throw new Error("unused"); }
   async insertMemoryFact(): Promise<void> { throw new Error("unused"); }
   async deleteMemoryFact(): Promise<void> { throw new Error("unused"); }
