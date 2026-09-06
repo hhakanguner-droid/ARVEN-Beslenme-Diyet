@@ -4,6 +4,8 @@ import type {
   AuthenticatedUserContext,
   ScientificReferenceSnapshot,
   StoredAssessmentSnapshot,
+  StoredBodyMeasurement,
+  StoredBodyPhotoSet,
   StoredDecision,
   StoredGoalVersion,
   StoredCustomFoodVersion,
@@ -17,6 +19,8 @@ import type {
   StoredPantryItem,
   StoredPhotoAsset,
   StoredProfile,
+  StoredProgressMilestone,
+  StoredProgressReportExport,
   StoredProposal,
   StoredRecipe,
   StoredSafetyAcknowledgement,
@@ -192,6 +196,36 @@ function mapWeekPrepPreferences(row: Record<string, unknown>): StoredWeekPrepPre
 }
 function mapWeekPrepStatus(row: Record<string, unknown>): StoredWeekPrepStatus {
   return { userSubject: asString(row.user_subject), weekStartLocalDate: asString(row.week_start_local_date), isCompleted: Number(row.is_completed) === 1, updatedAt: asString(row.updated_at) };
+}
+function mapBodyMeasurement(row: Record<string, unknown>): StoredBodyMeasurement {
+  return {
+    id: asString(row.id), userSubject: asString(row.user_subject), localDate: asString(row.local_date),
+    weightKg: row.weight_kg == null ? null : Number(row.weight_kg),
+    bodyFatPercent: row.body_fat_percent == null ? null : Number(row.body_fat_percent),
+    waistCm: row.waist_cm == null ? null : Number(row.waist_cm),
+    hipCm: row.hip_cm == null ? null : Number(row.hip_cm),
+    chestCm: row.chest_cm == null ? null : Number(row.chest_cm),
+    note: asNullableString(row.note), createdAt: asString(row.created_at),
+  };
+}
+function mapBodyPhotoSet(row: Record<string, unknown>): StoredBodyPhotoSet {
+  return {
+    id: asString(row.id), userSubject: asString(row.user_subject), localDate: asString(row.local_date),
+    angle: asNullableString(row.angle) as StoredBodyPhotoSet["angle"],
+    mimeType: asString(row.mime_type) as StoredBodyPhotoSet["mimeType"], byteSize: Number(row.byte_size),
+    storageKey: asString(row.storage_key), createdAt: asString(row.created_at),
+  };
+}
+function mapProgressMilestone(row: Record<string, unknown>): StoredProgressMilestone {
+  return { id: asString(row.id), userSubject: asString(row.user_subject), milestoneKey: asString(row.milestone_key), achievedAt: asString(row.achieved_at) };
+}
+function mapProgressReportExport(row: Record<string, unknown>): StoredProgressReportExport {
+  return {
+    id: asString(row.id), userSubject: asString(row.user_subject),
+    reportType: asString(row.report_type) as StoredProgressReportExport["reportType"],
+    periodLocalDate: asString(row.period_local_date), mimeType: "application/pdf",
+    byteSize: Number(row.byte_size), storageKey: asString(row.storage_key), createdAt: asString(row.created_at),
+  };
 }
 /** Keeps one row per `food_key` (the most recently verified), preserving first-seen order otherwise. */
 function dedupeByFoodKey(rows: Record<string, unknown>[]): Record<string, unknown>[] {
@@ -796,6 +830,66 @@ export class DurableObjectV1Transaction implements V1Transaction {
     );
   }
 
+  async insertBodyMeasurement(measurement: StoredBodyMeasurement): Promise<void> {
+    this.sql.exec(
+      "INSERT INTO body_measurements (id, user_subject, local_date, weight_kg, body_fat_percent, waist_cm, hip_cm, chest_cm, note, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+      measurement.id, measurement.userSubject, measurement.localDate, measurement.weightKg, measurement.bodyFatPercent, measurement.waistCm, measurement.hipCm, measurement.chestCm, measurement.note, measurement.createdAt,
+    );
+  }
+  async listBodyMeasurements(userSubject: string): Promise<StoredBodyMeasurement[]> {
+    return this.sql.exec("SELECT * FROM body_measurements WHERE user_subject=? ORDER BY local_date, created_at", userSubject).toArray().map(mapBodyMeasurement);
+  }
+  async deleteBodyMeasurement(userSubject: string, id: string): Promise<void> {
+    this.sql.exec("DELETE FROM body_measurements WHERE id=? AND user_subject=?", id, userSubject);
+  }
+
+  async insertBodyPhotoSet(photo: StoredBodyPhotoSet): Promise<void> {
+    this.sql.exec(
+      "INSERT INTO body_photo_sets (id, user_subject, local_date, angle, mime_type, byte_size, storage_key, created_at) VALUES (?,?,?,?,?,?,?,?)",
+      photo.id, photo.userSubject, photo.localDate, photo.angle, photo.mimeType, photo.byteSize, photo.storageKey, photo.createdAt,
+    );
+  }
+  async getBodyPhotoSet(userSubject: string, id: string): Promise<StoredBodyPhotoSet | null> {
+    const row = this.sql.exec("SELECT * FROM body_photo_sets WHERE id=? AND user_subject=?", id, userSubject).one();
+    return row ? mapBodyPhotoSet(row) : null;
+  }
+  async listBodyPhotoSets(userSubject: string): Promise<StoredBodyPhotoSet[]> {
+    return this.sql.exec("SELECT * FROM body_photo_sets WHERE user_subject=? ORDER BY created_at DESC", userSubject).toArray().map(mapBodyPhotoSet);
+  }
+  async deleteBodyPhotoSet(userSubject: string, id: string): Promise<void> {
+    this.sql.exec("DELETE FROM body_photo_sets WHERE id=? AND user_subject=?", id, userSubject);
+  }
+
+  async hasProgressMilestone(userSubject: string, milestoneKey: string): Promise<boolean> {
+    return this.sql.exec("SELECT 1 FROM progress_milestones WHERE user_subject=? AND milestone_key=?", userSubject, milestoneKey).one() != null;
+  }
+  async insertProgressMilestone(milestone: StoredProgressMilestone): Promise<void> {
+    this.sql.exec(
+      "INSERT INTO progress_milestones (id, user_subject, milestone_key, achieved_at) VALUES (?,?,?,?)",
+      milestone.id, milestone.userSubject, milestone.milestoneKey, milestone.achievedAt,
+    );
+  }
+  async listProgressMilestones(userSubject: string): Promise<StoredProgressMilestone[]> {
+    return this.sql.exec("SELECT * FROM progress_milestones WHERE user_subject=? ORDER BY achieved_at DESC", userSubject).toArray().map(mapProgressMilestone);
+  }
+
+  async insertProgressReportExport(report: StoredProgressReportExport): Promise<void> {
+    this.sql.exec(
+      "INSERT INTO progress_report_exports (id, user_subject, report_type, period_local_date, mime_type, byte_size, storage_key, created_at) VALUES (?,?,?,?,'application/pdf',?,?,?)",
+      report.id, report.userSubject, report.reportType, report.periodLocalDate, report.byteSize, report.storageKey, report.createdAt,
+    );
+  }
+  async getProgressReportExport(userSubject: string, id: string): Promise<StoredProgressReportExport | null> {
+    const row = this.sql.exec("SELECT * FROM progress_report_exports WHERE id=? AND user_subject=?", id, userSubject).one();
+    return row ? mapProgressReportExport(row) : null;
+  }
+  async listProgressReportExports(userSubject: string): Promise<StoredProgressReportExport[]> {
+    return this.sql.exec("SELECT * FROM progress_report_exports WHERE user_subject=? ORDER BY created_at DESC", userSubject).toArray().map(mapProgressReportExport);
+  }
+  async deleteProgressReportExport(userSubject: string, id: string): Promise<void> {
+    this.sql.exec("DELETE FROM progress_report_exports WHERE id=? AND user_subject=?", id, userSubject);
+  }
+
   /**
    * Ordered deletes respecting the schema's mixed CASCADE/RESTRICT foreign keys
    * — see db/migrations/*.sql. Only touches this user's own Durable Object
@@ -845,6 +939,10 @@ export class DurableObjectV1Transaction implements V1Transaction {
       this.sql.exec("DELETE FROM user_current_weekly_plan WHERE user_subject=?", userSubject);
       this.sql.exec("DELETE FROM weekly_plan_versions WHERE user_subject=?", userSubject);
       this.sql.exec("DELETE FROM recipes WHERE user_subject=?", userSubject);
+      this.sql.exec("DELETE FROM progress_report_exports WHERE user_subject=?", userSubject);
+      this.sql.exec("DELETE FROM progress_milestones WHERE user_subject=?", userSubject);
+      this.sql.exec("DELETE FROM body_photo_sets WHERE user_subject=?", userSubject);
+      this.sql.exec("DELETE FROM body_measurements WHERE user_subject=?", userSubject);
       this.sql.exec("DELETE FROM profiles WHERE user_subject=?", userSubject);
       this.sql.exec("DELETE FROM users WHERE subject=?", userSubject);
     });

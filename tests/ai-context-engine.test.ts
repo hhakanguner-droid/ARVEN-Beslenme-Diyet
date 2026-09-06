@@ -108,6 +108,20 @@ class FakeTx implements V1Transaction {
   async upsertWeekPrepPreferences(): Promise<void> { throw new Error("unused"); }
   async getWeekPrepStatus(): Promise<null> { return null; }
   async upsertWeekPrepStatus(): Promise<void> { throw new Error("unused"); }
+  async insertBodyMeasurement(): Promise<void> { throw new Error("unused"); }
+  async listBodyMeasurements(): Promise<never[]> { throw new Error("unused"); }
+  async deleteBodyMeasurement(): Promise<void> { throw new Error("unused"); }
+  async insertBodyPhotoSet(): Promise<void> { throw new Error("unused"); }
+  async getBodyPhotoSet(): Promise<null> { throw new Error("unused"); }
+  async listBodyPhotoSets(): Promise<never[]> { throw new Error("unused"); }
+  async deleteBodyPhotoSet(): Promise<void> { throw new Error("unused"); }
+  async hasProgressMilestone(): Promise<boolean> { throw new Error("unused"); }
+  async insertProgressMilestone(): Promise<void> { throw new Error("unused"); }
+  async listProgressMilestones(): Promise<never[]> { throw new Error("unused"); }
+  async insertProgressReportExport(): Promise<void> { throw new Error("unused"); }
+  async getProgressReportExport(): Promise<null> { throw new Error("unused"); }
+  async listProgressReportExports(): Promise<never[]> { throw new Error("unused"); }
+  async deleteProgressReportExport(): Promise<void> { throw new Error("unused"); }
 }
 
 class FakeRunner implements V1TransactionRunner {

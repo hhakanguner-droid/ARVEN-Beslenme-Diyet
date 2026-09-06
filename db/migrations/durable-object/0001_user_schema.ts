@@ -341,4 +341,54 @@ CREATE TABLE IF NOT EXISTS week_prep_status (
   updated_at TEXT NOT NULL,
   PRIMARY KEY (user_subject, week_start_local_date)
 ) STRICT, WITHOUT ROWID;
+
+-- Phase 8: progress and reports (see db/migrations/0009_phase8_progress.sql for the full
+-- rationale). No cross-database FK omission needed here (unlike pantry/shopping-list above) —
+-- none of these tables reference the shared D1 food catalog.
+CREATE TABLE IF NOT EXISTS body_measurements (
+  id TEXT PRIMARY KEY NOT NULL CHECK (length(trim(id)) > 0),
+  user_subject TEXT NOT NULL REFERENCES users(subject) ON DELETE CASCADE,
+  local_date TEXT NOT NULL CHECK (length(local_date) = 10),
+  weight_kg REAL CHECK (weight_kg IS NULL OR (weight_kg >= 20 AND weight_kg <= 400)),
+  body_fat_percent REAL CHECK (body_fat_percent IS NULL OR (body_fat_percent >= 1 AND body_fat_percent <= 75)),
+  waist_cm REAL CHECK (waist_cm IS NULL OR (waist_cm >= 20 AND waist_cm <= 300)),
+  hip_cm REAL CHECK (hip_cm IS NULL OR (hip_cm >= 20 AND hip_cm <= 300)),
+  chest_cm REAL CHECK (chest_cm IS NULL OR (chest_cm >= 20 AND chest_cm <= 300)),
+  note TEXT,
+  created_at TEXT NOT NULL,
+  CHECK (weight_kg IS NOT NULL OR body_fat_percent IS NOT NULL OR waist_cm IS NOT NULL OR hip_cm IS NOT NULL OR chest_cm IS NOT NULL)
+) STRICT, WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS body_measurements_user_idx ON body_measurements(user_subject, local_date);
+
+CREATE TABLE IF NOT EXISTS body_photo_sets (
+  id TEXT PRIMARY KEY NOT NULL CHECK (length(trim(id)) > 0),
+  user_subject TEXT NOT NULL REFERENCES users(subject) ON DELETE CASCADE,
+  local_date TEXT NOT NULL CHECK (length(local_date) = 10),
+  angle TEXT CHECK (angle IS NULL OR angle IN ('front', 'side', 'back')),
+  mime_type TEXT NOT NULL CHECK (mime_type IN ('image/jpeg', 'image/png', 'image/webp')),
+  byte_size INTEGER NOT NULL CHECK (byte_size > 0 AND byte_size <= 8000000),
+  storage_key TEXT NOT NULL CHECK (length(trim(storage_key)) > 0),
+  created_at TEXT NOT NULL
+) STRICT, WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS body_photo_sets_user_idx ON body_photo_sets(user_subject, local_date);
+
+CREATE TABLE IF NOT EXISTS progress_milestones (
+  id TEXT PRIMARY KEY NOT NULL CHECK (length(trim(id)) > 0),
+  user_subject TEXT NOT NULL REFERENCES users(subject) ON DELETE CASCADE,
+  milestone_key TEXT NOT NULL CHECK (length(trim(milestone_key)) > 0),
+  achieved_at TEXT NOT NULL
+) STRICT, WITHOUT ROWID;
+CREATE UNIQUE INDEX IF NOT EXISTS progress_milestones_user_key_idx ON progress_milestones(user_subject, milestone_key);
+
+CREATE TABLE IF NOT EXISTS progress_report_exports (
+  id TEXT PRIMARY KEY NOT NULL CHECK (length(trim(id)) > 0),
+  user_subject TEXT NOT NULL REFERENCES users(subject) ON DELETE CASCADE,
+  report_type TEXT NOT NULL CHECK (report_type IN ('daily', 'weekly')),
+  period_local_date TEXT NOT NULL CHECK (length(period_local_date) = 10),
+  mime_type TEXT NOT NULL CHECK (mime_type = 'application/pdf'),
+  byte_size INTEGER NOT NULL CHECK (byte_size > 0 AND byte_size <= 8000000),
+  storage_key TEXT NOT NULL CHECK (length(trim(storage_key)) > 0),
+  created_at TEXT NOT NULL
+) STRICT, WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS progress_report_exports_user_idx ON progress_report_exports(user_subject, created_at);
 `;
