@@ -806,6 +806,7 @@ export class DurableObjectV1Transaction implements V1Transaction {
     const row = this.sql.exec("SELECT id FROM shopping_list_items WHERE id=? AND user_subject=?", id, userSubject).one();
     if (!row) throw new Error("Shopping list item not found");
   }
+
   async getWeekPrepPreferences(userSubject: string): Promise<StoredWeekPrepPreferences | null> {
     const row = this.sql.exec("SELECT * FROM week_prep_preferences WHERE user_subject=?", userSubject).one();
     return row ? mapWeekPrepPreferences(row) : null;
