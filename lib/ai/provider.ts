@@ -41,7 +41,7 @@ const MEAL_PHOTO_SCHEMA_HINT =
   '"confidence":"high|medium|low"}],"overallConfidence":"high|medium|low","uncertainty":["..."]}. ' +
   "Fotoğrafta gördüğün her ayrı besini ayrı bir öğe olarak listele. Hiçbir metin alanında sayı, yüzde veya " +
   "besin/kalori/kilo miktarı belirtme — yalnızca doğal porsiyon ifadeleri (ör. '1 avuç', '1 dilim') kullan; " +
-  "kesin gram/kalori değerleri uygulamanın kendi verilen kataloğunfan gelecek. Emin olamadığın kısımları " +
+  "kesin gram/kalori değerleri uygulamanın kendi verilen katalogundan gelecek. Emin olamadığın kısımları " +
   "uncertainty alanında belirt.";
 
 const MENU_PHOTO_SCHEMA_HINT =
