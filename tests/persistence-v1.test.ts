@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { AllergenSafetyExclusion, DietarySafetyExclusion } from "@/lib/health-safety/policy";
-import { V1MutationService,deriveNutritionLocalDate,type AuthenticatedUserContext,type ScientificReferenceSnapshot,type StoredAssessmentSnapshot,type StoredCustomFoodVersion,type StoredDecision,type StoredGoalVersion,type StoredLabDocument,type StoredLabResultEntry,type StoredMealPlanVersion,type StoredMemoryFact,type StoredNutritionEvent,type StoredOutcome,type StoredPhotoAsset,type StoredProfile,type StoredProposal,type StoredSafetyAcknowledgement,type StoredSupplementRecord,type StoredVerifiedFoodImport,type StoredWeeklyInsightSnapshot,type V1Transaction,type V1TransactionRunner,type VersionedFood } from "@/lib/persistence/v1-boundary";
+import { V1MutationService,deriveNutritionLocalDate,type AuthenticatedUserContext,type ScientificReferenceSnapshot,type StoredAssessmentSnapshot,type StoredCustomFoodVersion,type StoredDecision,type StoredGoalVersion,type StoredLabDocument,type StoredLabResultEntry,type StoredMealPlanVersion,type StoredMemoryFact,type StoredNutritionEvent,type StoredOutcome,type StoredPantryItem,type StoredPhotoAsset,type StoredProfile,type StoredProposal,type StoredRecipe,type StoredSafetyAcknowledgement,type StoredShoppingListItem,type StoredSupplementRecord,type StoredVerifiedFoodImport,type StoredWeekPrepPreferences,type StoredWeekPrepStatus,type StoredWeeklyInsightSnapshot,type StoredWeeklyPlanVersion,type V1Transaction,type V1TransactionRunner,type VersionedFood } from "@/lib/persistence/v1-boundary";
 class MemoryTx implements V1Transaction{
  context:AuthenticatedUserContext={timezone:"Europe/Istanbul",nutritionDayStartMinutes:0};proposals=new Map<string,StoredProposal>();decisions=new Map<string,StoredDecision>();outcomes=new Map<string,StoredOutcome>();events=new Map<string,StoredNutritionEvent>();foods=new Map<string,VersionedFood>();allergens:AllergenSafetyExclusion[]=[];exclusions:DietarySafetyExclusion[]=[];refs=new Map<string,ScientificReferenceSnapshot>();goals=new Map<string,StoredGoalVersion>();currentGoal:string|null=null;purgedSubjects:string[]=[];users=new Map<string,AuthenticatedUserContext>();profiles=new Map<string,StoredProfile>();assessments=new Map<string,StoredAssessmentSnapshot>();acknowledgements=new Map<string,StoredSafetyAcknowledgement>();mealPlans=new Map<string,StoredMealPlanVersion>();currentMealPlan:string|null=null;customFoods=new Map<string,StoredCustomFoodVersion>();memoryFacts=new Map<string,StoredMemoryFact>();weeklyInsights:StoredWeeklyInsightSnapshot[]=[];photoAssets=new Map<string,StoredPhotoAsset>();
  async insertPhotoAsset(asset:StoredPhotoAsset){this.photoAssets.set(asset.id,asset)}
@@ -54,6 +54,24 @@ class MemoryTx implements V1Transaction{
  async getAssessmentSnapshots(subject:string){return [...this.assessments.values()].filter(a=>a.userSubject===subject)}
  async insertSafetyAcknowledgement(ack:StoredSafetyAcknowledgement){this.acknowledgements.set(ack.id,ack)}
  async getSafetyAcknowledgements(subject:string){return [...this.acknowledgements.values()].filter(a=>a.userSubject===subject)}
+ recipes=new Map<string,StoredRecipe>();weeklyPlans=new Map<string,StoredWeeklyPlanVersion>();currentWeeklyPlans=new Map<string,string>();pantryItems=new Map<string,StoredPantryItem>();shoppingListItems=new Map<string,StoredShoppingListItem>();weekPrepPreferences=new Map<string,StoredWeekPrepPreferences>();weekPrepStatuses=new Map<string,StoredWeekPrepStatus>();
+ async insertRecipe(recipe:StoredRecipe){this.recipes.set(recipe.id,recipe)}
+ async listRecipes(s:string){return [...this.recipes.values()].filter(r=>r.userSubject===s).sort((a,b)=>b.createdAt.localeCompare(a.createdAt))}
+ async getRecipe(s:string,id:string){const v=this.recipes.get(id);return v?.userSubject===s?v:null}
+ async deleteRecipe(s:string,id:string){const v=this.recipes.get(id);if(v&&v.userSubject===s)this.recipes.delete(id)}
+ async insertWeeklyPlanVersionAndSetCurrent(plan:StoredWeeklyPlanVersion,_selectedAt:string){this.weeklyPlans.set(plan.id,plan);this.currentWeeklyPlans.set(`${plan.userSubject}:${plan.weekStartLocalDate}`,plan.id)}
+ async getCurrentWeeklyPlan(s:string,weekStartLocalDate:string){const id=this.currentWeeklyPlans.get(`${s}:${weekStartLocalDate}`);return id?this.weeklyPlans.get(id)??null:null}
+ async insertPantryItem(item:StoredPantryItem){this.pantryItems.set(item.id,item)}
+ async listPantryItems(s:string){return [...this.pantryItems.values()].filter(i=>i.userSubject===s).sort((a,b)=>b.createdAt.localeCompare(a.createdAt))}
+ async updatePantryItem(s:string,id:string,edit:{quantityGrams:number|null;quantityNote:string|null}){const existing=this.pantryItems.get(id);if(!existing||existing.userSubject!==s)throw new Error("Pantry item not found");const updated={...existing,...edit,updatedAt:new Date().toISOString()};this.pantryItems.set(id,updated);return updated}
+ async deletePantryItem(s:string,id:string){const v=this.pantryItems.get(id);if(v&&v.userSubject===s)this.pantryItems.delete(id)}
+ async replaceShoppingListItems(s:string,weekStartLocalDate:string,items:StoredShoppingListItem[]){for(const [id,v] of this.shoppingListItems)if(v.userSubject===s&&v.weekStartLocalDate===weekStartLocalDate)this.shoppingListItems.delete(id);for(const item of items)this.shoppingListItems.set(item.id,item)}
+ async listShoppingListItems(s:string,weekStartLocalDate:string){return [...this.shoppingListItems.values()].filter(i=>i.userSubject===s&&i.weekStartLocalDate===weekStartLocalDate).sort((a,b)=>b.createdAt.localeCompare(a.createdAt))}
+ async setShoppingListItemChecked(s:string,id:string,isChecked:boolean){const existing=this.shoppingListItems.get(id);if(!existing||existing.userSubject!==s)throw new Error("Shopping list item not found");this.shoppingListItems.set(id,{...existing,isChecked})}
+ async getWeekPrepPreferences(s:string){return this.weekPrepPreferences.get(s)??null}
+ async upsertWeekPrepPreferences(preferences:StoredWeekPrepPreferences){this.weekPrepPreferences.set(preferences.userSubject,preferences)}
+ async getWeekPrepStatus(s:string,weekStartLocalDate:string){return this.weekPrepStatuses.get(`${s}:${weekStartLocalDate}`)??null}
+ async upsertWeekPrepStatus(status:StoredWeekPrepStatus){this.weekPrepStatuses.set(`${status.userSubject}:${status.weekStartLocalDate}`,status)}
 }
 class MemoryRunner implements V1TransactionRunner{constructor(readonly tx=new MemoryTx()){} async transaction<T>(work:(tx:V1Transaction)=>Promise<T>){return work(this.tx)}}
 class OutcomeRaceTx extends MemoryTx{
@@ -214,4 +232,102 @@ test("recordSupplement adds an active record the owner can list, deactivate and 
 test("recordSupplement rejects a blank name",async()=>{
  const s=new V1MutationService("u1",new MemoryRunner());
  await assert.rejects(()=>s.recordSupplement({foodVersionId:null,name:"   ",note:null}));
+});
+
+test("createRecipe stores a stable-ingredient recipe the owner can list, fetch and delete, scoped to the authenticated subject",async()=>{
+ const r=new MemoryRunner();r.tx.foods.set("food-v1",food());
+ const s=new V1MutationService("u1",r,ids("recipe-1"),{now:()=>new Date("2026-09-02T20:00:00Z")});
+ const recipe=await s.createRecipe({schemaVersion:"RecipeCreateV1",name:"Yoğurtlu tarif",servings:2,ingredients:[{foodVersionId:"food-v1",calculationVersion:"nutrition-v1",selection:{kind:"household",portionVersionId:"portion-v1",quantity:2}}]});
+ assert.equal(recipe.name,"Yoğurtlu tarif");
+ assert.equal((await s.listRecipes()).length,1);
+ assert.equal((await s.getRecipe(recipe.id))?.id,recipe.id);
+ const other=new V1MutationService("u2",r);
+ assert.equal(await other.getRecipe(recipe.id),null);
+ await other.deleteRecipe(recipe.id);
+ assert.equal((await s.listRecipes()).length,1,"another user's delete must not remove this user's recipe");
+ await s.deleteRecipe(recipe.id);
+ assert.equal((await s.listRecipes()).length,0);
+});
+
+test("createRecipe refuses an ingredient that does not resolve to a verified food",async()=>{
+ const s=new V1MutationService("u1",new MemoryRunner());
+ await assert.rejects(()=>s.createRecipe({schemaVersion:"RecipeCreateV1",name:"Tarif",servings:1,ingredients:[{foodVersionId:"missing",calculationVersion:"nutrition-v1",selection:{kind:"custom-grams",grams:100}}]}));
+});
+
+test("createWeeklyPlanVersion resolves food and recipe items, safety-checks them, and getCurrentWeeklyPlan returns the latest version for that exact week",async()=>{
+ const r=new MemoryRunner();r.tx.foods.set("food-v1",food());
+ const s=new V1MutationService("u1",r,ids("recipe-1","plan-1"),{now:()=>new Date("2026-09-02T20:00:00Z")});
+ const recipe=await s.createRecipe({schemaVersion:"RecipeCreateV1",name:"Yoğurtlu tarif",servings:2,ingredients:[{foodVersionId:"food-v1",calculationVersion:"nutrition-v1",selection:{kind:"household",portionVersionId:"portion-v1",quantity:2}}]});
+ assert.equal(await s.getCurrentWeeklyPlan("2026-08-31"),null);
+ const days=[0,1,2,3,4,5,6].map((offset)=>({localDate:["2026-08-31","2026-09-01","2026-09-02","2026-09-03","2026-09-04","2026-09-05","2026-09-06"][offset],slots:offset===0?[{mealType:"breakfast" as const,items:[{kind:"food" as const,foodVersionId:"food-v1",calculationVersion:"nutrition-v1" as const,selection:{kind:"household" as const,portionVersionId:"portion-v1",quantity:1}},{kind:"recipe" as const,recipeId:recipe.id,servings:4}]}]:[]}));
+ const plan=await s.createWeeklyPlanVersion({schemaVersion:"WeeklyPlanVersionV1",weekStartLocalDate:"2026-08-31",days});
+ const storedDays=JSON.parse(plan.daysJson);
+ assert.equal(storedDays[0].slots[0].items[0].kind,"food");
+ assert.equal(storedDays[0].slots[0].items[1].kind,"recipe");
+ assert.equal(storedDays[0].slots[0].items[1].recipeId,recipe.id);
+ const current=await s.getCurrentWeeklyPlan("2026-08-31");
+ assert.equal(current?.id,plan.id);
+});
+
+test("createWeeklyPlanVersion refuses a days array whose local dates do not exactly match weekStartLocalDate + 0..6",async()=>{
+ const s=new V1MutationService("u1",new MemoryRunner());
+ const days=[0,1,2,3,4,5,6].map((offset)=>({localDate:offset===1?"2026-09-05":["2026-08-31","2026-09-01","2026-09-02","2026-09-03","2026-09-04","2026-09-05","2026-09-06"][offset],slots:[]}));
+ await assert.rejects(()=>s.createWeeklyPlanVersion({schemaVersion:"WeeklyPlanVersionV1",weekStartLocalDate:"2026-08-31",days}),/days\[1\]/);
+});
+
+test("createWeeklyPlanVersion refuses a slot that conflicts with an active allergen exclusion",async()=>{
+ const r=new MemoryRunner();const f=food();f.allergenIds=["milk"];r.tx.foods.set(f.id,f);r.tx.allergens=[{id:"milk",label:"Süt",resolutionStatus:"resolved"}];
+ const s=new V1MutationService("u1",r,ids("plan-1"));
+ const days=["2026-08-31","2026-09-01","2026-09-02","2026-09-03","2026-09-04","2026-09-05","2026-09-06"].map((localDate,offset)=>({localDate,slots:offset===0?[{mealType:"dinner" as const,items:[{kind:"food" as const,foodVersionId:"food-v1",calculationVersion:"nutrition-v1" as const,selection:{kind:"household" as const,portionVersionId:"portion-v1",quantity:1}}]}]:[]}));
+ await assert.rejects(()=>s.createWeeklyPlanVersion({schemaVersion:"WeeklyPlanVersionV1",weekStartLocalDate:"2026-08-31",days}),/Allergy conflict/);
+ assert.equal(r.tx.weeklyPlans.size,0);
+});
+
+test("pantry items can be added, listed, quantity-updated and deleted, scoped to the authenticated subject",async()=>{
+ const r=new MemoryRunner();r.tx.foods.set("food-v1",food());
+ const s=new V1MutationService("u1",r,ids("pantry-1"),{now:()=>new Date("2026-09-02T20:00:00Z")});
+ const item=await s.addPantryItem({foodVersionId:"food-v1",label:"Yoğurt",quantityGrams:500,quantityNote:null});
+ assert.equal((await s.listPantryItems()).length,1);
+ const updated=await s.updatePantryItem(item.id,{quantityGrams:250,quantityNote:"Buzdolabında"});
+ assert.equal(updated.quantityGrams,250);
+ const other=new V1MutationService("u2",r);
+ await assert.rejects(()=>other.updatePantryItem(item.id,{quantityGrams:0,quantityNote:null}));
+ await other.deletePantryItem(item.id);
+ assert.equal((await s.listPantryItems()).length,1,"another user's delete must not remove this user's pantry item");
+ await s.deletePantryItem(item.id);
+ assert.equal((await s.listPantryItems()).length,0);
+});
+
+test("generateShoppingList aggregates live recipe ingredients and direct items by stable foodVersionId, then subtracts matching pantry stock",async()=>{
+ const r=new MemoryRunner();r.tx.foods.set("food-v1",food());
+ const s=new V1MutationService("u1",r,ids("recipe-1","plan-1","pantry-1"),{now:()=>new Date("2026-09-02T20:00:00Z")});
+ const recipe=await s.createRecipe({schemaVersion:"RecipeCreateV1",name:"Yoğurtlu tarif",servings:2,ingredients:[{foodVersionId:"food-v1",calculationVersion:"nutrition-v1",selection:{kind:"household",portionVersionId:"portion-v1",quantity:2}}]});
+ const days=["2026-08-31","2026-09-01","2026-09-02","2026-09-03","2026-09-04","2026-09-05","2026-09-06"].map((localDate,offset)=>({localDate,slots:offset===0?[{mealType:"breakfast" as const,items:[{kind:"recipe" as const,recipeId:recipe.id,servings:4}]}]:[]}));
+ await s.createWeeklyPlanVersion({schemaVersion:"WeeklyPlanVersionV1",weekStartLocalDate:"2026-08-31",days});
+ await s.addPantryItem({foodVersionId:"food-v1",label:"Yoğurt",quantityGrams:100,quantityNote:null});
+ const list=await s.generateShoppingList("2026-08-31");
+ assert.equal(list.length,1);
+ assert.equal(list[0]?.foodVersionId,"food-v1");
+ assert.equal(list[0]?.neededGrams,500); // ingredient portion 2*150g=300g, scaled by servings ratio 4/2=2 -> 600g, minus 100g pantry stock
+ await s.setShoppingListItemChecked(list[0]!.id,true);
+ assert.equal((await s.listShoppingListItems("2026-08-31"))[0]?.isChecked,true);
+ const regenerated=await s.generateShoppingList("2026-08-31");
+ assert.equal(regenerated[0]?.isChecked,false,"regenerating fully replaces the list, including checked state");
+});
+
+test("generateShoppingList refuses a week with no current plan",async()=>{
+ const s=new V1MutationService("u1",new MemoryRunner());
+ await assert.rejects(()=>s.generateShoppingList("2026-08-31"),/No weekly plan exists yet/);
+});
+
+test("week-prep preferences and per-week completion status are simple upserts, not a notification scheduler",async()=>{
+ const s=new V1MutationService("u1",new MemoryRunner());
+ assert.equal(await s.getWeekPrepPreferences(),null);
+ const preferences=await s.upsertWeekPrepPreferences({enabled:true,prepDayOfWeek:0,prepLocalTime:"09:30"});
+ assert.equal(preferences.enabled,true);
+ assert.equal((await s.getWeekPrepPreferences())?.prepLocalTime,"09:30");
+ assert.equal((await s.getWeekPrepStatus("2026-08-31"))?.isCompleted,undefined);
+ const status=await s.setWeekPrepStatus("2026-08-31",true);
+ assert.equal(status.isCompleted,true);
+ assert.equal((await s.getWeekPrepStatus("2026-08-31"))?.isCompleted,true);
 });

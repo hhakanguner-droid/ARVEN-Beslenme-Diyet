@@ -267,4 +267,78 @@ CREATE TABLE IF NOT EXISTS supplement_records (
   created_at TEXT NOT NULL
 ) STRICT, WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS supplement_records_user_idx ON supplement_records(user_subject, is_active, created_at);
+
+-- Phase 7: weekly planning system (see db/migrations/0008_phase7_planning.sql for the full
+-- rationale). pantry_items.food_version_id and shopping_list_items.food_version_id intentionally
+-- have NO foreign key here, for the same cross-database reason documented above
+-- supplement_records: food_versions lives in the shared D1 catalog, a separate database instance
+-- from this per-user Durable Object in production.
+CREATE TABLE IF NOT EXISTS recipes (
+  id TEXT PRIMARY KEY NOT NULL CHECK (length(trim(id)) > 0),
+  user_subject TEXT NOT NULL REFERENCES users(subject) ON DELETE CASCADE,
+  name TEXT NOT NULL CHECK (length(trim(name)) > 0 AND length(name) <= 160),
+  servings INTEGER NOT NULL CHECK (servings BETWEEN 1 AND 50),
+  ingredients_json TEXT NOT NULL CHECK (json_valid(ingredients_json) = 1 AND json_type(ingredients_json) = 'array'),
+  created_at TEXT NOT NULL
+) STRICT, WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS recipes_user_idx ON recipes(user_subject, created_at);
+
+CREATE TABLE IF NOT EXISTS weekly_plan_versions (
+  id TEXT PRIMARY KEY NOT NULL CHECK (length(trim(id)) > 0),
+  user_subject TEXT NOT NULL REFERENCES users(subject) ON DELETE CASCADE,
+  week_start_local_date TEXT NOT NULL CHECK (length(week_start_local_date) = 10),
+  days_json TEXT NOT NULL CHECK (json_valid(days_json) = 1 AND json_type(days_json) = 'array'),
+  created_at TEXT NOT NULL,
+  UNIQUE (id, user_subject)
+) STRICT, WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS weekly_plan_versions_user_idx ON weekly_plan_versions(user_subject, week_start_local_date, created_at);
+
+CREATE TABLE IF NOT EXISTS user_current_weekly_plan (
+  user_subject TEXT NOT NULL REFERENCES users(subject) ON DELETE CASCADE,
+  week_start_local_date TEXT NOT NULL CHECK (length(week_start_local_date) = 10),
+  weekly_plan_version_id TEXT NOT NULL,
+  selected_at TEXT NOT NULL,
+  PRIMARY KEY (user_subject, week_start_local_date),
+  FOREIGN KEY (weekly_plan_version_id, user_subject) REFERENCES weekly_plan_versions(id, user_subject) ON DELETE RESTRICT
+) STRICT, WITHOUT ROWID;
+
+CREATE TABLE IF NOT EXISTS pantry_items (
+  id TEXT PRIMARY KEY NOT NULL CHECK (length(trim(id)) > 0),
+  user_subject TEXT NOT NULL REFERENCES users(subject) ON DELETE CASCADE,
+  food_version_id TEXT,
+  label TEXT NOT NULL CHECK (length(trim(label)) > 0 AND length(label) <= 160),
+  quantity_grams REAL CHECK (quantity_grams IS NULL OR (quantity_grams >= 0 AND quantity_grams <= 100000)),
+  quantity_note TEXT CHECK (quantity_note IS NULL OR length(trim(quantity_note)) <= 80),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+) STRICT, WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS pantry_items_user_idx ON pantry_items(user_subject, created_at);
+
+CREATE TABLE IF NOT EXISTS shopping_list_items (
+  id TEXT PRIMARY KEY NOT NULL CHECK (length(trim(id)) > 0),
+  user_subject TEXT NOT NULL REFERENCES users(subject) ON DELETE CASCADE,
+  week_start_local_date TEXT NOT NULL CHECK (length(week_start_local_date) = 10),
+  food_version_id TEXT,
+  label TEXT NOT NULL CHECK (length(trim(label)) > 0 AND length(label) <= 160),
+  needed_grams REAL CHECK (needed_grams IS NULL OR (needed_grams >= 0 AND needed_grams <= 200000)),
+  is_checked INTEGER NOT NULL DEFAULT 0 CHECK (is_checked IN (0, 1)),
+  created_at TEXT NOT NULL
+) STRICT, WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS shopping_list_items_user_idx ON shopping_list_items(user_subject, week_start_local_date, created_at);
+
+CREATE TABLE IF NOT EXISTS week_prep_preferences (
+  user_subject TEXT PRIMARY KEY NOT NULL REFERENCES users(subject) ON DELETE CASCADE,
+  enabled INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0, 1)),
+  prep_day_of_week INTEGER NOT NULL DEFAULT 0 CHECK (prep_day_of_week BETWEEN 0 AND 6),
+  prep_local_time TEXT NOT NULL DEFAULT '10:00' CHECK (prep_local_time GLOB '[01][0-9]:[0-5][0-9]' OR prep_local_time GLOB '2[0-3]:[0-5][0-9]'),
+  updated_at TEXT NOT NULL
+) STRICT, WITHOUT ROWID;
+
+CREATE TABLE IF NOT EXISTS week_prep_status (
+  user_subject TEXT NOT NULL REFERENCES users(subject) ON DELETE CASCADE,
+  week_start_local_date TEXT NOT NULL CHECK (length(week_start_local_date) = 10),
+  is_completed INTEGER NOT NULL DEFAULT 0 CHECK (is_completed IN (0, 1)),
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (user_subject, week_start_local_date)
+) STRICT, WITHOUT ROWID;
 `;
