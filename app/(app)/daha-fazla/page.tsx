@@ -12,6 +12,10 @@ const menu = [
   ["Menü analizi", "/analiz/menu"],
   ["Başarılarım", "/basarilarim"],
   ["Bildirimler", "/ayarlar/bildirimler"],
+  ["Tariflerim", "/tarifler"],
+  ["Kilerim", "/kiler"],
+  ["Alışveriş listem", "/alisveris"],
+  ["Hafta hazırlığı", "/ayarlar/hafta-hazirlik"],
 ] as const;
 
 export default function DahaFazlaPage() {
