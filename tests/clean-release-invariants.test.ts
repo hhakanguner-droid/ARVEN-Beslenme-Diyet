@@ -138,6 +138,23 @@ class SafetyRaceTx implements V1Transaction {
   async listSupplementRecords(){ return []; }
   async setSupplementRecordActive(){ throw new Error("unused"); }
   async deleteSupplementRecord(){ throw new Error("unused"); }
+  async insertRecipe(){ throw new Error("unused"); }
+  async listRecipes(){ return []; }
+  async getRecipe(){ return null; }
+  async deleteRecipe(){ throw new Error("unused"); }
+  async insertWeeklyPlanVersionAndSetCurrent(){ throw new Error("unused"); }
+  async getCurrentWeeklyPlan(){ return null; }
+  async insertPantryItem(){ throw new Error("unused"); }
+  async listPantryItems(){ return []; }
+  async updatePantryItem():Promise<never>{ throw new Error("unused"); }
+  async deletePantryItem(){ throw new Error("unused"); }
+  async replaceShoppingListItems(){ throw new Error("unused"); }
+  async listShoppingListItems(){ return []; }
+  async setShoppingListItemChecked(){ throw new Error("unused"); }
+  async getWeekPrepPreferences(){ return null; }
+  async upsertWeekPrepPreferences(){ throw new Error("unused"); }
+  async getWeekPrepStatus(){ return null; }
+  async upsertWeekPrepStatus(){ throw new Error("unused"); }
 }
 class SafetyRaceRunner implements V1TransactionRunner {
   constructor(readonly tx = new SafetyRaceTx()) {}
