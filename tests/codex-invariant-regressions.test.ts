@@ -6,6 +6,7 @@ import {
   type AuthenticatedUserContext,
   type ScientificReferenceSnapshot,
   type StoredAssessmentSnapshot,
+  type StoredCustomFoodVersion,
   type StoredDecision,
   type StoredGoalVersion,
   type StoredNutritionEvent,
@@ -65,6 +66,8 @@ class Tx implements V1Transaction {
   async getCurrentMealPlan(){ return null; }
   async deleteManualNutritionEvent():Promise<void>{}
   async insertCustomFoodVersion():Promise<void>{}
+  async listNutritionEvents():Promise<StoredNutritionEvent[]>{return [];}
+  async listCustomFoodVersions():Promise<StoredCustomFoodVersion[]>{return [];}
   async purgeAuthenticatedUser(_s:string):Promise<void>{}
   async insertMemoryFact():Promise<void>{}
   async listMemoryFacts(){ return []; }

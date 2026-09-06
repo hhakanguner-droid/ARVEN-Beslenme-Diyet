@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { assertNoMedicalOverreach, type AllergenSafetyExclusion, type DietarySafetyExclusion } from "../lib/health-safety/policy";
+import type { AllergenSafetyExclusion, DietarySafetyExclusion } from "../lib/health-safety/policy";
 import { remainingTargets } from "../lib/nutrition/calculations";
 import { resolvePortionSelection } from "../lib/nutrition/portions";
 import type { Food } from "../lib/nutrition/types";
@@ -9,6 +9,7 @@ import {
   type AuthenticatedUserContext,
   type ScientificReferenceSnapshot,
   type StoredAssessmentSnapshot,
+  type StoredCustomFoodVersion,
   type StoredDecision,
   type StoredGoalVersion,
   type StoredNutritionEvent,
@@ -117,6 +118,8 @@ class SafetyRaceTx implements V1Transaction {
   async getCurrentMealPlan(){ return null; }
   async deleteManualNutritionEvent(){ throw new Error("unused"); }
   async insertCustomFoodVersion(){ throw new Error("unused"); }
+  async listNutritionEvents(): Promise<StoredNutritionEvent[]> { throw new Error("unused"); }
+  async listCustomFoodVersions(): Promise<StoredCustomFoodVersion[]> { throw new Error("unused"); }
   async insertMemoryFact(){ throw new Error("unused"); }
   async listMemoryFacts(){ return []; }
   async deleteMemoryFact(){ throw new Error("unused"); }
