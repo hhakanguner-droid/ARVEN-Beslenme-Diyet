@@ -4,9 +4,9 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { DurableObjectV1Transaction, type D1LikeQuery, type SyncSqlStorage } from "../lib/persistence/durable-object-adapter";
-import type { StoredCustomFoodVersion, StoredGoalVersion, StoredLabDocument, StoredLabResultEntry, StoredMemoryFact, StoredNutritionEvent, StoredOutcome, StoredPhotoAsset, StoredProposal, StoredSupplementRecord, StoredVerifiedFoodImport, StoredWeeklyInsightSnapshot } from "../lib/persistence/v1-boundary";
+import type { StoredBodyMeasurement, StoredBodyPhotoSet, StoredCustomFoodVersion, StoredGoalVersion, StoredLabDocument, StoredLabResultEntry, StoredMemoryFact, StoredNutritionEvent, StoredOutcome, StoredPhotoAsset, StoredProgressMilestone, StoredProgressReportExport, StoredProposal, StoredSupplementRecord, StoredVerifiedFoodImport, StoredWeeklyInsightSnapshot } from "../lib/persistence/v1-boundary";
 
-const MIGRATIONS = ["0001_initial.sql", "0002_phase2_identity.sql", "0003_phase3_planning.sql", "0004_phase4_ai.sql", "0005_phase5_vision.sql", "0006_phase6_health.sql", "0007_phase6_health_hardening.sql", "0008_phase7_planning.sql"].map(
+const MIGRATIONS = ["0001_initial.sql", "0002_phase2_identity.sql", "0003_phase3_planning.sql", "0004_phase4_ai.sql", "0005_phase5_vision.sql", "0006_phase6_health.sql", "0007_phase6_health_hardening.sql", "0008_phase7_planning.sql", "0009_phase8_progress.sql"].map(
   (name) => fileURLToPath(new URL(`../db/migrations/${name}`, import.meta.url)),
 );
 
@@ -213,10 +213,14 @@ test("purgeAuthenticatedUser removes every row for that subject across all owned
   await tx1.replaceShoppingListItems("u1", "2026-08-31", [{ id: "sl1", userSubject: "u1", weekStartLocalDate: "2026-08-31", foodVersionId: null, label: "Un", neededGrams: 500, isChecked: false, createdAt: "2026-09-04T00:00:00.000Z" }]);
   await tx1.upsertWeekPrepPreferences({ userSubject: "u1", enabled: true, prepDayOfWeek: 0, prepLocalTime: "09:00", updatedAt: "2026-09-04T00:00:00.000Z" });
   await tx1.upsertWeekPrepStatus({ userSubject: "u1", weekStartLocalDate: "2026-08-31", isCompleted: true, updatedAt: "2026-09-04T00:00:00.000Z" });
+  await tx1.insertBodyMeasurement({ id: "bm1", userSubject: "u1", localDate: "2026-08-31", weightKg: 80, bodyFatPercent: null, waistCm: null, hipCm: null, chestCm: null, note: null, createdAt: "2026-09-04T00:00:00.000Z" });
+  await tx1.insertBodyPhotoSet({ id: "bp1", userSubject: "u1", localDate: "2026-08-31", angle: "front", mimeType: "image/jpeg", byteSize: 12345, storageKey: "u1/bp1", createdAt: "2026-09-04T00:00:00.000Z" });
+  await tx1.insertProgressMilestone({ id: "pm1", userSubject: "u1", milestoneKey: "first-measurement-logged", achievedAt: "2026-09-04T00:00:00.000Z" });
+  await tx1.insertProgressReportExport({ id: "pr1", userSubject: "u1", reportType: "daily", periodLocalDate: "2026-08-31", mimeType: "application/pdf", byteSize: 2048, storageKey: "u1/pr1.pdf", createdAt: "2026-09-04T00:00:00.000Z" });
 
   await assert.doesNotReject(() => tx1.purgeAuthenticatedUser("u1"));
 
-  for (const table of ["users", "profiles", "ai_action_proposals", "ai_action_decisions", "ai_action_outcomes", "nutrition_events", "goal_versions", "user_current_goal", "assessment_snapshots", "safety_acknowledgements", "meal_plan_versions", "user_current_meal_plan", "photo_assets", "lab_documents", "lab_result_entries", "supplement_records", "recipes", "weekly_plan_versions", "user_current_weekly_plan", "pantry_items", "shopping_list_items", "week_prep_preferences", "week_prep_status"]) {
+  for (const table of ["users", "profiles", "ai_action_proposals", "ai_action_decisions", "ai_action_outcomes", "nutrition_events", "goal_versions", "user_current_goal", "assessment_snapshots", "safety_acknowledgements", "meal_plan_versions", "user_current_meal_plan", "photo_assets", "lab_documents", "lab_result_entries", "supplement_records", "recipes", "weekly_plan_versions", "user_current_weekly_plan", "pantry_items", "shopping_list_items", "week_prep_preferences", "week_prep_status", "body_measurements", "body_photo_sets", "progress_milestones", "progress_report_exports"]) {
     const count = (db.prepare(`SELECT count(*) as n FROM ${table} WHERE ${table === "users" ? "subject" : "user_subject"}='u1'`).get() as { n: number }).n;
     assert.equal(count, 0, `${table} should have no rows left for u1`);
   }
@@ -493,4 +497,80 @@ test("insertSupplementRecord/listSupplementRecords/setSupplementRecordActive/del
   assert.equal((await tx1.listSupplementRecords("u1")).length, 1, "u2 must not be able to delete u1's supplement");
   await tx1.deleteSupplementRecord("u1", "s1");
   assert.equal((await tx1.listSupplementRecords("u1")).length, 0);
+});
+
+test("insertBodyMeasurement/listBodyMeasurements/deleteBodyMeasurement scope strictly to the owning subject", async () => {
+  const db = freshDatabase();
+  insertUser(db, "u1");
+  insertUser(db, "u2");
+  const tx1 = new DurableObjectV1Transaction(wrapDatabase(db), emptyCatalog);
+  const tx2 = new DurableObjectV1Transaction(wrapDatabase(db), emptyCatalog);
+
+  const m1: StoredBodyMeasurement = { id: "bm1", userSubject: "u1", localDate: "2026-08-25", weightKg: 80, bodyFatPercent: null, waistCm: null, hipCm: null, chestCm: null, note: null, createdAt: "2026-09-04T00:00:00.000Z" };
+  const m2: StoredBodyMeasurement = { id: "bm2", userSubject: "u1", localDate: "2026-08-31", weightKg: 78.5, bodyFatPercent: 22.5, waistCm: 85, hipCm: null, chestCm: null, note: "sabah", createdAt: "2026-09-04T00:01:00.000Z" };
+  await tx1.insertBodyMeasurement(m1);
+  await tx1.insertBodyMeasurement(m2);
+
+  assert.equal((await tx2.listBodyMeasurements("u2")).length, 0);
+  const listed = await tx1.listBodyMeasurements("u1");
+  assert.deepEqual(listed.map((m) => m.id).sort(), ["bm1", "bm2"]);
+  assert.equal(listed.find((m) => m.id === "bm2")?.bodyFatPercent, 22.5);
+
+  await tx2.deleteBodyMeasurement("u2", "bm1");
+  assert.equal((await tx1.listBodyMeasurements("u1")).length, 2, "u2 must not be able to delete u1's measurement");
+  await tx1.deleteBodyMeasurement("u1", "bm1");
+  assert.deepEqual((await tx1.listBodyMeasurements("u1")).map((m) => m.id), ["bm2"]);
+});
+
+test("insertBodyPhotoSet/getBodyPhotoSet/listBodyPhotoSets/deleteBodyPhotoSet scope strictly to the owning subject", async () => {
+  const db = freshDatabase();
+  insertUser(db, "u1");
+  insertUser(db, "u2");
+  const tx1 = new DurableObjectV1Transaction(wrapDatabase(db), emptyCatalog);
+  const tx2 = new DurableObjectV1Transaction(wrapDatabase(db), emptyCatalog);
+
+  const photo: StoredBodyPhotoSet = { id: "bp1", userSubject: "u1", localDate: "2026-08-31", angle: "front", mimeType: "image/jpeg", byteSize: 12345, storageKey: "u1/bp1", createdAt: "2026-09-04T00:00:00.000Z" };
+  await tx1.insertBodyPhotoSet(photo);
+
+  assert.equal(await tx2.getBodyPhotoSet("u2", "bp1"), null, "u2 must not be able to read u1's body photo");
+  assert.equal((await tx1.getBodyPhotoSet("u1", "bp1"))?.angle, "front");
+
+  await tx2.deleteBodyPhotoSet("u2", "bp1");
+  assert.equal((await tx1.listBodyPhotoSets("u1")).length, 1, "u2 must not be able to delete u1's body photo");
+  await tx1.deleteBodyPhotoSet("u1", "bp1");
+  assert.equal((await tx1.listBodyPhotoSets("u1")).length, 0);
+});
+
+test("hasProgressMilestone/insertProgressMilestone/listProgressMilestones scope strictly to the owning subject, and the schema itself refuses earning the same milestone twice", async () => {
+  const db = freshDatabase();
+  insertUser(db, "u1");
+  insertUser(db, "u2");
+  const tx1 = new DurableObjectV1Transaction(wrapDatabase(db), emptyCatalog);
+  const tx2 = new DurableObjectV1Transaction(wrapDatabase(db), emptyCatalog);
+
+  assert.equal(await tx1.hasProgressMilestone("u1", "first-measurement-logged"), false);
+  await tx1.insertProgressMilestone({ id: "pm1", userSubject: "u1", milestoneKey: "first-measurement-logged", achievedAt: "2026-09-04T00:00:00.000Z" });
+  assert.equal(await tx1.hasProgressMilestone("u1", "first-measurement-logged"), true);
+  assert.equal(await tx2.hasProgressMilestone("u2", "first-measurement-logged"), false, "milestones do not leak across subjects");
+  await assert.rejects(() => tx1.insertProgressMilestone({ id: "pm2", userSubject: "u1", milestoneKey: "first-measurement-logged", achievedAt: "2026-09-04T00:01:00.000Z" }), "the unique index refuses a duplicate (userSubject, milestoneKey) even if the application forgot to check hasProgressMilestone first");
+  assert.equal((await tx1.listProgressMilestones("u1")).length, 1);
+});
+
+test("insertProgressReportExport/getProgressReportExport/listProgressReportExports/deleteProgressReportExport scope strictly to the owning subject", async () => {
+  const db = freshDatabase();
+  insertUser(db, "u1");
+  insertUser(db, "u2");
+  const tx1 = new DurableObjectV1Transaction(wrapDatabase(db), emptyCatalog);
+  const tx2 = new DurableObjectV1Transaction(wrapDatabase(db), emptyCatalog);
+
+  const report: StoredProgressReportExport = { id: "pr1", userSubject: "u1", reportType: "weekly", periodLocalDate: "2026-08-31", mimeType: "application/pdf", byteSize: 2048, storageKey: "u1/pr1.pdf", createdAt: "2026-09-04T00:00:00.000Z" };
+  await tx1.insertProgressReportExport(report);
+
+  assert.equal(await tx2.getProgressReportExport("u2", "pr1"), null);
+  assert.equal((await tx1.getProgressReportExport("u1", "pr1"))?.reportType, "weekly");
+
+  await tx2.deleteProgressReportExport("u2", "pr1");
+  assert.equal((await tx1.listProgressReportExports("u1")).length, 1, "u2 must not be able to delete u1's report export");
+  await tx1.deleteProgressReportExport("u1", "pr1");
+  assert.equal((await tx1.listProgressReportExports("u1")).length, 0);
 });

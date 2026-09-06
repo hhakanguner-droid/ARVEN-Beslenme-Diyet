@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { AllergenSafetyExclusion, DietarySafetyExclusion } from "@/lib/health-safety/policy";
-import { V1MutationService,deriveNutritionLocalDate,type AuthenticatedUserContext,type ScientificReferenceSnapshot,type StoredAssessmentSnapshot,type StoredCustomFoodVersion,type StoredDecision,type StoredGoalVersion,type StoredLabDocument,type StoredLabResultEntry,type StoredMealPlanVersion,type StoredMemoryFact,type StoredNutritionEvent,type StoredOutcome,type StoredPantryItem,type StoredPhotoAsset,type StoredProfile,type StoredProposal,type StoredRecipe,type StoredSafetyAcknowledgement,type StoredShoppingListItem,type StoredSupplementRecord,type StoredVerifiedFoodImport,type StoredWeekPrepPreferences,type StoredWeekPrepStatus,type StoredWeeklyInsightSnapshot,type StoredWeeklyPlanVersion,type V1Transaction,type V1TransactionRunner,type VersionedFood } from "@/lib/persistence/v1-boundary";
+import { V1MutationService,deriveNutritionLocalDate,type AuthenticatedUserContext,type ScientificReferenceSnapshot,type StoredAssessmentSnapshot,type StoredBodyMeasurement,type StoredBodyPhotoSet,type StoredCustomFoodVersion,type StoredDecision,type StoredGoalVersion,type StoredLabDocument,type StoredLabResultEntry,type StoredMealPlanVersion,type StoredMemoryFact,type StoredNutritionEvent,type StoredOutcome,type StoredPantryItem,type StoredPhotoAsset,type StoredProfile,type StoredProgressMilestone,type StoredProgressReportExport,type StoredProposal,type StoredRecipe,type StoredSafetyAcknowledgement,type StoredShoppingListItem,type StoredSupplementRecord,type StoredVerifiedFoodImport,type StoredWeekPrepPreferences,type StoredWeekPrepStatus,type StoredWeeklyInsightSnapshot,type StoredWeeklyPlanVersion,type V1Transaction,type V1TransactionRunner,type VersionedFood } from "@/lib/persistence/v1-boundary";
 class MemoryTx implements V1Transaction{
  context:AuthenticatedUserContext={timezone:"Europe/Istanbul",nutritionDayStartMinutes:0};proposals=new Map<string,StoredProposal>();decisions=new Map<string,StoredDecision>();outcomes=new Map<string,StoredOutcome>();events=new Map<string,StoredNutritionEvent>();foods=new Map<string,VersionedFood>();allergens:AllergenSafetyExclusion[]=[];exclusions:DietarySafetyExclusion[]=[];refs=new Map<string,ScientificReferenceSnapshot>();goals=new Map<string,StoredGoalVersion>();currentGoal:string|null=null;purgedSubjects:string[]=[];users=new Map<string,AuthenticatedUserContext>();profiles=new Map<string,StoredProfile>();assessments=new Map<string,StoredAssessmentSnapshot>();acknowledgements=new Map<string,StoredSafetyAcknowledgement>();mealPlans=new Map<string,StoredMealPlanVersion>();currentMealPlan:string|null=null;customFoods=new Map<string,StoredCustomFoodVersion>();memoryFacts=new Map<string,StoredMemoryFact>();weeklyInsights:StoredWeeklyInsightSnapshot[]=[];photoAssets=new Map<string,StoredPhotoAsset>();
  async insertPhotoAsset(asset:StoredPhotoAsset){this.photoAssets.set(asset.id,asset)}
@@ -72,6 +72,21 @@ class MemoryTx implements V1Transaction{
  async upsertWeekPrepPreferences(preferences:StoredWeekPrepPreferences){this.weekPrepPreferences.set(preferences.userSubject,preferences)}
  async getWeekPrepStatus(s:string,weekStartLocalDate:string){return this.weekPrepStatuses.get(`${s}:${weekStartLocalDate}`)??null}
  async upsertWeekPrepStatus(status:StoredWeekPrepStatus){this.weekPrepStatuses.set(`${status.userSubject}:${status.weekStartLocalDate}`,status)}
+ bodyMeasurements=new Map<string,StoredBodyMeasurement>();bodyPhotoSets=new Map<string,StoredBodyPhotoSet>();progressMilestones=new Map<string,StoredProgressMilestone>();progressReportExports=new Map<string,StoredProgressReportExport>();
+ async insertBodyMeasurement(measurement:StoredBodyMeasurement){this.bodyMeasurements.set(measurement.id,measurement)}
+ async listBodyMeasurements(s:string){return [...this.bodyMeasurements.values()].filter(m=>m.userSubject===s)}
+ async deleteBodyMeasurement(s:string,id:string){const v=this.bodyMeasurements.get(id);if(v&&v.userSubject===s)this.bodyMeasurements.delete(id)}
+ async insertBodyPhotoSet(photo:StoredBodyPhotoSet){this.bodyPhotoSets.set(photo.id,photo)}
+ async getBodyPhotoSet(s:string,id:string){const v=this.bodyPhotoSets.get(id);return v?.userSubject===s?v:null}
+ async listBodyPhotoSets(s:string){return [...this.bodyPhotoSets.values()].filter(p=>p.userSubject===s).sort((a,b)=>b.createdAt.localeCompare(a.createdAt))}
+ async deleteBodyPhotoSet(s:string,id:string){const v=this.bodyPhotoSets.get(id);if(v&&v.userSubject===s)this.bodyPhotoSets.delete(id)}
+ async hasProgressMilestone(s:string,milestoneKey:string){return [...this.progressMilestones.values()].some(m=>m.userSubject===s&&m.milestoneKey===milestoneKey)}
+ async insertProgressMilestone(milestone:StoredProgressMilestone){this.progressMilestones.set(milestone.id,milestone)}
+ async listProgressMilestones(s:string){return [...this.progressMilestones.values()].filter(m=>m.userSubject===s).sort((a,b)=>b.achievedAt.localeCompare(a.achievedAt))}
+ async insertProgressReportExport(report:StoredProgressReportExport){this.progressReportExports.set(report.id,report)}
+ async getProgressReportExport(s:string,id:string){const v=this.progressReportExports.get(id);return v?.userSubject===s?v:null}
+ async listProgressReportExports(s:string){return [...this.progressReportExports.values()].filter(r=>r.userSubject===s).sort((a,b)=>b.createdAt.localeCompare(a.createdAt))}
+ async deleteProgressReportExport(s:string,id:string){const v=this.progressReportExports.get(id);if(v&&v.userSubject===s)this.progressReportExports.delete(id)}
 }
 class MemoryRunner implements V1TransactionRunner{constructor(readonly tx=new MemoryTx()){} async transaction<T>(work:(tx:V1Transaction)=>Promise<T>){return work(this.tx)}}
 class OutcomeRaceTx extends MemoryTx{
@@ -330,4 +345,46 @@ test("week-prep preferences and per-week completion status are simple upserts, n
  const status=await s.setWeekPrepStatus("2026-08-31",true);
  assert.equal(status.isCompleted,true);
  assert.equal((await s.getWeekPrepStatus("2026-08-31"))?.isCompleted,true);
+});
+
+test("recordBodyMeasurement refuses an all-null submission",async()=>{
+ const s=new V1MutationService("u1",new MemoryRunner());
+ await assert.rejects(()=>s.recordBodyMeasurement({schemaVersion:"BodyMeasurementCreateV1",localDate:"2026-08-31",weightKg:null,bodyFatPercent:null,waistCm:null,hipCm:null,chestCm:null,note:null}));
+});
+
+test("recordBodyMeasurement earns milestones deterministically from measurement history and never earns the same milestone twice",async()=>{
+ const s=new V1MutationService("u1",new MemoryRunner());
+ const first=await s.recordBodyMeasurement({schemaVersion:"BodyMeasurementCreateV1",localDate:"2026-08-25",weightKg:80,bodyFatPercent:null,waistCm:null,hipCm:null,chestCm:null,note:null});
+ assert.deepEqual(first.newMilestones.map(m=>m.milestoneKey),["first-measurement-logged"]);
+ const second=await s.recordBodyMeasurement({schemaVersion:"BodyMeasurementCreateV1",localDate:"2026-08-31",weightKg:78.5,bodyFatPercent:null,waistCm:null,hipCm:null,chestCm:null,note:"sabah ölçümü"});
+ assert.deepEqual(second.newMilestones.map(m=>m.milestoneKey),["weight-change-1kg-observed"]);
+ const repeat=await s.recordBodyMeasurement({schemaVersion:"BodyMeasurementCreateV1",localDate:"2026-09-01",weightKg:78,bodyFatPercent:null,waistCm:null,hipCm:null,chestCm:null,note:null});
+ assert.deepEqual(repeat.newMilestones,[],"weight-change-1kg-observed was already earned, so it is not earned again");
+ assert.equal((await s.listBodyMeasurements()).length,3);
+ assert.equal((await s.listProgressMilestones()).length,2);
+});
+
+test("deleteBodyMeasurement removes the measurement but keeps any milestone it helped earn",async()=>{
+ const s=new V1MutationService("u1",new MemoryRunner());
+ const {measurement}=await s.recordBodyMeasurement({schemaVersion:"BodyMeasurementCreateV1",localDate:"2026-08-31",weightKg:80,bodyFatPercent:null,waistCm:null,hipCm:null,chestCm:null,note:null});
+ await s.deleteBodyMeasurement(measurement.id);
+ assert.equal((await s.listBodyMeasurements()).length,0);
+ assert.equal((await s.listProgressMilestones()).length,1,"an earned milestone is a record of a moment, not a live-recomputed property");
+});
+
+test("body-progress photo records are scoped to the authenticated subject",async()=>{
+ const s=new V1MutationService("u1",new MemoryRunner());
+ const photo=await s.recordBodyPhotoSet({localDate:"2026-08-31",angle:"front",mimeType:"image/jpeg",byteSize:12345,storageKey:"u1/body-progress-photo/1"});
+ assert.equal((await s.getBodyPhotoSet(photo.id))?.angle,"front");
+ await s.deleteBodyPhotoSet(photo.id);
+ assert.equal(await s.getBodyPhotoSet(photo.id),null);
+});
+
+test("progress report export metadata is recorded and can be listed/deleted, never touching bytes itself",async()=>{
+ const s=new V1MutationService("u1",new MemoryRunner());
+ const report=await s.recordProgressReportExport({reportType:"weekly",periodLocalDate:"2026-08-31",byteSize:2048,storageKey:"u1/progress-report/1.pdf"});
+ assert.equal(report.mimeType,"application/pdf");
+ assert.equal((await s.listProgressReportExports()).length,1);
+ await s.deleteProgressReportExport(report.id);
+ assert.equal(await s.getProgressReportExport(report.id),null);
 });
