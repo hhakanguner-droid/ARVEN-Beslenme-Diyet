@@ -4,6 +4,7 @@ import {
 } from "@/lib/ai/contracts";
 import type { WeeklyMetricsV1 } from "@/lib/nutrition/weekly-metrics";
 import { dedupeInFlight, recordAiUsage } from "@/lib/ai/telemetry";
+import { fingerprintCredential } from "@/lib/persistence/credential-crypto";
 
 const DEFAULT_BASE_URL = "https://api.openai.com/v1";
 const DEFAULT_MODEL = "gpt-4o-mini";
@@ -115,6 +116,21 @@ export type OpenAiClientConfig = {
   model: string;
   fetchImpl: AiFetch;
   baseUrl?: string;
+  /**
+   * BYOK hardening (fix/byok-security-hardening): the authenticated subject making this call, when
+   * known. Used ONLY to scope in-flight request deduplication (below) and usage telemetry to that
+   * user — never sent to the AI provider, never logged. Omitted by internal callers (e.g. tests)
+   * that don't have a subject; dedup then falls back to a fixed scope shared by all such callers,
+   * which is fine since none of them represent a real, distinct authenticated user.
+   */
+  subject?: string;
+  /**
+   * BYOK hardening: "byok" when `apiKey` is this subject's own saved key, "shared" when it's the
+   * server's single `env.OPENAI_API_KEY` fallback. Determines how the resulting usage record is
+   * attributed in `lib/ai/telemetry.ts` — a "byok" call is visible only to `subject` afterward, a
+   * "shared" call is pooled like every call was before BYOK existed. Defaults to "shared".
+   */
+  usageScope?: "byok" | "shared";
 };
 
 type ChatContentPart = { type: "text"; text: string } | { type: "image_url"; image_url: { url: string } };
@@ -126,16 +142,32 @@ type OpenAiUsage = { prompt_tokens?: number; completion_tokens?: number };
 /**
  * Faz 9 hardening: every one of this module's six call sites goes through here, so this single
  * choke point is where cost telemetry (`lib/ai/telemetry.ts`) and request deduplication both live —
- * neither needed touching each of the six functions below individually. Deduplication is keyed on
- * the exact request body (model + messages), so it only ever collapses genuinely identical
- * concurrent calls (e.g. a double-tap send before the first reply arrives), never two different
- * users' or two different turns' requests.
+ * neither needed touching each of the six functions below individually.
+ *
+ * BYOK hardening (fix/byok-security-hardening): deduplication was originally keyed on ONLY the
+ * request body (`${url}:${requestBody}`) — model + messages, nothing about who's asking or with
+ * which credential. Two different users whose requests happened to serialize identically (e.g. both
+ * brand-new accounts with an empty profile, sending the same first chat message at the same moment)
+ * would collapse onto the SAME in-flight promise: the second caller's request would never reach the
+ * network at all, and would instead receive the FIRST caller's reply — generated using the first
+ * caller's own BYOK credential. That's a cross-user response leak, and a way for one user's key to
+ * be billed for another user's call. The key is now scoped by the authenticated subject plus a
+ * non-reversible fingerprint of the actual credential in use (not the credential itself — never put
+ * raw key material in a map key that could end up in a stack trace or debugger), so:
+ *   - same user + same credential + identical request  -> still deduplicates (the original intent).
+ *   - different user                                   -> never shares an in-flight request.
+ *   - same user, but credential changed since           -> never reuses the old request either.
+ * The credential fingerprint and subject are used ONLY as an in-memory Map key for the lifetime of
+ * one request; neither is ever logged, persisted, or included in any error message below.
  */
 async function performJsonCompletion(config: OpenAiClientConfig, messages: ChatMessage[], endpoint: string): Promise<unknown> {
   const baseUrl = config.baseUrl ?? DEFAULT_BASE_URL;
   const url = `${baseUrl}/chat/completions`;
   const requestBody = JSON.stringify({ model: config.model, messages, response_format: { type: "json_object" }, temperature: 0.4 });
-  const dedupeKey = `${url}:${requestBody}`;
+  const dedupeScope = config.subject ?? "no-subject";
+  const credentialFingerprint = await fingerprintCredential(config.apiKey);
+  const dedupeKey = `${dedupeScope}:${credentialFingerprint}:${url}:${requestBody}`;
+  const usageScope = config.usageScope ?? "shared";
 
   return dedupeInFlight(dedupeKey, async () => {
     let response: AiFetchResponse;
@@ -162,7 +194,14 @@ async function performJsonCompletion(config: OpenAiClientConfig, messages: ChatM
     }
     const usage = (body as { usage?: OpenAiUsage } | null)?.usage;
     if (usage) {
-      recordAiUsage({ endpoint, model: config.model, promptTokens: usage.prompt_tokens ?? 0, completionTokens: usage.completion_tokens ?? 0 });
+      recordAiUsage({
+        endpoint,
+        model: config.model,
+        promptTokens: usage.prompt_tokens ?? 0,
+        completionTokens: usage.completion_tokens ?? 0,
+        scope: usageScope,
+        subject: usageScope === "byok" ? (config.subject ?? null) : null,
+      });
     }
     return body;
   });
@@ -308,13 +347,16 @@ export async function extractLabResult(config: OpenAiClientConfig, request: Arve
 }
 
 /** Production wrapper: uses the global `fetch` and an env-configured API key/model. Throws if unset. */
-export function createOpenAiProvider(env?: { apiKey?: string; model?: string }): ArvenAiProvider {
+export function createOpenAiProvider(env?: { apiKey?: string; model?: string; subject?: string; usageScope?: "byok" | "shared" }): ArvenAiProvider {
   const apiKey = env?.apiKey ?? process.env.OPENAI_API_KEY;
   if (!apiKey || !apiKey.trim()) {
     throw new Error("OPENAI_API_KEY must be configured to call the OpenAI provider");
   }
   const model = env?.model ?? process.env.ARVEN_AI_MODEL ?? DEFAULT_MODEL;
-  const config: OpenAiClientConfig = { apiKey, model, fetchImpl: (url, init) => fetch(url, init) };
+  const config: OpenAiClientConfig = {
+    apiKey, model, fetchImpl: (url, init) => fetch(url, init),
+    subject: env?.subject, usageScope: env?.usageScope,
+  };
   return {
     generateChatReply: (request) => generateChatReply(config, request),
     generateWeeklyInsight: (request) => generateWeeklyInsight(config, request),
@@ -331,8 +373,8 @@ export function createOpenAiProvider(env?: { apiKey?: string; model?: string }):
  * lib/nutrition/providers/open-food-facts.ts. Lets every ARVEN AI route degrade gracefully
  * (informational-only response) until the user supplies a real key via Cloudflare secrets.
  */
-export function getOptionalAiProvider(env?: { apiKey?: string; model?: string }): ArvenAiProvider | null {
+export function getOptionalAiProvider(env?: { apiKey?: string; model?: string; subject?: string; usageScope?: "byok" | "shared" }): ArvenAiProvider | null {
   const apiKey = env?.apiKey ?? process.env.OPENAI_API_KEY;
   if (!apiKey || !apiKey.trim()) return null;
-  return createOpenAiProvider({ apiKey, model: env?.model });
+  return createOpenAiProvider({ apiKey, model: env?.model, subject: env?.subject, usageScope: env?.usageScope });
 }

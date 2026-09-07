@@ -7,6 +7,7 @@ import { scaleNutritionForStorage, sumNutrition } from "@/lib/nutrition/calculat
 import { resolvePortionSelection } from "@/lib/nutrition/portions";
 import type { Food, NutritionFacts, PortionSelection } from "@/lib/nutrition/types";
 import { addLocalDays, assertCanonicalLocalDate, assertCanonicalUtcInstant, previousLocalDate } from "@/lib/time/canonical";
+import { decryptCredential, encryptCredential, isEncryptedCredential } from "@/lib/persistence/credential-crypto";
 
 export const NUTRITION_CALCULATION_VERSION = "nutrition-v1" as const;
 const Id = z.string().trim().min(1).max(200);
@@ -1164,32 +1165,57 @@ export class V1MutationService{
   async deleteProgressReportExport(id:string):Promise<void>{const parsed=Id.parse(id);await this.runner.transaction(async tx=>{await tx.deleteProgressReportExport(this.subject,parsed);});}
 
   /**
-   * Post-Faz-9 addition: saves (inserting or overwriting) the authenticated user's own AI provider
-   * API key, entered in Ayarlar → Yapay Zeka. Returns only the non-secret status — never the key
-   * itself — so a route handler cannot accidentally leak it into a JSON response even by returning
-   * this method's own result.
+   * Post-Faz-9 addition, hardened in fix/byok-security-hardening: saves (inserting or overwriting)
+   * the authenticated user's own AI provider API key, entered in Ayarlar → Yapay Zeka. The value is
+   * encrypted (`encryptCredential`, AES-256-GCM) before it ever reaches `V1Transaction` — the
+   * transaction layer only ever sees an opaque, already-encrypted string, never the raw key — so
+   * every table/log/backup below this call site is incapable of holding plaintext for a NEW save.
+   * Fails closed (propagates `CredentialEncryptionUnavailableError`) when
+   * `ARVEN_CREDENTIAL_ENCRYPTION_KEY` is not configured, rather than ever falling back to storing
+   * the key unencrypted. Returns only the non-secret status — never the key itself — so a route
+   * handler cannot accidentally leak it into a JSON response even by returning this method's result.
    */
   async setAiProviderApiKey(input:unknown):Promise<{hasKey:true;updatedAt:string;maskedHint:string}>{
     const x=AiProviderApiKeyV1.parse(input);
     const updatedAt=instant(this.clock.now());
-    await this.runner.transaction(async tx=>{await tx.upsertAiProviderSettings(this.subject,x.apiKey,updatedAt);});
+    const encrypted=await encryptCredential(x.apiKey);
+    await this.runner.transaction(async tx=>{await tx.upsertAiProviderSettings(this.subject,encrypted,updatedAt);});
     return{hasKey:true,updatedAt,maskedHint:x.apiKey.slice(-4)};
   }
-  /** Whether a key is currently saved for this subject, when it was last saved, and a last-4-characters hint — never the key itself. Safe to return directly from a route handler. */
+  /** Whether a key is currently saved for this subject, when it was last saved, and a last-4-characters hint — never the key itself. Safe to return directly from a route handler. Decrypts only in memory, only long enough to read the last 4 characters. */
   async getAiProviderKeyStatus():Promise<{hasKey:boolean;updatedAt:string|null;maskedHint:string|null}>{
     const row=await this.runner.transaction(async tx=>tx.getAiProviderSettings(this.subject));
     if(!row)return{hasKey:false,updatedAt:null,maskedHint:null};
-    return{hasKey:true,updatedAt:row.updatedAt,maskedHint:row.apiKey.slice(-4)};
+    const plaintext=await decryptCredential(row.apiKey);
+    return{hasKey:true,updatedAt:row.updatedAt,maskedHint:plaintext.slice(-4)};
   }
   /** User-initiated forget: removes the saved key so this subject's AI calls fall back to `env.OPENAI_API_KEY` (if any) — see `V1Transaction.deleteAiProviderSettings`. */
   async clearAiProviderApiKey():Promise<void>{await this.runner.transaction(async tx=>{await tx.deleteAiProviderSettings(this.subject);});}
   /**
-   * Internal-only: the raw stored key (or null), read immediately before an outgoing AI provider
+   * Internal-only: the raw decrypted key (or null), read immediately before an outgoing AI provider
    * call by the `/api/ai/*` and `/api/vision/*` routes. NEVER serialize this method's return value
    * into an HTTP response — every client-facing read must go through `getAiProviderKeyStatus` instead.
+   *
+   * Upgrade-safe legacy migration: PR #19 merged to `main` before this encryption hardening landed,
+   * so a production row may still hold a pre-hardening plaintext value (`isEncryptedCredential`
+   * false). Such a row is still read and returned correctly here — no silent credential loss — and,
+   * best-effort, is transparently re-encrypted in place the moment it's read, so a legacy row heals
+   * to the encrypted form on its own the first time this subject's AI feature is actually used. If no
+   * encryption secret happens to be configured yet, the re-encryption attempt is skipped (not fatal)
+   * and the legacy value keeps working as-is until one is.
    */
   async getAiProviderApiKeyForRuntime():Promise<string|null>{
     const row=await this.runner.transaction(async tx=>tx.getAiProviderSettings(this.subject));
-    return row?row.apiKey:null;
+    if(!row)return null;
+    const plaintext=await decryptCredential(row.apiKey);
+    if(!isEncryptedCredential(row.apiKey)){
+      try{
+        const reEncrypted=await encryptCredential(plaintext);
+        await this.runner.transaction(async tx=>{await tx.upsertAiProviderSettings(this.subject,reEncrypted,row.updatedAt);});
+      }catch{
+        // No encryption secret configured yet — leave the legacy value in place rather than losing it.
+      }
+    }
+    return plaintext;
   }
 }
