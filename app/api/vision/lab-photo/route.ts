@@ -22,7 +22,11 @@ export async function POST(request: Request) {
   try {
     const context = await resolveRouteContext(request);
     const storedApiKey = await context.service.getAiProviderApiKeyForRuntime();
-    const provider = getOptionalAiProvider(storedApiKey ? { apiKey: storedApiKey } : undefined);
+    const provider = getOptionalAiProvider(
+      storedApiKey
+        ? { apiKey: storedApiKey, subject: context.subject, usageScope: "byok" }
+        : { subject: context.subject, usageScope: "shared" },
+    );
     const localOnly = request.headers.get(LAB_AI_MODE_HEADER) === "local";
 
     if (provider && !localOnly) {

@@ -61,6 +61,32 @@ test("buildUserExport gathers every declared section, scoped only to the request
   assert.equal(payload.manifest.recordCounts["water-log"], 1);
 });
 
+// BYOK hardening (fix/byok-security-hardening), credential lifecycle check #4: a saved AI provider
+// API key — encrypted or, before this hardening pass, legacy plaintext — must never be included in a
+// user's export/backup, in either form. `db/migrations/durable-object/0004_ai_provider_settings.ts`'s
+// own doc comment already states this table is deliberately absent from `buildUserExport`; this test
+// makes that a regression-checked invariant rather than only a comment.
+test("buildUserExport never includes a saved AI provider API key, encrypted or plaintext", async () => {
+  const originalKey = process.env.ARVEN_CREDENTIAL_ENCRYPTION_KEY;
+  process.env.ARVEN_CREDENTIAL_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString("base64");
+  try {
+    const { runner, service } = await seedUser("user-with-ai-key");
+    const distinctiveSecret = "sk-super-secret-distinctive-marker-value";
+    await service.setAiProviderApiKey({ apiKey: distinctiveSecret });
+    const userContext = await service.getOrCreateAuthenticatedUser({ timezone: "Europe/Istanbul", locale: "tr-TR" });
+
+    const payload = await buildUserExport(runner, "user-with-ai-key", userContext, "tr-TR", CLOCK.now());
+    const serialized = JSON.stringify(payload);
+
+    assert.equal(serialized.includes(distinctiveSecret), false, "the raw API key must never appear in an export");
+    assert.equal(serialized.includes("arvenenc:"), false, "the encrypted envelope must never appear in an export either");
+    assert.ok(!("aiProviderSettings" in payload) && !("apiKey" in payload), "the export payload must not carry any AI-provider-settings field at all");
+  } finally {
+    if (originalKey === undefined) delete process.env.ARVEN_CREDENTIAL_ENCRYPTION_KEY;
+    else process.env.ARVEN_CREDENTIAL_ENCRYPTION_KEY = originalKey;
+  }
+});
+
 test("mealLogToCsv/waterLogToCsv/measurementsToCsv escape commas, quotes and newlines per RFC 4180", () => {
   const events: StoredNutritionEvent[] = [{
     id: "e1", userSubject: "u1", eventType: "meal-log", occurredAt: "2026-09-01T08:00:00.000Z", localDate: "2026-09-01",
@@ -74,8 +100,8 @@ test("mealLogToCsv/waterLogToCsv/measurementsToCsv escape commas, quotes and new
   const waterCsv = waterLogToCsv([{ id: "e2", userSubject: "u1", eventType: "water-log", occurredAt: "2026-09-01T09:00:00.000Z", localDate: "2026-09-01", payloadJson: JSON.stringify({ schemaVersion: "WaterEventV1", milliliters: 300 }), createdAt: "2026-09-01T09:00:00.000Z" }]);
   assert.match(waterCsv, /2026-09-01T09:00:00\.000Z,2026-09-01,300/);
 
-  const measurements: StoredBodyMeasurement[] = [{ id: "m1", userSubject: "u1", localDate: "2026-09-01", weightKg: 70.2, bodyFatPercent: null, waistCm: null, hipCm: null, chestCm: null, note: "not, virgüllü", createdAt: "2026-09-01T08:00:00.000Z" }];
-  assert.match(measurementsToCsv(measurements), /"not, virgüllü"/);
+  const measurements: StoredBodyMeasurement[] = [{ id: "m1", userSubject: "u1", localDate: "2026-09-01", weightKg: 70.2, bodyFatPercent: null, waistCm: null, hipCm: null, chestCm: null, note: "not, virügllü", createdAt: "2026-09-01T08:00:00.000Z" }];
+  assert.match(measurementsToCsv(measurements), /"not, virügllü"/);
 });
 
 test("importUserExport rejects a file whose manifest is missing or has an unsupported format", async () => {

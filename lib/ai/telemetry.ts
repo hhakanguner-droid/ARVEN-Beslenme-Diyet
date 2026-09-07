@@ -13,6 +13,14 @@ export type AiUsageRecord = {
   promptTokens: number;
   completionTokens: number;
   recordedAt: string;
+  /**
+   * BYOK hardening (fix/byok-security-hardening): "byok" when this call used the calling user's own
+   * saved API key, "shared" when it fell back to the server's single `env.OPENAI_API_KEY`. Defaults
+   * to "shared" when omitted, matching every call recorded before this field existed.
+   */
+  scope: "byok" | "shared";
+  /** The authenticated subject that made the call, when `scope` is "byok" — null for "shared" calls, which are not attributable to one user by design (see `getAiUsageSummary`). Never a fingerprint or the raw key. */
+  subject: string | null;
 };
 
 /**
@@ -26,8 +34,8 @@ const APPROX_USD_PER_1K_COMPLETION_TOKENS = 0.0006;
 const usageLog: AiUsageRecord[] = [];
 const MAX_RECORDS = 2000;
 
-export function recordAiUsage(record: Omit<AiUsageRecord, "recordedAt">): void {
-  usageLog.push({ ...record, recordedAt: new Date().toISOString() });
+export function recordAiUsage(record: Omit<AiUsageRecord, "recordedAt" | "scope" | "subject"> & Partial<Pick<AiUsageRecord, "scope" | "subject">>): void {
+  usageLog.push({ scope: "shared", subject: null, ...record, recordedAt: new Date().toISOString() });
   if (usageLog.length > MAX_RECORDS) usageLog.splice(0, usageLog.length - MAX_RECORDS);
 }
 
@@ -39,12 +47,26 @@ export type AiUsageSummary = {
   byEndpoint: Record<string, { callCount: number; promptTokens: number; completionTokens: number }>;
 };
 
-/** Aggregates everything recorded so far in this process — resets on redeploy/restart, by design. */
-export function getAiUsageSummary(): AiUsageSummary {
+/**
+ * Aggregates everything recorded so far in this process — resets on redeploy/restart, by design.
+ *
+ * BYOK hardening (fix/byok-security-hardening): a call made with a user's own saved API key
+ * (`scope: "byok"`) is now attributed to that `subject` and must never be visible to anyone else —
+ * previously every call was pooled into one shared, unscoped total, which leaked cross-user usage
+ * once BYOK meant "not everyone shares one account" was no longer true. Pass `viewerSubject` (the
+ * authenticated caller — see `app/api/telemetry/ai-usage/route.ts`) to get that caller's own view:
+ * every "shared" call (still pooled, since there is exactly one shared credential, not one per user)
+ * plus only THAT subject's own "byok" calls. Omitting `viewerSubject` returns the full, unfiltered
+ * aggregate across everyone — kept only for internal/test use, never wired to an HTTP response.
+ */
+export function getAiUsageSummary(viewerSubject?: string): AiUsageSummary {
   const byEndpoint: AiUsageSummary["byEndpoint"] = {};
   let totalPromptTokens = 0;
   let totalCompletionTokens = 0;
-  for (const record of usageLog) {
+  const visibleRecords = viewerSubject === undefined
+    ? usageLog
+    : usageLog.filter((record) => record.scope !== "byok" || record.subject === viewerSubject);
+  for (const record of visibleRecords) {
     totalPromptTokens += record.promptTokens;
     totalCompletionTokens += record.completionTokens;
     const bucket = byEndpoint[record.endpoint] ?? { callCount: 0, promptTokens: 0, completionTokens: 0 };
@@ -54,7 +76,7 @@ export function getAiUsageSummary(): AiUsageSummary {
     byEndpoint[record.endpoint] = bucket;
   }
   const approxCostUsd = (totalPromptTokens / 1000) * APPROX_USD_PER_1K_PROMPT_TOKENS + (totalCompletionTokens / 1000) * APPROX_USD_PER_1K_COMPLETION_TOKENS;
-  return { callCount: usageLog.length, totalPromptTokens, totalCompletionTokens, approxCostUsd: Math.round(approxCostUsd * 1e6) / 1e6, byEndpoint };
+  return { callCount: visibleRecords.length, totalPromptTokens, totalCompletionTokens, approxCostUsd: Math.round(approxCostUsd * 1e6) / 1e6, byEndpoint };
 }
 
 /** Test-only reset so usage assertions never leak between test files. */
