@@ -16,6 +16,7 @@ const menu = [
   ["Kilerim", "/kiler"],
   ["Alışveriş listem", "/alisveris"],
   ["Hafta hazırlığı", "/ayarlar/hafta-hazirlik"],
+  ["Yapay zeka anahtarı", "/ayarlar/yapay-zeka"],
   ["Veri ve gizlilik", "/ayarlar/veri-ve-gizlilik"],
 ] as const;
 

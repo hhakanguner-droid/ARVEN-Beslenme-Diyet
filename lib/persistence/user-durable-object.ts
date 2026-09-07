@@ -2,6 +2,7 @@ import type { D1Database, DurableObjectState, SqlStorage } from "@cloudflare/wor
 import { USER_DURABLE_OBJECT_SCHEMA_V1 } from "@/db/migrations/durable-object/0001_user_schema";
 import { USER_DURABLE_OBJECT_PHASE6_HARDENING } from "@/db/migrations/durable-object/0002_phase6_health_hardening";
 import { USER_DURABLE_OBJECT_PHASE9_DELETION_HARDENING } from "@/db/migrations/durable-object/0003_phase9_deletion_hardening";
+import { USER_DURABLE_OBJECT_AI_PROVIDER_SETTINGS } from "@/db/migrations/durable-object/0004_ai_provider_settings";
 import { DurableObjectV1Transaction, DurableObjectV1TransactionRunner, type D1LikeQuery, type SyncSqlStorage } from "@/lib/persistence/durable-object-adapter";
 import type { V1TransactionRunner } from "@/lib/persistence/v1-boundary";
 
@@ -54,6 +55,7 @@ export class UserDurableObject {
       this.ctx.storage.sql.exec(USER_DURABLE_OBJECT_SCHEMA_V1);
       this.ctx.storage.sql.exec(USER_DURABLE_OBJECT_PHASE6_HARDENING);
       this.ctx.storage.sql.exec(USER_DURABLE_OBJECT_PHASE9_DELETION_HARDENING);
+      this.ctx.storage.sql.exec(USER_DURABLE_OBJECT_AI_PROVIDER_SETTINGS);
     });
     const sql = wrapDurableObjectSql(this.ctx.storage.sql, (closure) => this.ctx.storage.transactionSync(closure));
     const tx = new DurableObjectV1Transaction(sql, d1Catalog(env.ARVEN_CATALOG_DB));

@@ -986,9 +986,28 @@ export class DurableObjectV1Transaction implements V1Transaction {
     return row ? { startedAt: asString(row.started_at) } : null;
   }
 
+  async upsertAiProviderSettings(userSubject: string, apiKey: string, updatedAt: string): Promise<void> {
+    this.sql.exec(
+      "INSERT INTO ai_provider_settings (user_subject, api_key, updated_at) VALUES (?,?,?) ON CONFLICT(user_subject) DO UPDATE SET api_key=excluded.api_key, updated_at=excluded.updated_at",
+      userSubject,
+      apiKey,
+      updatedAt,
+    );
+  }
+
+  async getAiProviderSettings(userSubject: string): Promise<{ apiKey: string; updatedAt: string } | null> {
+    const row = this.sql.exec("SELECT api_key, updated_at FROM ai_provider_settings WHERE user_subject=?", userSubject).one();
+    return row ? { apiKey: asString(row.api_key), updatedAt: asString(row.updated_at) } : null;
+  }
+
+  async deleteAiProviderSettings(userSubject: string): Promise<void> {
+    this.sql.exec("DELETE FROM ai_provider_settings WHERE user_subject=?", userSubject);
+  }
+
   async purgeAuthenticatedUser(userSubject: string): Promise<void> {
     this.sql.transactionSync(() => {
       this.sql.exec("DELETE FROM account_deletion_state WHERE user_subject=?", userSubject);
+      this.sql.exec("DELETE FROM ai_provider_settings WHERE user_subject=?", userSubject);
       this.sql.exec("DELETE FROM ai_action_outcomes WHERE user_subject=?", userSubject);
       this.sql.exec("DELETE FROM ai_action_decisions WHERE user_subject=?", userSubject);
       this.sql.exec("DELETE FROM ai_action_proposals WHERE user_subject=?", userSubject);

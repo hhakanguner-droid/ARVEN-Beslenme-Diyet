@@ -15,7 +15,8 @@ export async function POST(request: Request) {
     const context = await resolveRouteContext(request);
     const { asset, bytes } = await parsePhotoUpload(request, context, "meal-photo");
 
-    const provider = getOptionalAiProvider();
+    const storedApiKey = await context.service.getAiProviderApiKeyForRuntime();
+    const provider = getOptionalAiProvider(storedApiKey ? { apiKey: storedApiKey } : undefined);
     if (!provider) {
       return Response.json({ photoAssetId: asset.id, estimate: null, aiAvailable: false });
     }

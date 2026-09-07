@@ -172,6 +172,13 @@ const WeekPrepPreferencesV1 = z.object({
   prepLocalTime:z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/,"prepLocalTime must be HH:MM"),
 }).strict();
 
+// Post-Faz-9: the user's own AI provider API key, entered in Ayarlar -> Yapay Zeka. Trimmed and
+// length-bounded only — never format-checked against a specific provider's key shape, since this
+// app is not tied to one AI vendor at the persistence layer (see `lib/ai/provider.ts`).
+const AiProviderApiKeyV1 = z.object({
+  apiKey:z.string().trim().min(8,"apiKey is too short").max(200,"apiKey is too long"),
+}).strict();
+
 // Phase 8: progress and reports. Keys are required-but-nullable (same convention as
 // `ProfileUpsertV1`) rather than optional, so a client always states its intent explicitly; the
 // refine below rejects an all-null submission, since an empty measurement carries no information.
@@ -463,6 +470,18 @@ export interface V1Transaction {
   listProgressReportExports(userSubject:string):Promise<StoredProgressReportExport[]>;
   /** User-initiated forget, same semantics as `deleteMemoryFact`. Callers are responsible for also deleting the underlying bytes via `lib/media/storage.ts`. */
   deleteProgressReportExport(userSubject:string,id:string):Promise<void>;
+  /**
+   * Post-Faz-9 addition: upserts the authenticated subject's own AI provider API key (Ayarlar →
+   * Yapay Zeka), so a deployment can be run without `wrangler secret put`. `apiKey` is stored as-is
+   * (the raw value) — the adapter never hashes or encrypts it, matching the plaintext-secret trust
+   * model of `env.OPENAI_API_KEY` itself; the never-return-to-client guarantee is enforced entirely at
+   * the `V1MutationService` layer (`getAiProviderKeyStatus` vs. `getAiProviderApiKeyForRuntime`), not here.
+   */
+  upsertAiProviderSettings(userSubject:string,apiKey:string,updatedAt:string):Promise<void>;
+  /** The authenticated subject's raw stored key row, or null before one has ever been saved. Internal-only — never exposed directly to a route handler; see `V1MutationService`. */
+  getAiProviderSettings(userSubject:string):Promise<{apiKey:string;updatedAt:string}|null>;
+  /** User-initiated forget: removes the stored key so the deployment falls back to `env.OPENAI_API_KEY` (if any). Silently a no-op if none was ever set. */
+  deleteAiProviderSettings(userSubject:string):Promise<void>;
 }
 export interface V1TransactionRunner{transaction<T>(work:(tx:V1Transaction)=>Promise<T>):Promise<T>}
 export type ServiceClock={now():Date}; export type IdFactory=()=>string;
@@ -1143,4 +1162,34 @@ export class V1MutationService{
   async listProgressReportExports():Promise<StoredProgressReportExport[]>{return this.runner.transaction(async tx=>tx.listProgressReportExports(this.subject));}
   /** User-initiated forget — see `V1Transaction.deleteProgressReportExport`'s doc comment. */
   async deleteProgressReportExport(id:string):Promise<void>{const parsed=Id.parse(id);await this.runner.transaction(async tx=>{await tx.deleteProgressReportExport(this.subject,parsed);});}
+
+  /**
+   * Post-Faz-9 addition: saves (inserting or overwriting) the authenticated user's own AI provider
+   * API key, entered in Ayarlar → Yapay Zeka. Returns only the non-secret status — never the key
+   * itself — so a route handler cannot accidentally leak it into a JSON response even by returning
+   * this method's own result.
+   */
+  async setAiProviderApiKey(input:unknown):Promise<{hasKey:true;updatedAt:string;maskedHint:string}>{
+    const x=AiProviderApiKeyV1.parse(input);
+    const updatedAt=instant(this.clock.now());
+    await this.runner.transaction(async tx=>{await tx.upsertAiProviderSettings(this.subject,x.apiKey,updatedAt);});
+    return{hasKey:true,updatedAt,maskedHint:x.apiKey.slice(-4)};
+  }
+  /** Whether a key is currently saved for this subject, when it was last saved, and a last-4-characters hint — never the key itself. Safe to return directly from a route handler. */
+  async getAiProviderKeyStatus():Promise<{hasKey:boolean;updatedAt:string|null;maskedHint:string|null}>{
+    const row=await this.runner.transaction(async tx=>tx.getAiProviderSettings(this.subject));
+    if(!row)return{hasKey:false,updatedAt:null,maskedHint:null};
+    return{hasKey:true,updatedAt:row.updatedAt,maskedHint:row.apiKey.slice(-4)};
+  }
+  /** User-initiated forget: removes the saved key so this subject's AI calls fall back to `env.OPENAI_API_KEY` (if any) — see `V1Transaction.deleteAiProviderSettings`. */
+  async clearAiProviderApiKey():Promise<void>{await this.runner.transaction(async tx=>{await tx.deleteAiProviderSettings(this.subject);});}
+  /**
+   * Internal-only: the raw stored key (or null), read immediately before an outgoing AI provider
+   * call by the `/api/ai/*` and `/api/vision/*` routes. NEVER serialize this method's return value
+   * into an HTTP response — every client-facing read must go through `getAiProviderKeyStatus` instead.
+   */
+  async getAiProviderApiKeyForRuntime():Promise<string|null>{
+    const row=await this.runner.transaction(async tx=>tx.getAiProviderSettings(this.subject));
+    return row?row.apiKey:null;
+  }
 }

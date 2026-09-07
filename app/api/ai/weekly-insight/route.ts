@@ -35,7 +35,8 @@ export async function GET(request: Request) {
       return Response.json({ metrics, narrative: JSON.parse(cached.narrativeJson), aiAvailable: true });
     }
 
-    const provider = getOptionalAiProvider();
+    const storedApiKey = await context.service.getAiProviderApiKeyForRuntime();
+    const provider = getOptionalAiProvider(storedApiKey ? { apiKey: storedApiKey } : undefined);
     if (!provider) {
       if (!cached) await context.service.recordWeeklyInsightSnapshot(weekStartLocalDate, metrics, null);
       return Response.json({ metrics, narrative: null, aiAvailable: false });

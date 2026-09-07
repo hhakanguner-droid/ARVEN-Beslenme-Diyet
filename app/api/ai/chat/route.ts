@@ -46,7 +46,8 @@ export async function POST(request: Request) {
     const message = typeof body.message === "string" ? body.message.trim() : "";
     if (!message) return Response.json({ error: "message is required" }, { status: 400 });
 
-    const provider = getOptionalAiProvider();
+    const storedApiKey = await context.service.getAiProviderApiKeyForRuntime();
+    const provider = getOptionalAiProvider(storedApiKey ? { apiKey: storedApiKey } : undefined);
     if (!provider) {
       return Response.json({ reply: OFFLINE_REPLY, aiAvailable: false, proposedActionId: null });
     }

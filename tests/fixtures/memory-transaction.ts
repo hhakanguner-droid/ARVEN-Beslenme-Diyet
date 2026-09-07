@@ -22,6 +22,11 @@ export class MemoryTx implements V1Transaction {
   private assertNotDeleting(userSubject:string){if(this.deletionState.has(userSubject))throw new Error("Account deletion is in progress; new media cannot be recorded for this account")}
   async beginAccountDeletion(userSubject:string,startedAt:string){const existing=this.deletionState.get(userSubject);if(existing)return{startedAt:existing};this.deletionState.set(userSubject,startedAt);return{startedAt}}
   async getAccountDeletionState(userSubject:string){const startedAt=this.deletionState.get(userSubject);return startedAt?{startedAt}:null}
+  /** Post-Faz-9: mirrors `ai_provider_settings` — the user's own saved AI provider API key (Ayarlar → Yapay Zeka). */
+  aiProviderSettings=new Map<string,{apiKey:string;updatedAt:string}>();
+  async upsertAiProviderSettings(userSubject:string,apiKey:string,updatedAt:string){this.aiProviderSettings.set(userSubject,{apiKey,updatedAt})}
+  async getAiProviderSettings(userSubject:string){return this.aiProviderSettings.get(userSubject)??null}
+  async deleteAiProviderSettings(userSubject:string){this.aiProviderSettings.delete(userSubject)}
   async insertPhotoAsset(asset:StoredPhotoAsset){this.assertNotDeleting(asset.userSubject);this.photoAssets.set(asset.id,asset)}
   async getPhotoAsset(s:string,id:string){const v=this.photoAssets.get(id);return v?.userSubject===s?v:null}
   async listPhotoAssets(s:string){return [...this.photoAssets.values()].filter(p=>p.userSubject===s).sort((a,b)=>b.createdAt.localeCompare(a.createdAt))}
@@ -70,7 +75,7 @@ export class MemoryTx implements V1Transaction {
     // Faz 9: mirrors every `DELETE FROM ... WHERE user_subject=?` in `DurableObjectV1Transaction.purgeAuthenticatedUser`
     // (`lib/persistence/durable-object-adapter.ts`) — kept in sync with that list so this in-memory
     // double behaves like the real adapter for every owned table, not just the ones earlier phases needed.
-    this.deletionState.delete(subject);this.purgedSubjects.push(subject);
+    this.deletionState.delete(subject);this.purgedSubjects.push(subject);this.aiProviderSettings.delete(subject);
     for(const [id,v] of this.outcomes)if(v.userSubject===subject)this.outcomes.delete(id);
     for(const [id,v] of this.decisions)if(v.userSubject===subject)this.decisions.delete(id);
     for(const [id,v] of this.proposals)if(v.userSubject===subject)this.proposals.delete(id);

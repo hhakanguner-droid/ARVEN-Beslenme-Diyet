@@ -21,7 +21,8 @@ const LAB_EXTRACTION_SYSTEM_PROMPT = [
 export async function POST(request: Request) {
   try {
     const context = await resolveRouteContext(request);
-    const provider = getOptionalAiProvider();
+    const storedApiKey = await context.service.getAiProviderApiKeyForRuntime();
+    const provider = getOptionalAiProvider(storedApiKey ? { apiKey: storedApiKey } : undefined);
     const localOnly = request.headers.get(LAB_AI_MODE_HEADER) === "local";
 
     if (provider && !localOnly) {
