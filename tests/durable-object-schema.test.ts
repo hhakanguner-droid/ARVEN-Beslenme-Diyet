@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { USER_DURABLE_OBJECT_SCHEMA_V1 } from "../db/migrations/durable-object/0001_user_schema";
+import { USER_DURABLE_OBJECT_PHASE6_HARDENING } from "../db/migrations/durable-object/0002_phase6_health_hardening";
+import { USER_DURABLE_OBJECT_PHASE9_DELETION_HARDENING } from "../db/migrations/durable-object/0003_phase9_deletion_hardening";
 import { DurableObjectV1Transaction, type D1LikeQuery, type SyncSqlStorage } from "../lib/persistence/durable-object-adapter";
 import type { VersionedFood } from "../lib/persistence/v1-boundary";
 
@@ -30,6 +32,8 @@ function freshUserDatabase(): DatabaseSync {
   const db = new DatabaseSync(":memory:");
   db.exec("PRAGMA foreign_keys = ON");
   db.exec(USER_DURABLE_OBJECT_SCHEMA_V1);
+  db.exec(USER_DURABLE_OBJECT_PHASE6_HARDENING);
+  db.exec(USER_DURABLE_OBJECT_PHASE9_DELETION_HARDENING);
   return db;
 }
 

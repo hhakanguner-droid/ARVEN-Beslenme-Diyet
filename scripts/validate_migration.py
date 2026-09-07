@@ -9,7 +9,7 @@ def reject(conn,sql,params=()):
     except (sqlite3.IntegrityError,sqlite3.OperationalError): return
     raise AssertionError(f'expected rejection: {sql}')
 def main():
-    assert [Path(p).name for p in MIGRATIONS]==['0001_initial.sql','0002_phase2_identity.sql','0003_phase3_planning.sql','0004_phase4_ai.sql','0005_phase5_vision.sql','0006_phase6_health.sql','0007_phase6_health_hardening.sql','0008_phase7_planning.sql','0009_phase8_progress.sql']
+    assert [Path(p).name for p in MIGRATIONS]==['0001_initial.sql','0002_phase2_identity.sql','0003_phase3_planning.sql','0004_phase4_ai.sql','0005_phase5_vision.sql','0006_phase6_health.sql','0007_phase6_health_hardening.sql','0008_phase7_planning.sql','0009_phase8_progress.sql','0010_phase9_deletion_hardening.sql']
     combined='\n'.join(Path(p).read_text(encoding='utf-8') for p in MIGRATIONS)
     assert 'CREATE TABLE ai_actions' not in combined
     assert 'meal_entry_items' not in combined
@@ -102,5 +102,11 @@ def main():
     reject(c,"INSERT INTO progress_report_exports(id,user_subject,report_type,period_local_date,mime_type,byte_size,storage_key,created_at) VALUES('pr-bad','u1','monthly','2026-08-31','application/pdf',100,'u1/pr-bad',?)",(now,))
     c.execute("INSERT INTO progress_report_exports(id,user_subject,report_type,period_local_date,mime_type,byte_size,storage_key,created_at) VALUES('pr1','u1','daily','2026-08-31','application/pdf',12345,'u1/pr1',?)",(now,))
     c.execute("DELETE FROM progress_report_exports WHERE id='pr1'")
+    reject(c,"INSERT INTO account_deletion_state(user_subject,started_at) VALUES('does-not-exist',?)",(now,))
+    c.execute("INSERT INTO users(subject,timezone,created_at,updated_at) VALUES('u3','Europe/Istanbul',?,?)",(now,now))
+    c.execute("INSERT INTO account_deletion_state(user_subject,started_at) VALUES('u3',?)",(now,))
+    reject(c,"INSERT INTO account_deletion_state(user_subject,started_at) VALUES('u3',?)",(now,))
+    c.execute("DELETE FROM users WHERE subject='u3'")
+    assert c.execute("SELECT count(*) FROM account_deletion_state WHERE user_subject='u3'").fetchone()[0] == 0
     print('CLEAN_V1_MIGRATION_OK')
 if __name__=='__main__':main()

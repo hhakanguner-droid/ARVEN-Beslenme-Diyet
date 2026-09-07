@@ -17,12 +17,17 @@ import {
  */
 export class MemoryTx implements V1Transaction {
   context:AuthenticatedUserContext={timezone:"Europe/Istanbul",nutritionDayStartMinutes:0};proposals=new Map<string,StoredProposal>();decisions=new Map<string,StoredDecision>();outcomes=new Map<string,StoredOutcome>();events=new Map<string,StoredNutritionEvent>();foods=new Map<string,VersionedFood>();allergens:AllergenSafetyExclusion[]=[];exclusions:DietarySafetyExclusion[]=[];refs=new Map<string,ScientificReferenceSnapshot>();goals=new Map<string,StoredGoalVersion>();currentGoal:string|null=null;purgedSubjects:string[]=[];users=new Map<string,AuthenticatedUserContext>();profiles=new Map<string,StoredProfile>();assessments=new Map<string,StoredAssessmentSnapshot>();acknowledgements=new Map<string,StoredSafetyAcknowledgement>();mealPlans=new Map<string,StoredMealPlanVersion>();currentMealPlan:string|null=null;customFoods=new Map<string,StoredCustomFoodVersion>();memoryFacts=new Map<string,StoredMemoryFact>();weeklyInsights:StoredWeeklyInsightSnapshot[]=[];photoAssets=new Map<string,StoredPhotoAsset>();
-  async insertPhotoAsset(asset:StoredPhotoAsset){this.photoAssets.set(asset.id,asset)}
+  /** Faz 9: mirrors `account_deletion_state` — presence of a subject here means deletion is in progress for it, gating every user-media insert below exactly like `assertAccountDeletionNotInProgress` does against the real SQLite adapter. */
+  deletionState=new Map<string,string>();
+  private assertNotDeleting(userSubject:string){if(this.deletionState.has(userSubject))throw new Error("Account deletion is in progress; new media cannot be recorded for this account")}
+  async beginAccountDeletion(userSubject:string,startedAt:string){const existing=this.deletionState.get(userSubject);if(existing)return{startedAt:existing};this.deletionState.set(userSubject,startedAt);return{startedAt}}
+  async getAccountDeletionState(userSubject:string){const startedAt=this.deletionState.get(userSubject);return startedAt?{startedAt}:null}
+  async insertPhotoAsset(asset:StoredPhotoAsset){this.assertNotDeleting(asset.userSubject);this.photoAssets.set(asset.id,asset)}
   async getPhotoAsset(s:string,id:string){const v=this.photoAssets.get(id);return v?.userSubject===s?v:null}
   async listPhotoAssets(s:string){return [...this.photoAssets.values()].filter(p=>p.userSubject===s).sort((a,b)=>b.createdAt.localeCompare(a.createdAt))}
   async deletePhotoAsset(s:string,id:string){const p=this.photoAssets.get(id);if(p&&p.userSubject===s)this.photoAssets.delete(id)}
   labDocuments=new Map<string,StoredLabDocument>();labResultEntries=new Map<string,StoredLabResultEntry>();supplementRecords=new Map<string,StoredSupplementRecord>();
-  async insertLabDocument(doc:StoredLabDocument){this.labDocuments.set(doc.id,doc)}
+  async insertLabDocument(doc:StoredLabDocument){this.assertNotDeleting(doc.userSubject);this.labDocuments.set(doc.id,doc)}
   async getLabDocument(s:string,id:string){const v=this.labDocuments.get(id);return v?.userSubject===s?v:null}
   async listLabDocuments(s:string){return [...this.labDocuments.values()].filter(d=>d.userSubject===s).sort((a,b)=>b.createdAt.localeCompare(a.createdAt))}
   async deleteLabDocument(s:string,id:string){const d=this.labDocuments.get(id);if(d&&d.userSubject===s)this.labDocuments.delete(id)}
@@ -61,7 +66,40 @@ export class MemoryTx implements V1Transaction {
   async deleteManualNutritionEvent(s:string,id:string){const v=this.events.get(id);if(!v||v.userSubject!==s)throw new Error("Nutrition event not found");if([...this.outcomes.values()].some(o=>o.resultEventId===id))throw new Error("Cannot delete a nutrition event created by a confirmed AI action");this.events.delete(id)}
   async insertCustomFoodVersion(food:StoredCustomFoodVersion){this.customFoods.set(food.id,food);this.foods.set(food.id,{id:food.id,foodKey:food.foodKey,name:food.name,isLiquid:food.isLiquid,basisGrams:100,nutrition:{energyKcal:food.energyKcal,proteinG:food.proteinG,carbsG:food.carbsG,fatG:food.fatG,fiberG:food.fiberG??undefined},source:{provider:"manual-verified",verifiedAt:food.verifiedAt},allergenIds:food.allergenIds,allergenDataStatus:food.allergenDataStatus,dietaryConflictRuleIds:food.dietaryConflictRuleIds,dietarySafetyDataStatus:food.dietarySafetyDataStatus,portionOptions:food.portions.map(p=>({id:p.id,measure:p.measure as never,label:p.label,gramsPerUnit:p.gramsPerUnit,source:{provider:"manual-verified",verifiedAt:food.verifiedAt}}))})}
   async listCustomFoodVersions(s:string){return [...this.customFoods.values()].filter(f=>f.ownerSubject===s).sort((a,b)=>b.verifiedAt.localeCompare(a.verifiedAt))}
-  async getUserContext(){return this.context} async getProposal(s:string,id:string){const v=this.proposals.get(id);return v?.userSubject===s?v:null} async insertProposalIfAbsent(v:StoredProposal){const old=[...this.proposals.values()].find(p=>p.userSubject===v.userSubject&&p.idempotencyKey===v.idempotencyKey);if(old)return old;this.proposals.set(v.id,v);return v} async getDecision(s:string,id:string){const v=this.decisions.get(id);return v?.userSubject===s?v:null} async insertDecision(v:StoredDecision){this.decisions.set(v.actionId,v)} async getOutcome(s:string,id:string){const v=this.outcomes.get(id);return v?.userSubject===s?v:null} async insertOutcome(v:StoredOutcome){if(this.outcomes.has(v.actionId))throw new Error("duplicate outcome");this.outcomes.set(v.actionId,v)} async getNutritionEvent(s:string,id:string){const v=this.events.get(id);return v?.userSubject===s?v:null} async insertNutritionEvent(v:StoredNutritionEvent){this.events.set(v.id,v)} async insertNutritionEventWithOutcome(e:StoredNutritionEvent,o:StoredOutcome){this.events.set(e.id,e);await this.insertOutcome(o)} async getFoodVersion(_s:string,id:string){return this.foods.get(id)??null} async getActiveAllergenExclusions(){return this.allergens} async getActiveDietaryExclusions(){return this.exclusions} async getScientificReferenceSnapshots(ids:string[]){return ids.flatMap(id=>this.refs.get(id)??[])} async insertGoalVersion(g:StoredGoalVersion){this.goals.set(g.id,g)} async setCurrentGoal(_s:string,id:string){this.currentGoal=id} async insertGoalVersionAndSetCurrent(g:StoredGoalVersion,_at:string){this.goals.set(g.id,g);this.currentGoal=g.id} async purgeAuthenticatedUser(subject:string){this.purgedSubjects.push(subject);for(const [id,v] of this.outcomes)if(v.userSubject===subject)this.outcomes.delete(id);for(const [id,v] of this.decisions)if(v.userSubject===subject)this.decisions.delete(id);for(const [id,v] of this.proposals)if(v.userSubject===subject)this.proposals.delete(id);for(const [id,v] of this.events)if(v.userSubject===subject)this.events.delete(id);for(const [id,v] of this.goals)if(v.userSubject===subject)this.goals.delete(id);this.currentGoal=null;this.users.delete(subject);this.profiles.delete(subject);for(const [id,v] of this.assessments)if(v.userSubject===subject)this.assessments.delete(id);for(const [id,v] of this.acknowledgements)if(v.userSubject===subject)this.acknowledgements.delete(id)}
+  async getUserContext(){return this.context} async getProposal(s:string,id:string){const v=this.proposals.get(id);return v?.userSubject===s?v:null} async insertProposalIfAbsent(v:StoredProposal){const old=[...this.proposals.values()].find(p=>p.userSubject===v.userSubject&&p.idempotencyKey===v.idempotencyKey);if(old)return old;this.proposals.set(v.id,v);return v} async getDecision(s:string,id:string){const v=this.decisions.get(id);return v?.userSubject===s?v:null} async insertDecision(v:StoredDecision){this.decisions.set(v.actionId,v)} async getOutcome(s:string,id:string){const v=this.outcomes.get(id);return v?.userSubject===s?v:null} async insertOutcome(v:StoredOutcome){if(this.outcomes.has(v.actionId))throw new Error("duplicate outcome");this.outcomes.set(v.actionId,v)} async getNutritionEvent(s:string,id:string){const v=this.events.get(id);return v?.userSubject===s?v:null} async insertNutritionEvent(v:StoredNutritionEvent){this.events.set(v.id,v)} async insertNutritionEventWithOutcome(e:StoredNutritionEvent,o:StoredOutcome){this.events.set(e.id,e);await this.insertOutcome(o)} async getFoodVersion(_s:string,id:string){return this.foods.get(id)??null} async getActiveAllergenExclusions(){return this.allergens} async getActiveDietaryExclusions(){return this.exclusions} async getScientificReferenceSnapshots(ids:string[]){return ids.flatMap(id=>this.refs.get(id)??[])} async insertGoalVersion(g:StoredGoalVersion){this.goals.set(g.id,g)} async setCurrentGoal(_s:string,id:string){this.currentGoal=id} async insertGoalVersionAndSetCurrent(g:StoredGoalVersion,_at:string){this.goals.set(g.id,g);this.currentGoal=g.id} async purgeAuthenticatedUser(subject:string){
+    // Faz 9: mirrors every `DELETE FROM ... WHERE user_subject=?` in `DurableObjectV1Transaction.purgeAuthenticatedUser`
+    // (`lib/persistence/durable-object-adapter.ts`) — kept in sync with that list so this in-memory
+    // double behaves like the real adapter for every owned table, not just the ones earlier phases needed.
+    this.deletionState.delete(subject);this.purgedSubjects.push(subject);
+    for(const [id,v] of this.outcomes)if(v.userSubject===subject)this.outcomes.delete(id);
+    for(const [id,v] of this.decisions)if(v.userSubject===subject)this.decisions.delete(id);
+    for(const [id,v] of this.proposals)if(v.userSubject===subject)this.proposals.delete(id);
+    for(const [id,v] of this.events)if(v.userSubject===subject)this.events.delete(id);
+    for(const [id,v] of this.mealPlans)if(v.userSubject===subject)this.mealPlans.delete(id);
+    if(this.currentMealPlan&&this.mealPlans.get(this.currentMealPlan)===undefined)this.currentMealPlan=null;
+    for(const [id,v] of this.goals)if(v.userSubject===subject)this.goals.delete(id);
+    this.currentGoal=null;
+    this.users.delete(subject);this.profiles.delete(subject);
+    for(const [id,v] of this.assessments)if(v.userSubject===subject)this.assessments.delete(id);
+    for(const [id,v] of this.acknowledgements)if(v.userSubject===subject)this.acknowledgements.delete(id);
+    this.weeklyInsights=this.weeklyInsights.filter(w=>w.userSubject!==subject);
+    for(const [id,v] of this.memoryFacts)if(v.userSubject===subject)this.memoryFacts.delete(id);
+    for(const [id,v] of this.photoAssets)if(v.userSubject===subject)this.photoAssets.delete(id);
+    for(const [id,v] of this.labResultEntries)if(v.userSubject===subject)this.labResultEntries.delete(id);
+    for(const [id,v] of this.labDocuments)if(v.userSubject===subject)this.labDocuments.delete(id);
+    for(const [id,v] of this.supplementRecords)if(v.userSubject===subject)this.supplementRecords.delete(id);
+    for(const [id,v] of this.shoppingListItems)if(v.userSubject===subject)this.shoppingListItems.delete(id);
+    for(const key of [...this.weekPrepStatuses.keys()])if(key.startsWith(`${subject}:`))this.weekPrepStatuses.delete(key);
+    this.weekPrepPreferences.delete(subject);
+    for(const [id,v] of this.pantryItems)if(v.userSubject===subject)this.pantryItems.delete(id);
+    for(const key of [...this.currentWeeklyPlans.keys()])if(key.startsWith(`${subject}:`))this.currentWeeklyPlans.delete(key);
+    for(const [id,v] of this.weeklyPlans)if(v.userSubject===subject)this.weeklyPlans.delete(id);
+    for(const [id,v] of this.recipes)if(v.userSubject===subject)this.recipes.delete(id);
+    for(const [id,v] of this.progressReportExports)if(v.userSubject===subject)this.progressReportExports.delete(id);
+    for(const [id,v] of this.progressMilestones)if(v.userSubject===subject)this.progressMilestones.delete(id);
+    for(const [id,v] of this.bodyPhotoSets)if(v.userSubject===subject)this.bodyPhotoSets.delete(id);
+    for(const [id,v] of this.bodyMeasurements)if(v.userSubject===subject)this.bodyMeasurements.delete(id);
+  }
   async getOrCreateUser(subject:string,defaults:{timezone:string;locale:string}){let u=this.users.get(subject);if(!u){u={timezone:defaults.timezone,nutritionDayStartMinutes:0};this.users.set(subject,u)}return u}
   async getProfile(subject:string){return this.profiles.get(subject)??null}
   async upsertProfile(profile:StoredProfile){this.profiles.set(profile.userSubject,profile)}
@@ -91,14 +129,14 @@ export class MemoryTx implements V1Transaction {
   async insertBodyMeasurement(measurement:StoredBodyMeasurement){this.bodyMeasurements.set(measurement.id,measurement)}
   async listBodyMeasurements(s:string){return [...this.bodyMeasurements.values()].filter(m=>m.userSubject===s)}
   async deleteBodyMeasurement(s:string,id:string){const v=this.bodyMeasurements.get(id);if(v&&v.userSubject===s)this.bodyMeasurements.delete(id)}
-  async insertBodyPhotoSet(photo:StoredBodyPhotoSet){this.bodyPhotoSets.set(photo.id,photo)}
+  async insertBodyPhotoSet(photo:StoredBodyPhotoSet){this.assertNotDeleting(photo.userSubject);this.bodyPhotoSets.set(photo.id,photo)}
   async getBodyPhotoSet(s:string,id:string){const v=this.bodyPhotoSets.get(id);return v?.userSubject===s?v:null}
   async listBodyPhotoSets(s:string){return [...this.bodyPhotoSets.values()].filter(p=>p.userSubject===s).sort((a,b)=>b.createdAt.localeCompare(a.createdAt))}
   async deleteBodyPhotoSet(s:string,id:string){const v=this.bodyPhotoSets.get(id);if(v&&v.userSubject===s)this.bodyPhotoSets.delete(id)}
   async hasProgressMilestone(s:string,milestoneKey:string){return [...this.progressMilestones.values()].some(m=>m.userSubject===s&&m.milestoneKey===milestoneKey)}
   async insertProgressMilestone(milestone:StoredProgressMilestone){this.progressMilestones.set(milestone.id,milestone)}
   async listProgressMilestones(s:string){return [...this.progressMilestones.values()].filter(m=>m.userSubject===s).sort((a,b)=>b.achievedAt.localeCompare(a.achievedAt))}
-  async insertProgressReportExport(report:StoredProgressReportExport){this.progressReportExports.set(report.id,report)}
+  async insertProgressReportExport(report:StoredProgressReportExport){this.assertNotDeleting(report.userSubject);this.progressReportExports.set(report.id,report)}
   async getProgressReportExport(s:string,id:string){const v=this.progressReportExports.get(id);return v?.userSubject===s?v:null}
   async listProgressReportExports(s:string){return [...this.progressReportExports.values()].filter(r=>r.userSubject===s).sort((a,b)=>b.createdAt.localeCompare(a.createdAt))}
   async deleteProgressReportExport(s:string,id:string){const v=this.progressReportExports.get(id);if(v&&v.userSubject===s)this.progressReportExports.delete(id)}
