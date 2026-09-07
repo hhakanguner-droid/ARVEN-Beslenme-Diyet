@@ -71,6 +71,9 @@ class Tx implements V1Transaction {
   async purgeAuthenticatedUser(_s:string):Promise<void>{}
   async beginAccountDeletion():Promise<{startedAt:string}>{throw new Error("unused")}
   async getAccountDeletionState():Promise<{startedAt:string}|null>{return null}
+  async upsertAiProviderSettings():Promise<void>{throw new Error("unused")}
+  async getAiProviderSettings():Promise<{apiKey:string;updatedAt:string}|null>{return null}
+  async deleteAiProviderSettings():Promise<void>{throw new Error("unused")}
   async insertMemoryFact():Promise<void>{}
   async listMemoryFacts(){ return []; }
   async deleteMemoryFact():Promise<void>{}

@@ -103,6 +103,9 @@ class SafetyRaceTx implements V1Transaction {
   async purgeAuthenticatedUser(){ throw new Error("unused"); }
   async beginAccountDeletion(): Promise<{ startedAt: string }> { throw new Error("unused"); }
   async getAccountDeletionState(): Promise<{ startedAt: string } | null> { return null; }
+  async upsertAiProviderSettings(): Promise<void> { throw new Error("unused"); }
+  async getAiProviderSettings(): Promise<{ apiKey: string; updatedAt: string } | null> { return null; }
+  async deleteAiProviderSettings(): Promise<void> { throw new Error("unused"); }
   async getOrCreateUser(): Promise<AuthenticatedUserContext>{ throw new Error("unused"); }
   async getProfile(): Promise<StoredProfile|null>{ return null; }
   async upsertProfile(_p:StoredProfile){ throw new Error("unused"); }

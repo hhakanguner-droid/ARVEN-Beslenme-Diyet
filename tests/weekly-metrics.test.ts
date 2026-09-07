@@ -75,6 +75,9 @@ class FakeTx implements V1Transaction {
   async purgeAuthenticatedUser(): Promise<void> { throw new Error("unused"); }
   async beginAccountDeletion(): Promise<{ startedAt: string }> { throw new Error("unused"); }
   async getAccountDeletionState(): Promise<{ startedAt: string } | null> { return null; }
+  async upsertAiProviderSettings(): Promise<void> { throw new Error("unused"); }
+  async getAiProviderSettings(): Promise<{ apiKey: string; updatedAt: string } | null> { return null; }
+  async deleteAiProviderSettings(): Promise<void> { throw new Error("unused"); }
   async insertMemoryFact(): Promise<void> { throw new Error("unused"); }
   async deleteMemoryFact(): Promise<void> { throw new Error("unused"); }
   async insertWeeklyInsightSnapshot(): Promise<void> { throw new Error("unused"); }
