@@ -35,6 +35,21 @@ test("importUserExport never re-inserts rows from the media-manifest section, an
   assert.match(importModule, /skipped\["media-manifest"\] = raw\.mediaManifest\.length/);
   assert.doesNotMatch(importModule, /raw\.userSubject/);
   assert.doesNotMatch(importModule, /raw\.ownerSubject/);
-  // Every insert must be built with the authenticated `subject`, never anything read off the file.
-  assert.match(importModule, /userSubject: subject/);
+  // Faz 9: every write is routed through one V1MutationService bound to the authenticated subject —
+  // ownership is derived from that binding, not from any field read off the uploaded file.
+  assert.match(importModule, /new V1MutationService\(subject, runner, idFactory, clock\)/);
+});
+
+test("importUserExport rejects any top-level field the export format has never produced, closing the door on a forged userSubject/ownerSubject or a smuggled unrelated section (e.g. supplements, lab results)", () => {
+  const importModule = source("lib/portability/import.ts");
+  assert.match(importModule, /KNOWN_TOP_LEVEL_KEYS/);
+  assert.match(importModule, /if \(!KNOWN_TOP_LEVEL_KEYS\.has\(key\)\) throw new Error/);
+});
+
+test("importUserExport re-derives goals from the original calculator inputs and re-validates meal/water log entries through the live logging path, instead of writing stored totals or resolved payloads verbatim", () => {
+  const importModule = source("lib/portability/import.ts");
+  assert.match(importModule, /parseMifflinStJeorV1Inputs\(JSON\.parse\(g\.calculatorInputsJson\)\)/);
+  assert.match(importModule, /service\.createCalculatedGoalVersion\(inputs, referenceIds, allocations\)/);
+  assert.match(importModule, /service\.appendManualMeal\(/);
+  assert.match(importModule, /service\.appendManualWater\(/);
 });

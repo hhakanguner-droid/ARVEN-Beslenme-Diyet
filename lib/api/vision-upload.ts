@@ -13,6 +13,12 @@ export type ParsedPhotoUpload = { asset: StoredPhotoAsset; bytes: Uint8Array };
  * `db/migrations/0005_phase5_vision.sql`'s CHECK constraints, stores the bytes via
  * `lib/media/storage.ts`, and records the metadata row. Bytes never touch D1/the Durable Object —
  * only the small `photo_assets` row does.
+ *
+ * Faz 9 hardening: if metadata persistence fails after the object was written — including the
+ * account-deletion-in-progress rejection `V1MutationService.recordPhotoAsset` now applies (see
+ * `V1Transaction.beginAccountDeletion`'s doc comment) — the object is removed immediately so a
+ * sensitive orphan cannot remain in storage without a database pointer, same as
+ * `lib/api/lab-upload.ts`'s `parseLabPhotoUpload`.
  */
 export async function parsePhotoUpload(request: Request, context: RouteContext, kind: PhotoAssetKind): Promise<ParsedPhotoUpload> {
   const form = await request.formData();
@@ -29,14 +35,25 @@ export async function parsePhotoUpload(request: Request, context: RouteContext, 
     throw new Error("photo must be between 1 byte and 8,000,000 bytes");
   }
   const storageKey = `${context.subject}/${kind}/${crypto.randomUUID()}`;
-  await getMediaStorage().put(storageKey, bytes, mimeType);
-  const asset = await context.service.recordPhotoAsset({
-    kind,
-    mimeType: mimeType as StoredPhotoAsset["mimeType"],
-    byteSize: bytes.length,
-    storageKey,
-  });
-  return { asset, bytes };
+  const storage = getMediaStorage();
+  await storage.put(storageKey, bytes, mimeType);
+  try {
+    const asset = await context.service.recordPhotoAsset({
+      kind,
+      mimeType: mimeType as StoredPhotoAsset["mimeType"],
+      byteSize: bytes.length,
+      storageKey,
+    });
+    return { asset, bytes };
+  } catch (error) {
+    try {
+      await storage.delete(storageKey);
+    } catch {
+      // Preserve the original persistence error; storage cleanup can be retried by operational
+      // tooling using the deterministic subject/kind prefix.
+    }
+    throw error;
+  }
 }
 
 /** Base64-encodes photo bytes for the OpenAI vision `image_url` data: URL — small helper kept here so every vision route encodes the same way. */

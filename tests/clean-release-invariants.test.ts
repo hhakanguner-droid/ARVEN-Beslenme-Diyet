@@ -101,6 +101,8 @@ class SafetyRaceTx implements V1Transaction {
   async setCurrentGoal(){ throw new Error("unused"); }
   async insertGoalVersionAndSetCurrent(_g:StoredGoalVersion,_selectedAt:string){ throw new Error("unused"); }
   async purgeAuthenticatedUser(){ throw new Error("unused"); }
+  async beginAccountDeletion(): Promise<{ startedAt: string }> { throw new Error("unused"); }
+  async getAccountDeletionState(): Promise<{ startedAt: string } | null> { return null; }
   async getOrCreateUser(): Promise<AuthenticatedUserContext>{ throw new Error("unused"); }
   async getProfile(): Promise<StoredProfile|null>{ return null; }
   async upsertProfile(_p:StoredProfile){ throw new Error("unused"); }

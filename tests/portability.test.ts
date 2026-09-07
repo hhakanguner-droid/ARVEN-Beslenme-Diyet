@@ -8,13 +8,34 @@ import { V1MutationService, type StoredBodyMeasurement, type StoredNutritionEven
 
 const CLOCK = { now: () => new Date("2026-09-06T12:00:00.000Z") };
 
+/**
+ * The shared verified-food catalog food both `seedUser` and, where a test round-trips into a second
+ * account, the target account's own `MemoryRunner` must carry — `MemoryTx.foods` is per-runner (a
+ * test-fixture simplification), but production's real catalog (`food_versions` in the shared D1
+ * database — see `lib/persistence/local-runtime.ts`'s doc comment) is the same table for every user.
+ * Faz 9's `importUserExport` re-resolves every meal-log item against this catalog exactly like a live
+ * log would (see `lib/portability/import.ts`'s module doc comment), so a round-trip test must seed the
+ * food on both sides for the import to find it, same as production would.
+ */
+function seedFood(runner: MemoryRunner) {
+  runner.tx.foods.set("food-v1", {
+    id: "food-v1", foodKey: "yogurt-muz", name: "Yoğurt, Muz", basisGrams: 100,
+    nutrition: { energyKcal: 75, proteinG: 4, carbsG: 10, fatG: 2, fiberG: 1 },
+    source: { provider: "manual-verified", verifiedAt: "2026-09-01T00:00:00.000Z" },
+    portionOptions: [], allergenDataStatus: "verified", allergenIds: [], dietarySafetyDataStatus: "verified", dietaryConflictRuleIds: [],
+  });
+}
+
 async function seedUser(subject: string) {
   const runner = new MemoryRunner();
+  seedFood(runner);
   const service = new V1MutationService(subject, runner, undefined, CLOCK);
   await service.getOrCreateAuthenticatedUser({ timezone: "Europe/Istanbul", locale: "tr-TR" });
   await service.upsertProfile({ schemaVersion: "ProfileUpsertV1", displayName: "Ada", birthDate: "1990-01-01", sexAtBirth: "female", heightCm: 165, activityLevel: "moderate" });
-  await runner.tx.insertNutritionEvent({ id: "evt-meal-1", userSubject: subject, eventType: "meal-log", occurredAt: "2026-09-01T08:00:00.000Z", localDate: "2026-09-01", payloadJson: JSON.stringify({ schemaVersion: "MealEventV1", mealType: "breakfast", items: [{ foodName: "Yoğurt, Muz", grams: 200, nutrition: { energyKcal: 150, proteinG: 8, carbsG: 20, fatG: 4, fiberG: 2 } }] }), createdAt: "2026-09-01T08:00:00.000Z" });
-  await runner.tx.insertNutritionEvent({ id: "evt-water-1", userSubject: subject, eventType: "water-log", occurredAt: "2026-09-01T09:00:00.000Z", localDate: "2026-09-01", payloadJson: JSON.stringify({ schemaVersion: "WaterEventV1", milliliters: 250 }), createdAt: "2026-09-01T09:00:00.000Z" });
+  // Logged the same way a live "öğün ekle" request would, so its payloadJson carries the
+  // foodVersionId/calculationVersion/grams the Faz 9 importer needs to re-validate it on the way back in.
+  await service.appendManualMeal({ occurredAt: "2026-09-01T08:00:00.000Z", mealType: "breakfast", items: [{ foodVersionId: "food-v1", calculationVersion: "nutrition-v1", selection: { kind: "custom-grams", grams: 200 } }] });
+  await service.appendManualWater("2026-09-01T09:00:00.000Z", 250);
   await service.recordBodyMeasurement({ schemaVersion: "BodyMeasurementCreateV1", localDate: "2026-09-01", weightKg: 70.2, bodyFatPercent: null, waistCm: null, hipCm: null, chestCm: null, note: "sabah, aç karnına" });
   await service.recordMemoryFacts({ schemaVersion: "MemoryFactRecordV1", facts: [{ factText: "kahvaltıda genelde yumurta tercih ediyor", confidence: "high", provenance: "user-stated" }] });
   return { runner, service };
@@ -69,6 +90,7 @@ test("importUserExport restores an exported backup into a different (fresh) acco
   const exportPayload = await buildUserExport(source.runner, "original-user", userContext, "tr-TR", CLOCK.now());
 
   const targetRunner = new MemoryRunner();
+  seedFood(targetRunner); // the shared verified-food catalog food the imported meal-log entry re-resolves against — see seedFood's doc comment.
   const targetService = new V1MutationService("restored-user", targetRunner, undefined, CLOCK);
   const summary = await importUserExport(targetRunner, "restored-user", exportPayload);
 

@@ -69,6 +69,8 @@ class Tx implements V1Transaction {
   async listNutritionEvents():Promise<StoredNutritionEvent[]>{return [];}
   async listCustomFoodVersions():Promise<StoredCustomFoodVersion[]>{return [];}
   async purgeAuthenticatedUser(_s:string):Promise<void>{}
+  async beginAccountDeletion():Promise<{startedAt:string}>{throw new Error("unused")}
+  async getAccountDeletionState():Promise<{startedAt:string}|null>{return null}
   async insertMemoryFact():Promise<void>{}
   async listMemoryFacts(){ return []; }
   async deleteMemoryFact():Promise<void>{}

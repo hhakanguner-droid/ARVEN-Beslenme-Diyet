@@ -4,6 +4,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { USER_DURABLE_OBJECT_SCHEMA_V1 } from "@/db/migrations/durable-object/0001_user_schema";
 import { USER_DURABLE_OBJECT_PHASE6_HARDENING } from "@/db/migrations/durable-object/0002_phase6_health_hardening";
+import { USER_DURABLE_OBJECT_PHASE9_DELETION_HARDENING } from "@/db/migrations/durable-object/0003_phase9_deletion_hardening";
 import {
   DurableObjectV1Transaction,
   DurableObjectV1TransactionRunner,
@@ -209,6 +210,7 @@ function getUserDb(subject: string): DatabaseSync {
   db.exec("PRAGMA foreign_keys = ON;");
   db.exec(USER_DURABLE_OBJECT_SCHEMA_V1);
   db.exec(USER_DURABLE_OBJECT_PHASE6_HARDENING);
+  db.exec(USER_DURABLE_OBJECT_PHASE9_DELETION_HARDENING);
   userDbs.set(subject, db);
   return db;
 }
