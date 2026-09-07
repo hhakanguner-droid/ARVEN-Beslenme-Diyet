@@ -351,6 +351,19 @@ export interface V1Transaction {
   listCustomFoodVersions(userSubject:string):Promise<StoredCustomFoodVersion[]>;
   /** Delete the authenticated account and all dependent lifecycle rows in one transaction, in dependency-safe order. */
   purgeAuthenticatedUser(userSubject:string):Promise<void>;
+  /**
+   * Faz 9 hardening: records that account deletion has started for this subject, as a tombstone row
+   * an adapter checks (synchronously, in the same non-yielding stretch of its own method — see
+   * `insertPhotoAsset`'s doc comment) before accepting any new media metadata. Idempotent: a retry
+   * after a partial failure (e.g. one storage object could not be deleted) must return the
+   * originally-recorded `startedAt` rather than erroring or resetting the clock, so the caller's own
+   * retry loop stays simple. Cleared automatically once `purgeAuthenticatedUser` deletes the user row
+   * (`ON DELETE CASCADE`), and also deleted explicitly there for the same auditability reason every
+   * other owned table is.
+   */
+  beginAccountDeletion(userSubject:string,startedAt:string):Promise<{startedAt:string}>;
+  /** Whether — and since when — this subject's account deletion is in progress, or null before one has ever started. Exposed for tests/observability, not just internal gating. */
+  getAccountDeletionState(userSubject:string):Promise<{startedAt:string}|null>;
   /** Appends one ARVEN memory fact. Never deduplicated by the adapter — the service decides what's worth remembering. */
   insertMemoryFact(fact:StoredMemoryFact):Promise<void>;
   /** Every memory fact for this subject, most recent first — the exact list the user sees (and can delete from) in "ARVEN hafızası". */
@@ -849,6 +862,16 @@ export class V1MutationService{
   /** User-initiated forget — see `V1Transaction.deletePhotoAsset`'s doc comment. Callers are responsible for also deleting the underlying bytes via `lib/media/storage.ts`. */
   async deletePhotoAsset(id:string):Promise<void>{const parsed=Id.parse(id);await this.runner.transaction(async tx=>{await tx.deletePhotoAsset(this.subject,parsed);});}
   async deleteAccount():Promise<void>{await this.runner.transaction(async tx=>{await tx.purgeAuthenticatedUser(this.subject);});}
+  /**
+   * Faz 9 hardening: must be called before a caller starts listing/deleting this subject's private
+   * media objects, so every media-recording method below sees the tombstone before any concurrent
+   * upload can slip a new object in between the listing and the (slow, network-bound) storage
+   * deletes. Idempotent — a retried `/api/account` DELETE after a partial storage-delete failure
+   * reuses the original `startedAt` instead of erroring.
+   */
+  async beginAccountDeletion():Promise<{startedAt:string}>{const startedAt=instant(this.clock.now());return this.runner.transaction(async tx=>tx.beginAccountDeletion(this.subject,startedAt));}
+  /** Whether this subject's account deletion is currently in progress — see `beginAccountDeletion`'s doc comment. */
+  async getAccountDeletionState():Promise<{startedAt:string}|null>{return this.runner.transaction(async tx=>tx.getAccountDeletionState(this.subject));}
   /** Every nutrition event (meal-log and water-log alike) this subject has ever recorded — Faz 9 data export/backup. */
   async listAllNutritionEvents():Promise<StoredNutritionEvent[]>{return this.runner.transaction(async tx=>tx.listNutritionEvents(this.subject));}
   /** Every custom food this subject owns — Faz 9 data export/backup. */
