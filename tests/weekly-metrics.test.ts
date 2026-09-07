@@ -73,6 +73,8 @@ class FakeTx implements V1Transaction {
   async listNutritionEvents(): Promise<StoredNutritionEvent[]> { throw new Error("unused"); }
   async listCustomFoodVersions(): Promise<StoredCustomFoodVersion[]> { throw new Error("unused"); }
   async purgeAuthenticatedUser(): Promise<void> { throw new Error("unused"); }
+  async beginAccountDeletion(): Promise<{ startedAt: string }> { throw new Error("unused"); }
+  async getAccountDeletionState(): Promise<{ startedAt: string } | null> { return null; }
   async insertMemoryFact(): Promise<void> { throw new Error("unused"); }
   async deleteMemoryFact(): Promise<void> { throw new Error("unused"); }
   async insertWeeklyInsightSnapshot(): Promise<void> { throw new Error("unused"); }
