@@ -12,6 +12,11 @@ const MAX_BYTES = 8_000_000;
  * `db/migrations/0009_phase8_progress.sql` for why this is a separate table rather than a new
  * `photo_assets.kind`. Reads `photo` (the file), `localDate`, and an optional `angle` from a
  * `multipart/form-data` body.
+ *
+ * Faz 9 hardening: if metadata persistence fails after the object was written — including the
+ * account-deletion-in-progress rejection `V1MutationService.recordBodyPhotoSet` now applies (see
+ * `V1Transaction.beginAccountDeletion`'s doc comment) — the object is removed immediately, same
+ * compensating-delete shape as `lib/api/vision-upload.ts`/`lib/api/lab-upload.ts`.
  */
 export async function parseBodyPhotoUpload(request: Request, context: RouteContext): Promise<StoredBodyPhotoSet> {
   const form = await request.formData();
@@ -27,12 +32,23 @@ export async function parseBodyPhotoUpload(request: Request, context: RouteConte
   const angle = angleRaw == null || angleRaw === "" ? null : String(angleRaw);
   if (angle !== null && !ALLOWED_ANGLES.has(angle)) throw new Error("angle must be front, side, or back");
   const storageKey = `${context.subject}/body-progress-photo/${crypto.randomUUID()}`;
-  await getMediaStorage().put(storageKey, bytes, mimeType);
-  return context.service.recordBodyPhotoSet({
-    localDate,
-    angle: angle as BodyPhotoAngle | null,
-    mimeType: mimeType as StoredBodyPhotoSet["mimeType"],
-    byteSize: bytes.length,
-    storageKey,
-  });
+  const storage = getMediaStorage();
+  await storage.put(storageKey, bytes, mimeType);
+  try {
+    return await context.service.recordBodyPhotoSet({
+      localDate,
+      angle: angle as BodyPhotoAngle | null,
+      mimeType: mimeType as StoredBodyPhotoSet["mimeType"],
+      byteSize: bytes.length,
+      storageKey,
+    });
+  } catch (error) {
+    try {
+      await storage.delete(storageKey);
+    } catch {
+      // Preserve the original persistence error; storage cleanup can be retried by operational
+      // tooling using the deterministic subject/body-progress-photo prefix.
+    }
+    throw error;
+  }
 }
