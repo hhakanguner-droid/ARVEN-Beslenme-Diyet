@@ -36,7 +36,11 @@ export async function GET(request: Request) {
     }
 
     const storedApiKey = await context.service.getAiProviderApiKeyForRuntime();
-    const provider = getOptionalAiProvider(storedApiKey ? { apiKey: storedApiKey } : undefined);
+    const provider = getOptionalAiProvider(
+      storedApiKey
+        ? { apiKey: storedApiKey, subject: context.subject, usageScope: "byok" }
+        : { subject: context.subject, usageScope: "shared" },
+    );
     if (!provider) {
       if (!cached) await context.service.recordWeeklyInsightSnapshot(weekStartLocalDate, metrics, null);
       return Response.json({ metrics, narrative: null, aiAvailable: false });

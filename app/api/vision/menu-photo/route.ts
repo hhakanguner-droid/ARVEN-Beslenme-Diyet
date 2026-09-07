@@ -14,7 +14,11 @@ export async function POST(request: Request) {
     const { asset, bytes } = await parsePhotoUpload(request, context, "menu-photo");
 
     const storedApiKey = await context.service.getAiProviderApiKeyForRuntime();
-    const provider = getOptionalAiProvider(storedApiKey ? { apiKey: storedApiKey } : undefined);
+    const provider = getOptionalAiProvider(
+      storedApiKey
+        ? { apiKey: storedApiKey, subject: context.subject, usageScope: "byok" }
+        : { subject: context.subject, usageScope: "shared" },
+    );
     if (!provider) {
       return Response.json({ photoAssetId: asset.id, analysis: null, aiAvailable: false });
     }
