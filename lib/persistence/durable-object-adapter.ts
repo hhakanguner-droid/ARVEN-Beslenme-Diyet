@@ -61,6 +61,19 @@ function asNumber(value: unknown): number { return Number(value); }
 function asBool(value: unknown): boolean { return Number(value) === 1; }
 function normalizeFoodName(value: string): string { return value.toLocaleLowerCase("tr-TR").trim(); }
 
+/**
+ * Faz 9 hardening: the synchronous check `insertPhotoAsset`/`insertLabDocument`/`insertBodyPhotoSet`/
+ * `insertProgressReportExport` each run immediately before their own INSERT, closing the account-
+ * deletion race described on `V1Transaction.beginAccountDeletion`'s doc comment. Both statements run
+ * in the same non-yielding stretch of one adapter method — `SyncSqlStorage.exec` is genuinely
+ * synchronous (see this file's `SyncSqlStorage` doc comment), so no concurrently-scheduled request
+ * can observe a gap between "no deletion in progress" and the new metadata row landing.
+ */
+function assertAccountDeletionNotInProgress(sql: SyncSqlStorage, userSubject: string): void {
+  const deleting = sql.exec("SELECT 1 FROM account_deletion_state WHERE user_subject=?", userSubject).one();
+  if (deleting) throw new Error("Account deletion is in progress; new media cannot be recorded for this account");
+}
+
 function mapUserContext(row: Record<string, unknown>): AuthenticatedUserContext {
   return { timezone: asString(row.timezone), nutritionDayStartMinutes: asNumber(row.nutrition_day_start_minutes) };
 }
@@ -681,6 +694,7 @@ export class DurableObjectV1Transaction implements V1Transaction {
   }
 
   async insertPhotoAsset(asset: StoredPhotoAsset): Promise<void> {
+    assertAccountDeletionNotInProgress(this.sql, asset.userSubject);
     this.sql.exec(
       "INSERT INTO photo_assets (id, user_subject, kind, mime_type, byte_size, storage_key, created_at) VALUES (?,?,?,?,?,?,?)",
       asset.id, asset.userSubject, asset.kind, asset.mimeType, asset.byteSize, asset.storageKey, asset.createdAt,
@@ -701,6 +715,7 @@ export class DurableObjectV1Transaction implements V1Transaction {
   }
 
   async insertLabDocument(document: StoredLabDocument): Promise<void> {
+    assertAccountDeletionNotInProgress(this.sql, document.userSubject);
     this.sql.exec(
       "INSERT INTO lab_documents (id, user_subject, mime_type, byte_size, storage_key, created_at) VALUES (?,?,?,?,?,?)",
       document.id, document.userSubject, document.mimeType, document.byteSize, document.storageKey, document.createdAt,
@@ -889,6 +904,7 @@ export class DurableObjectV1Transaction implements V1Transaction {
   }
 
   async insertBodyPhotoSet(photo: StoredBodyPhotoSet): Promise<void> {
+    assertAccountDeletionNotInProgress(this.sql, photo.userSubject);
     this.sql.exec(
       "INSERT INTO body_photo_sets (id, user_subject, local_date, angle, mime_type, byte_size, storage_key, created_at) VALUES (?,?,?,?,?,?,?,?)",
       photo.id, photo.userSubject, photo.localDate, photo.angle, photo.mimeType, photo.byteSize, photo.storageKey, photo.createdAt,
@@ -919,6 +935,7 @@ export class DurableObjectV1Transaction implements V1Transaction {
   }
 
   async insertProgressReportExport(report: StoredProgressReportExport): Promise<void> {
+    assertAccountDeletionNotInProgress(this.sql, report.userSubject);
     this.sql.exec(
       "INSERT INTO progress_report_exports (id, user_subject, report_type, period_local_date, mime_type, byte_size, storage_key, created_at) VALUES (?,?,?,?,'application/pdf',?,?,?)",
       report.id, report.userSubject, report.reportType, report.periodLocalDate, report.byteSize, report.storageKey, report.createdAt,
@@ -957,8 +974,21 @@ export class DurableObjectV1Transaction implements V1Transaction {
    * exists yet to wire that up (that's Phase 9 scope), so a full delete-account implementation
    * will need to list a user's photo/lab documents and delete their underlying objects first.
    */
+  async beginAccountDeletion(userSubject: string, startedAt: string): Promise<{ startedAt: string }> {
+    const existing = this.sql.exec("SELECT started_at FROM account_deletion_state WHERE user_subject=?", userSubject).one();
+    if (existing) return { startedAt: asString(existing.started_at) };
+    this.sql.exec("INSERT INTO account_deletion_state (user_subject, started_at) VALUES (?,?)", userSubject, startedAt);
+    return { startedAt };
+  }
+
+  async getAccountDeletionState(userSubject: string): Promise<{ startedAt: string } | null> {
+    const row = this.sql.exec("SELECT started_at FROM account_deletion_state WHERE user_subject=?", userSubject).one();
+    return row ? { startedAt: asString(row.started_at) } : null;
+  }
+
   async purgeAuthenticatedUser(userSubject: string): Promise<void> {
     this.sql.transactionSync(() => {
+      this.sql.exec("DELETE FROM account_deletion_state WHERE user_subject=?", userSubject);
       this.sql.exec("DELETE FROM ai_action_outcomes WHERE user_subject=?", userSubject);
       this.sql.exec("DELETE FROM ai_action_decisions WHERE user_subject=?", userSubject);
       this.sql.exec("DELETE FROM ai_action_proposals WHERE user_subject=?", userSubject);
