@@ -64,18 +64,18 @@ test("buildUserExport gathers every declared section, scoped only to the request
 test("mealLogToCsv/waterLogToCsv/measurementsToCsv escape commas, quotes and newlines per RFC 4180", () => {
   const events: StoredNutritionEvent[] = [{
     id: "e1", userSubject: "u1", eventType: "meal-log", occurredAt: "2026-09-01T08:00:00.000Z", localDate: "2026-09-01",
-    payloadJson: JSON.stringify({ schemaVersion: "MealEventV1", mealType: "breakfast", items: [{ foodName: 'Corba, "ev yapimi"\nsicak', grams: 250, nutrition: { energyKcal: 90 } }] }),
+    payloadJson: JSON.stringify({ schemaVersion: "MealEventV1", mealType: "breakfast", items: [{ foodName: 'Çorba, "ev yapımı"\nsıcak', grams: 250, nutrition: { energyKcal: 90 } }] }),
     createdAt: "2026-09-01T08:00:00.000Z",
   }];
   const csv = mealLogToCsv(events);
-  assert.match(csv, /"Corba, ""ev yapimi""\nsicak"/);
+  assert.match(csv, /"Çorba, ""ev yapımı""\nsıcak"/);
   assert.match(csv, /^occurredAt,localDate,mealType,foodName,grams,energyKcal,proteinG,carbsG,fatG,fiberG\r\n/);
 
   const waterCsv = waterLogToCsv([{ id: "e2", userSubject: "u1", eventType: "water-log", occurredAt: "2026-09-01T09:00:00.000Z", localDate: "2026-09-01", payloadJson: JSON.stringify({ schemaVersion: "WaterEventV1", milliliters: 300 }), createdAt: "2026-09-01T09:00:00.000Z" }]);
   assert.match(waterCsv, /2026-09-01T09:00:00\.000Z,2026-09-01,300/);
 
-  const measurements: StoredBodyMeasurement[] = [{ id: "m1", userSubject: "u1", localDate: "2026-09-01", weightKg: 70.2, bodyFatPercent: null, waistCm: null, hipCm: null, chestCm: null, note: "not, virgullu", createdAt: "2026-09-01T08:00:00.000Z" }];
-  assert.match(measurementsToCsv(measurements), /"not, virgullu"/);
+  const measurements: StoredBodyMeasurement[] = [{ id: "m1", userSubject: "u1", localDate: "2026-09-01", weightKg: 70.2, bodyFatPercent: null, waistCm: null, hipCm: null, chestCm: null, note: "not, virgüllü", createdAt: "2026-09-01T08:00:00.000Z" }];
+  assert.match(measurementsToCsv(measurements), /"not, virgüllü"/);
 });
 
 test("importUserExport rejects a file whose manifest is missing or has an unsupported format", async () => {
