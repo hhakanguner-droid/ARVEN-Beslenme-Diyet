@@ -6,7 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import { DurableObjectV1Transaction, type D1LikeQuery, type SyncSqlStorage } from "../lib/persistence/durable-object-adapter";
 import type { StoredBodyMeasurement, StoredBodyPhotoSet, StoredCustomFoodVersion, StoredGoalVersion, StoredLabDocument, StoredLabResultEntry, StoredMemoryFact, StoredNutritionEvent, StoredOutcome, StoredPhotoAsset, StoredProgressMilestone, StoredProgressReportExport, StoredProposal, StoredSupplementRecord, StoredVerifiedFoodImport, StoredWeeklyInsightSnapshot } from "../lib/persistence/v1-boundary";
 
-const MIGRATIONS = ["0001_initial.sql", "0002_phase2_identity.sql", "0003_phase3_planning.sql", "0004_phase4_ai.sql", "0005_phase5_vision.sql", "0006_phase6_health.sql", "0007_phase6_health_hardening.sql", "0008_phase7_planning.sql", "0009_phase8_progress.sql"].map(
+const MIGRATIONS = ["0001_initial.sql", "0002_phase2_identity.sql", "0003_phase3_planning.sql", "0004_phase4_ai.sql", "0005_phase5_vision.sql", "0006_phase6_health.sql", "0007_phase6_health_hardening.sql", "0008_phase7_planning.sql", "0009_phase8_progress.sql", "0010_phase9_deletion_hardening.sql"].map(
   (name) => fileURLToPath(new URL(`../db/migrations/${name}`, import.meta.url)),
 );
 
